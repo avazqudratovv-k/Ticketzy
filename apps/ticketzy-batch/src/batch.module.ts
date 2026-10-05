@@ -5,8 +5,8 @@ import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './database/database.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MongooseModule } from '@nestjs/mongoose';
-import PropertySchema from 'apps/nestar-api/src/libs/schemas/Property.model';
-import MemberSchema from 'apps/nestar-api/src/libs/schemas/Member.model';
+import PropertySchema from 'apps/ticketzy-api/src/libs/schemas/Property.model';
+import MemberSchema from 'apps/ticketzy-api/src/libs/schemas/Member.model';
 
 @Module({
 	imports: [
