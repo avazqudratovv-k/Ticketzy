@@ -1,6 +1,6 @@
 # Ticketzy Backend Agent Instruction
 
-Ticketzy is a NestJS GraphQL monorepo migrated from Real estate platform into a petshop platform
+Ticketzy is a NestJS GraphQL monorepo migrated from Real estate platform into a ticket selling platform
 
 ## Read First
 
@@ -22,14 +22,12 @@ Use those files as the source of truth for AI Agent related migration history, a
 
 ## Domain Rules
 
-- Use Ticketzy/product terminology for the main catalog entity.
-- Do not reintroduce property or real-estate fields.
-- Keep `MemberType.USER`, `MemberType.AGENT` and `MemberType.ADMIN` unchanged.
-- Product ownership continues to use `MemberType.AGENT` unless a later migration explicitly changes it.
-- Product enum values are:
-  - `productType`: `PET`, `FOOD`, `TOY`, `ACCESSORY`
-  - `productSpecies`: `DOG`, `CAT`, `BIRD`, `FISH`
-  - `productGender`: `MALE`, `FEMALE`
+- Use ticketing terminology: the main catalog entity is Event, with Venue, TicketType, Order and Ticket as supporting entities (planned, see `docs/ai/BACKEND_MIGRATION.md`).
+- Do not reintroduce property, real-estate or petshop fields.
+- `MemberType.AGENT` is replaced by `MemberType.ORGANIZER` in the Organizer layer (`docs/ai/NEXT_STEPS.md` B7). Until then keep `USER`, `AGENT` and `ADMIN` unchanged.
+- Event ownership uses the organizer role once it exists; until then it uses `MemberType.AGENT`.
+- Ticket inventory changes must be atomic (conditional `findOneAndUpdate`) so tickets cannot be oversold.
+- Event category, city and other enum values are still to be decided; record them in `docs/ai/DECISIONS.md`.
 
 ## Workflow
 
