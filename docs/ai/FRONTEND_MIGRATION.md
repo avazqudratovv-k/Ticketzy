@@ -54,6 +54,8 @@ Operation names change only when the backend adds the new ones. Keep the old one
 
 Input fields follow the same rule: `propertyX` to `eventX` (e.g. `propertyType` to `eventCategory`, `propertyLocation` to venue/city), and the frontend types are regenerated from the schema.
 
+> **Implemented backend names (differs from the plan above):** `getFavorites` and `getVisited` kept their names and return events; the organizer listing is `getAgentEvents` (the role is still `AGENT`); `getAgents` is unchanged. New: `createVenue`, `updateVenue`, `getVenue`, `getVenues`, `createTicketType`, `updateTicketType`, `getTicketTypes`, `createOrder`, `payOrder`, `cancelOrder`, `getOrder`, `getMyOrders`, `getAllOrdersByAdmin`, `getMyTickets`, `checkInTicket`. No deprecated `*Property*` aliases were added: those operations no longer exist.
+
 ## UI terminology
 
 | Nestar | Ticketzy |

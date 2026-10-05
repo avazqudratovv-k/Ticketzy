@@ -10,10 +10,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { MemberType } from '../../libs/enums/member.enum';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { MemberUpdate } from '../../libs/dto/member/member.update';
-import { getSerialForImage, shapeIntoMongoObjectId, validMimeTypes } from '../../libs/config';
+import { getSerialForImage, shapeIntoMongoObjectId, validMimeTypes, validUploadTargets } from '../../libs/config';
 import { WithoutGuard } from '../auth/guards/without.guard';
 import { GraphQLUpload, FileUpload } from 'graphql-upload';
-import { createWriteStream } from 'fs';
+import { createWriteStream, mkdirSync } from 'fs';
 import { Message } from '../../libs/enums/common.enum';
 
 @Resolver()
@@ -116,10 +116,12 @@ export class MemberResolver {
 		console.log('Mutation: imageUploader');
 
 		if (!filename) throw new Error(Message.UPLOAD_FAILED);
+		if (!validUploadTargets.includes(target)) throw new Error(Message.BAD_REQUEST);
 		const validMime = validMimeTypes.includes(mimetype);
 		if (!validMime) throw new Error(Message.PROVIDE_ALLOWED_FORMAT);
 
 		const imageName = getSerialForImage(filename);
+		mkdirSync(`uploads/${target}`, { recursive: true });
 		const url = `uploads/${target}/${imageName}`;
 		const stream = createReadStream();
 
@@ -143,6 +145,8 @@ export class MemberResolver {
 	): Promise<string[]> {
 		console.log('Mutation: imagesUploader');
 
+		if (!validUploadTargets.includes(target)) throw new Error(Message.BAD_REQUEST);
+
 		const uploadedImages = [];
 		const promisedList = files.map(async (img: Promise<FileUpload>, index: number): Promise<Promise<void>> => {
 			try {
@@ -152,6 +156,7 @@ export class MemberResolver {
 				if (!validMime) throw new Error(Message.PROVIDE_ALLOWED_FORMAT);
 
 				const imageName = getSerialForImage(filename);
+				mkdirSync(`uploads/${target}`, { recursive: true });
 				const url = `uploads/${target}/${imageName}`;
 				const stream = createReadStream();
 

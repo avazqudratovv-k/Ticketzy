@@ -5,16 +5,22 @@ import { ConfigModule } from '@nestjs/config';
 import { DatabaseModule } from './database/database.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MongooseModule } from '@nestjs/mongoose';
-import PropertySchema from 'apps/ticketzy-api/src/libs/schemas/Property.model';
+import EventSchema from 'apps/ticketzy-api/src/libs/schemas/Event.model';
 import MemberSchema from 'apps/ticketzy-api/src/libs/schemas/Member.model';
+import OrderSchema from 'apps/ticketzy-api/src/libs/schemas/Order.model';
+import TicketTypeSchema from 'apps/ticketzy-api/src/libs/schemas/TicketType.model';
 
 @Module({
 	imports: [
 		ConfigModule.forRoot(), 
 		DatabaseModule, 
 		ScheduleModule.forRoot(),
-		MongooseModule.forFeature([{ name: 'Property', schema: PropertySchema}]),
-		MongooseModule.forFeature([{ name: 'Member', schema: MemberSchema}]),
+		MongooseModule.forFeature([
+			{ name: 'Event', schema: EventSchema },
+			{ name: 'Member', schema: MemberSchema },
+			{ name: 'Order', schema: OrderSchema },
+			{ name: 'TicketType', schema: TicketTypeSchema },
+		]),
 	],
 	controllers: [BatchController],
 	providers: [BatchService],

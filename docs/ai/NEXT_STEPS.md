@@ -6,16 +6,26 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 
 | # | Task | Why |
 |---|---|---|
-| B1 | `rm -rf dist`, then rebuild both apps | remove stale `nestar-*` output |
-| B2 | Run `npm install --package-lock-only` and check the lockfile diff | the lockfile name was edited by hand |
-| B3 | Decouple `LikeService`/`ViewService`/`CommentService` from Property DTOs and `PropertyService` | prerequisite for replacing Property |
-| B4 | Fix `Like.model.ts` (uses `ViewGroup` as its enum) and make `*Group` enums entity-agnostic | correctness plus decoupling |
-| B5 | Replace Property with Event, Venue, TicketType (schemas, DTOs, resolver, service) | core domain |
-| B6 | Add Order and Ticket with atomic inventory (conditional `findOneAndUpdate`); issue ticket codes | selling tickets |
-| B7 | Replace `MemberType.AGENT` with ORGANIZER; update `RolesGuard` and JWT payload | role change |
-| B8 | Rewrite batch ranking jobs for events and organizers; set a sane cron cadence (currently every minute) | batch app |
-| B9 | Security: validate the upload `target` (path traversal), null-check `authMember` in `RolesGuard`, enable `ValidationPipe({ whitelist: true })`, disable the playground and restrict CORS in production | issues found during exploration |
+| ~~B1~~ (done) | `rm -rf dist`, then rebuild both apps | remove stale `nestar-*` output |
+| ~~B2~~ (done) | Run `npm install --package-lock-only` and check the lockfile diff | the lockfile name was edited by hand |
+| ~~B3~~ (done) | Decouple `LikeService`/`ViewService`/`CommentService` from Property DTOs and `PropertyService` | prerequisite for replacing Property |
+| ~~B4~~ (done) | Fix `Like.model.ts` (uses `ViewGroup` as its enum) and make `*Group` enums entity-agnostic | correctness plus decoupling |
+| ~~B5~~ (done) | Replace Property with Event, Venue, TicketType (schemas, DTOs, resolver, service) | core domain |
+| ~~B6~~ (done) | Add Order and Ticket with atomic inventory (conditional `findOneAndUpdate`); issue ticket codes | selling tickets |
+| ~~B7~~ (cancelled) | `MemberType` stays `USER / AGENT / ADMIN` by owner decision (DECISIONS #13) | role change |
+| ~~B8~~ (done) | Rewrite batch ranking jobs for events and organizers; set a sane cron cadence (currently every minute) | batch app |
+| B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`, `article`); still open: null-check `authMember` in `RolesGuard`, enable `ValidationPipe({ whitelist: true })`, disable the playground and restrict CORS in production | issues found during exploration |
 | B10 | Wire `Notice` and `Notification` modules | schemas exist, nothing uses them |
+
+## New backend follow-ups
+| # | Task | Why |
+|---|---|---|
+| N1 | Replace the manual `payOrder` stub with a provider flow (webhook sets PAID) | anyone can currently pay their own order for free |
+| N2 | Run the concurrency test for `TicketTypeService.reserve` against a real MongoDB (two parallel orders for the last ticket) | the unit tests use mocks and cannot prove atomicity |
+| N3 | Smoke-test the new operations against a dev DB and drop the old `likes` / `views` unique indexes (`memberId_1_likeRefId_1`, `memberId_1_viewRefId_1`) | schema change is not applied to existing indexes |
+| N4 | Decide whether to drop the orphaned `properties` collection and `uploads/property/` | left untouched on purpose |
+| N5 | Refund / cancel for PAID orders (`REFUNDED` status exists, no flow) | not built |
+| N6 | Admin-side listing of venues and ticket types, delete flows for both | only create, update and public reads exist |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException } from '@
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { MemberService } from '../member/member.service';
-import { PropertyService } from '../property/property.service';
+import { EventService } from '../event/event.service';
 import { BoardArticleService } from '../board-article/board-article.service';
 import { CommentInput, CommentsInquiry } from '../../libs/dto/comment/comment.input';
 import { Direction, Message } from '../../libs/enums/common.enum';
@@ -18,7 +18,7 @@ export class CommentService {
     constructor(
         @InjectModel('Comment') private readonly commentModel: Model<Comment>,
         private readonly memberService: MemberService,
-        private readonly propertyService: PropertyService,
+        private readonly eventService: EventService,
         private readonly boardArticleService: BoardArticleService,
     ) {}
 
@@ -32,12 +32,13 @@ export class CommentService {
             console.log('Error, Service.model:', err.message);
             throw new BadRequestException(Message.CREATE_FAILED);
         }
+        if (!result) throw new InternalServerErrorException(Message.CREATE_FAILED);
 
         switch (input.commentGroup) {
-            case CommentGroup.PROPERTY:
-                await this.propertyService.propertyStatsEditor({
+            case CommentGroup.EVENT:
+                await this.eventService.eventStatsEditor({
                     _id: input.commentRefId,
-                    targetKey: 'propertyComments',
+                    targetKey: 'eventComments',
                     modifier: 1,
                 });
                 break;
@@ -56,8 +57,7 @@ export class CommentService {
                 });
                 break;         
         }
-        if (result!) throw new InternalServerErrorException(Message.CREATE_FAILED);
-        return result
+        return result;
     }
 
     public async updateComment(memberId: ObjectId, input: CommentUpdate): Promise<Comment> {

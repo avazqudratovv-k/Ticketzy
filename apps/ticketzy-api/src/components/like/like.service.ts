@@ -6,8 +6,8 @@ import { LikeInput } from '../../libs/dto/like/like.input';
 import { Message } from '../../libs/enums/common.enum';
 import { T } from '../../libs/types/common';
 import { LikeGroup } from '../../libs/enums/like.enum';
-import { OrdinaryInquiry } from '../../libs/dto/property/property.input';
-import { Properties } from '../../libs/dto/property/property';
+import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
+import { Events } from '../../libs/dto/event/event';
 import { lookupFavorite } from '../../libs/config';
 
 @Injectable()
@@ -15,7 +15,7 @@ export class LikeService {
     constructor(@InjectModel('Like') private readonly likeModel: Model<Like>) {}
 
     public async toggleLike(input: LikeInput): Promise<number> {
-        const search: T = { memberId: input.memberId, likeRefId: input.likeRefId };
+        const search: T = { memberId: input.memberId, likeRefId: input.likeRefId, likeGroup: input.likeGroup };
         const exist = await this.likeModel.findOne(search).exec();
         let modifier = 1;
 
@@ -36,14 +36,16 @@ export class LikeService {
     }
 
     public async checkLikeExistence(input: LikeInput): Promise<MeLiked[]> {
-        const { memberId, likeRefId } = input;
-        const result = await this.likeModel.findOne({ memberId: memberId, likeRefId: likeRefId }).exec();
+        const { memberId, likeRefId, likeGroup } = input;
+        const result = await this.likeModel
+            .findOne({ memberId: memberId, likeRefId: likeRefId, likeGroup: likeGroup })
+            .exec();
         return result ? [{ memberId: memberId, likeRefId: likeRefId, myFavorite: true }] : [];
     }
 
-    public async getFavoriteProperties(memberId: ObjectId, input: OrdinaryInquiry): Promise<Properties> {
+    public async getFavoriteEvents(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {
         const { page, limit } = input;
-        const match: T = { likeGroup: LikeGroup.PROPERTY, memberId: memberId };
+        const match: T = { likeGroup: LikeGroup.EVENT, memberId: memberId };
 
         const data: T = await this.likeModel
         .aggregate([
@@ -51,20 +53,20 @@ export class LikeService {
             { $sort: { updatedAt: -1 } },
             {
               $lookup: {
-                    from: 'properties',
+                    from: 'events',
                     localField: 'likeRefId',
                     foreignField: '_id',
-                    as: 'favoriteProperty',
+                    as: 'favoriteEvent',
                 },
             },
-            { $unwind: '$favoriteProperty' },
+            { $unwind: '$favoriteEvent' },
             {
               $facet: {
                     list: [
                         { $skip: (page - 1) * limit }, 
                         { $limit: limit }, 
                         lookupFavorite,
-                        { $unwind: '$favoriteProperty.memberData' },
+                        { $unwind: '$favoriteEvent.memberData' },
                     ],
                     metaCounter: [{ $count: 'total' }]
                 },
@@ -73,8 +75,8 @@ export class LikeService {
         ])
         .exec();
 
-        const result: Properties = { list: [], metaCounter: data[0].metaCounter}
-        result.list = data[0].list.map((ele) => ele.favoriteProperty);
+        const result: Events = { list: [], metaCounter: data[0]?.metaCounter ?? [] };
+        result.list = (data[0]?.list ?? []).map((ele) => ele.favoriteEvent);
         return result;
     }
 

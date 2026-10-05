@@ -2,15 +2,17 @@ import { ObjectId } from 'bson';
 
 export const availableAgentSorts = ['createdAt', 'updatedAt', 'memberLikes', 'memberViews', 'memberRank'];
 export const availableMemberSorts = ['createdAt', 'updatedAt', 'memberLikes', 'memberViews'];
-export const availableOptions = ['propertyBarter', 'propertyRent'];
-export const availablePropertySorts = [
+export const availableEventSorts = [
   'createdAt',
   'updatedAt',
-  'propertyLikes',
-  'propertyViews',
-  'propertyRank',
-  'propertyPrice',
+  'eventLikes',
+  'eventViews',
+  'eventRank',
+  'eventMinPrice',
+  'startAt',
 ];
+export const availableOrderSorts = ['createdAt', 'updatedAt', 'totalAmount'];
+export const availableVenueSorts = ['createdAt', 'updatedAt', 'venueName', 'venueCapacity'];
 export const availableBoardArticleSorts = ['createdAt', 'updatedAt', 'articleLikes', 'articleViews'];
 export const availableCommentSorts= ['createdAt', 'updatedAt']
 
@@ -20,6 +22,7 @@ import * as path from 'path';
 import { T } from './types/common';
 
 export const validMimeTypes = ['image/png', 'image/jpg', 'image/jpeg'];
+export const validUploadTargets = ['member', 'event', 'venue', 'article'];
 export const getSerialForImage = (filename: string) => {
 	const ext = path.parse(filename).ext;
 	return uuidv4() + ext;
@@ -125,20 +128,56 @@ export const lookupFollowerData = {
     },
 };
 
+export const lookupOrganizer = {
+  $lookup: {
+    from: 'members',
+    localField: 'organizerId',
+    foreignField: '_id',
+    as: 'memberData',
+  },
+};
+
+export const lookupVenue = {
+  $lookup: {
+    from: 'venues',
+    localField: 'venueId',
+    foreignField: '_id',
+    as: 'venueData',
+  },
+};
+
 export const lookupFavorite = {
   $lookup: {
     from: 'members',
-    localField: 'favoriteProperty.memberId',
+    localField: 'favoriteEvent.organizerId',
     foreignField: '_id',
-    as: 'favoriteProperty.memberData',
+    as: 'favoriteEvent.memberData',
   },
 };
 
 export const lookupVisit = {
   $lookup: {
     from: 'members',
-    localField: 'visitedProperty.memberId',
+    localField: 'visitedEvent.organizerId',
     foreignField: '_id',
-    as: 'visitedProperty.memberData',
+    as: 'visitedEvent.memberData',
+  },
+};
+
+export const lookupEvent = {
+  $lookup: {
+    from: 'events',
+    localField: 'eventId',
+    foreignField: '_id',
+    as: 'eventData',
+  },
+};
+
+export const lookupTicketType = {
+  $lookup: {
+    from: 'ticketTypes',
+    localField: 'ticketTypeId',
+    foreignField: '_id',
+    as: 'ticketTypeData',
   },
 };

@@ -22,10 +22,12 @@ Reuse auth, member, like/view/comment/follow, chat, upload and batch scaffolding
 | Layer | Status |
 |---|---|
 | 1. Safe rename (identifiers only) | **Done**, committed as `3386edb` |
-| 2. Decouple generic services from Property | Not started |
-| 3. Property to Event/Venue/TicketType | Not started |
-| 4. Order/Ticket + atomic inventory | Not started |
-| 5. Organizer role, batch ranking rewrite | Not started |
+| 2. Decouple generic services from Property | **Done** (like/view/comment no longer know Property; group enums say `EVENT`) |
+| 3. Property to Event/Venue/TicketType | **Done**; `components/property` and all Property DTOs, schemas and enums are removed |
+| 4. Order/Ticket + atomic inventory | **Done** (payment is a manual stub, see DECISIONS #16) |
+| 5. Organizer role, batch ranking rewrite | Batch rewrite **done**; Organizer role **deliberately not done**: `MemberType` stays `USER / AGENT / ADMIN` (DECISIONS #13) |
+
+> Sections 5 to 8 below describe the original Nestar state at the time of layer 1. The current domain is: members, events, venues, ticketTypes, orders, tickets, payments, boardArticles, comments, likes, views, follows (plus the notice and notification schemas, still unwired). Current GraphQL operations are listed in `COMPLETED_TASKS.md` section 7.
 
 ## 4. Naming changes (layer 1)
 

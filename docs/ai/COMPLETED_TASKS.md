@@ -42,3 +42,55 @@ Not changed: GraphQL schema/operations, DTOs, enums, schema names, collections, 
 
 ## 6. Documentation
 - `docs/` created with six files: `BACKEND_MIGRATION.md`, `DECISIONS.md`, `FRONTEND_MIGRATION.md`, `COMPLETED_TASKS.md`, `NEXT_STEPS.md`, `PROMPTS.md`. No application source was changed.
+
+## 7. Layers 2 to 5: Property replaced by the Ticketzy domain
+
+Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner's ER diagram. Nothing is committed yet.
+
+**Housekeeping:** removed stale `dist/`; `npm install --package-lock-only` produced no lockfile diff.
+
+**Layer 2, decoupling**
+- `OrdinaryInquiry`, `PricesRange`, `PeriodsRange` moved to `libs/dto/common/common.input.ts`.
+- `LikeGroup`, `ViewGroup`, `CommentGroup`, `NotificationGroup`: `PROPERTY` became `EVENT` (`NotificationGroup` also gained `ORDER`; `NotificationType` gained `ORDER_PAID`, `EVENT_REMINDER`).
+- Fixed `Like.model.ts` (used `ViewGroup`); like and view unique indexes and lookups are now group-scoped; `toggleLike`, `checkLikeExistence`, `recordView` search by group.
+- `getFavoriteEvents` / `getVisitedEvents` look up `events` and no longer crash on an empty result; `CommentService` uses `EventService`; fixed the inverted `if (result!)` check in `createComment`.
+
+**Layer 3, catalog**
+- New enums `libs/enums/event.enum.ts`, `ticket.enum.ts` (values in DECISIONS #14).
+- New schemas: `Event`, `Venue`, `TicketType`, `Order` (embedded `items[]`), `Ticket`, `Payment`; `Notification` now has `eventId` / `orderId`; `Member.memberProperties` became `memberEvents` (+ DTO).
+- New modules `event`, `venue`, `ticket-type` with DTOs under `libs/dto/{event,venue,ticket-type}`. Filters: category, venue, city, price (`eventMinPrice`), date (`startAt`), text (regex now escaped). `eventMinPrice` is recomputed when ticket types change. Event date ranges are validated. The organizer's `memberEvents` counter drops once when an event first becomes CANCELLED or DELETE.
+- Removed `components/property`, `libs/dto/property`, `Property.model.ts`, `property.enum.ts`.
+- Fixed the old bug where `updateProperty` never persisted `deletedAt`.
+
+**Layer 4, sales**
+- Modules `order` (createOrder, payOrder, cancelOrder, getOrder, getMyOrders, getAllOrdersByAdmin; payment is a stub) and `ticket` (getMyTickets, checkInTicket).
+- `TicketTypeService.reserve` / `release`: atomic conditional `findOneAndUpdate` (see DECISIONS #17). Orders snapshot unit prices, reject mixed currencies and duplicate ticket types, and release stock on any partial failure.
+
+**Layer 5, batch**
+- Ranking now uses `events` (`batchTopEvents`) and `memberEvents` (`batchTopAgents`); rollback and ranking run hourly instead of every minute; new `batchExpireOrders` (every minute) expires PENDING orders and releases their stock.
+
+**Security touchpoint:** `imageUploader` / `imagesUploader` only accept `target` in `member`, `event`, `venue`, `article` and create the folder if missing.
+
+**Not changed:** `MemberType` (stays `USER / AGENT / ADMIN`), board-article, follow, socket, `.env`, the `properties` collection, `uploads/property/`.
+
+### Validation
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `grep -rni propert apps/` | no matches |
+| GraphQL schema generated from all resolvers (no DB needed) | pass, no `propert*` in the schema |
+| `npx jest apps/ticketzy-api/src` (18 mock-based unit tests: reserve filter, order rollback, payment ticket issuing, cancel) | pass |
+| Concurrency test against a real MongoDB | **not run** (no MongoDB available here) |
+| Server start, DB connection, manual GraphQL smoke test | **not run** |
+| Batch jobs against a database | **not run** |
+| `eslint` | not run (`npm run lint` uses `--fix`) |
+
+### Current operations by resolver
+- event: createEvent, getEvent, updateEvent, getEvents, getFavorites, getVisited, getAgentEvents, likeTargetEvent, getAllEventsByAdmin, updateEventByAdmin, removeEventByAdmin
+- venue: createVenue, getVenue, updateVenue, getVenues
+- ticket-type: createTicketType, updateTicketType, getTicketTypes
+- order: createOrder, payOrder, cancelOrder, getOrder, getMyOrders, getAllOrdersByAdmin
+- ticket: getMyTickets, checkInTicket
+- unchanged: member, board-article, comment, follow operations

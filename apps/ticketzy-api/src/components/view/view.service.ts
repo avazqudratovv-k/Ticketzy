@@ -3,8 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { View } from '../../libs/dto/view/view';
 import { ViewInput } from '../../libs/dto/view/view.input';
-import { Properties } from '../../libs/dto/property/property';
-import { OrdinaryInquiry } from '../../libs/dto/property/property.input';
+import { Events } from '../../libs/dto/event/event';
+import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { T } from '../../libs/types/common';
 import { ViewGroup } from '../../libs/enums/view.enum';
 import { lookupVisit } from '../../libs/config';
@@ -22,14 +22,14 @@ export class ViewService {
 	}
 
 	private async checkViewExistence(input: ViewInput): Promise<View | null> {
-		const { memberId, viewRefId } = input;
-		const search = { memberId: memberId, viewRefId: viewRefId };
+		const { memberId, viewRefId, viewGroup } = input;
+		const search = { memberId: memberId, viewRefId: viewRefId, viewGroup: viewGroup };
 		return await this.viewModel.findOne(search).exec();
 	}
 
-	public async getVisitedProperties(memberId: ObjectId, input: OrdinaryInquiry): Promise<Properties> {
+	public async getVisitedEvents(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {
   		const { page, limit } = input;
-  		const match: T = { viewGroup: ViewGroup.PROPERTY, memberId: memberId };
+  		const match: T = { viewGroup: ViewGroup.EVENT, memberId: memberId };
 
  		const data: T = await this.viewModel
     		.aggregate([
@@ -37,20 +37,20 @@ export class ViewService {
       			{ $sort: { updatedAt: -1 } },
       			{
         			$lookup: {
-          				from: 'properties',
+          				from: 'events',
           				localField: 'viewRefId',
           				foreignField: '_id',
-          				as: 'visitedProperty',
+          				as: 'visitedEvent',
         			},
       			},
-      			{ $unwind: '$visitedProperty' },
+      			{ $unwind: '$visitedEvent' },
       			{
         			$facet: {
           				list: [
             				{ $skip: (page - 1) * limit },
             				{ $limit: limit },
             				lookupVisit,
-            				{ $unwind: '$visitedProperty.memberData' },
+            				{ $unwind: '$visitedEvent.memberData' },
           				],
           		metaCounter: [{ $count: 'total' }],
         		},
@@ -58,8 +58,8 @@ export class ViewService {
     	])
     	.exec();
 
-  		const result: Properties = { list: [], metaCounter: data[0].metaCounter };
-  		result.list = data[0].list.map((ele) => ele.visitedProperty);
+  		const result: Events = { list: [], metaCounter: data[0]?.metaCounter ?? [] };
+  		result.list = (data[0]?.list ?? []).map((ele) => ele.visitedEvent);
 
   		return result;
 	}
