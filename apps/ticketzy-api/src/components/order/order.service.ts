@@ -13,6 +13,8 @@ import { OrderStatus, PaymentProvider, PaymentStatus, TicketStatus } from '../..
 import { T } from '../../libs/types/common';
 import { lookupEvent, shapeIntoMongoObjectId } from '../../libs/config';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 
 /** how long a PENDING order holds its stock before the batch releases it */
 export const ORDER_HOLD_MINUTES = 15;
@@ -25,6 +27,7 @@ export class OrderService {
 		@InjectModel('Ticket') private readonly ticketModel: Model<Ticket>,
 		@InjectModel('Payment') private readonly paymentModel: Model<any>,
 		private readonly ticketTypeService: TicketTypeService,
+		private readonly notificationService: NotificationService,
 	) {}
 
 	public async createOrder(memberId: ObjectId, input: OrderInput): Promise<Order> {
@@ -106,7 +109,6 @@ export class OrderService {
 				}
 			}
 			await this.ticketModel.insertMany(tickets);
-			return order;
 		} catch (err) {
 			console.log('Error, Service.model:', err.message);
 			// undo so the buyer can retry while the hold is still valid
@@ -116,6 +118,38 @@ export class OrderService {
 				.updateOne({ _id: order._id, orderStatus: OrderStatus.PAID }, { orderStatus: OrderStatus.PENDING, paidAt: null })
 				.exec();
 			throw new InternalServerErrorException(Message.SOMETHING_WENT_WRONG);
+		}
+
+		// outside the try above: a notification problem must never undo a payment
+		await this.notifyOrderPaid(order);
+		return order;
+	}
+
+	/** buyer gets a receipt, the event's organizer hears about the sale */
+	private async notifyOrderPaid(order: Order): Promise<void> {
+		const common = {
+			notificationType: NotificationType.ORDER_PAID,
+			notificationGroup: NotificationGroup.ORDER,
+			orderId: order._id,
+			eventId: order.eventId,
+		};
+		await this.notificationService.createNotification({
+			...common,
+			notificationTitle: 'Payment received',
+			notificationDesc: order.orderNumber,
+			authorId: order.buyerId,
+			receiverId: order.buyerId,
+		});
+
+		const event = await this.eventModel.findOne({ _id: order.eventId }).lean().exec();
+		if (event) {
+			await this.notificationService.createNotification({
+				...common,
+				notificationTitle: 'New ticket sale',
+				notificationDesc: order.orderNumber,
+				authorId: order.buyerId,
+				receiverId: event.organizerId,
+			});
 		}
 	}
 

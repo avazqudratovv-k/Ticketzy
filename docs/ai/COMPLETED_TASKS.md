@@ -45,7 +45,7 @@ Not changed: GraphQL schema/operations, DTOs, enums, schema names, collections, 
 
 ## 7. Layers 2 to 5: Property replaced by the Ticketzy domain
 
-Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner's ER diagram. Nothing is committed yet.
+Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner's ER diagram. Committed as `a9a3d19`.
 
 **Housekeeping:** removed stale `dist/`; `npm install --package-lock-only` produced no lockfile diff.
 
@@ -94,3 +94,18 @@ Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner
 - order: createOrder, payOrder, cancelOrder, getOrder, getMyOrders, getAllOrdersByAdmin
 - ticket: getMyTickets, checkInTicket
 - unchanged: member, board-article, comment, follow operations
+
+## 8. Notices and notifications wired (B10)
+
+- New modules `notice` and `notification` (resolver, service, module, DTOs under `libs/dto/{notice,notification}`). Their schemas and enums already existed; registering them is what makes the `notices` and `notifications` collections appear in MongoDB (Mongoose creates a collection on first write).
+- Notice operations: `getNotices` (public, ACTIVE only, filter by category); ADMIN: `createNotice`, `updateNotice`, `getAllNoticesByAdmin`, `removeNoticeByAdmin` (hard delete only after status DELETE).
+- Notification operations: `getMyNotifications`, `markNotificationRead` (receiver only).
+- Notifications are created by: a new event like (organizer), a comment on an event, article or member (owner), and `payOrder` (buyer receipt and organizer sale). `createNotification` never throws, skips self-notification for LIKE and COMMENT, and in `payOrder` runs outside the rollback block so it cannot undo a payment.
+- The `auths` collection is dropped from the ER (DECISIONS #21).
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` both apps, `npm run build` | pass |
+| `npx jest apps/ticketzy-api/src` (26 mock-based tests) | pass |
+| GraphQL schema generated with the new resolvers | pass |
+| Run against a database | **not run** |

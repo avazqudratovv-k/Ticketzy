@@ -23,6 +23,7 @@ describe('OrderService', () => {
 	let ticketModel: any;
 	let paymentModel: any;
 	let ticketTypeService: any;
+	let notificationService: any;
 	let service: OrderService;
 
 	beforeEach(() => {
@@ -31,7 +32,8 @@ describe('OrderService', () => {
 		ticketModel = { insertMany: jest.fn(), deleteMany: jest.fn().mockReturnValue(query({})) };
 		paymentModel = { create: jest.fn(), deleteMany: jest.fn().mockReturnValue(query({})) };
 		ticketTypeService = { reserve: jest.fn(), release: jest.fn().mockResolvedValue(undefined) };
-		service = new OrderService(orderModel, eventModel, ticketModel, paymentModel, ticketTypeService);
+		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
+		service = new OrderService(orderModel, eventModel, ticketModel, paymentModel, ticketTypeService, notificationService);
 	});
 
 	const input = (items: { ticketTypeId: string; quantity: number }[]) => ({ eventId: E, items }) as any;
@@ -160,6 +162,25 @@ describe('OrderService', () => {
 			expect(tickets).toHaveLength(3);
 			expect(new Set(tickets.map((t) => t.ticketCode)).size).toBe(3);
 			expect(tickets.every((t) => t.ownerId === 'm1' && t.eventId === 'e1')).toBe(true);
+		});
+
+		it('notifies the buyer and the organizer after payment', async () => {
+			orderModel.findOneAndUpdate.mockReturnValue(query(pendingOrder));
+			ticketModel.insertMany.mockResolvedValue([]);
+			eventModel.findOne.mockReturnValue(query({ ...futureEvent(), organizerId: 'org1' }));
+
+			await service.payOrder('m1' as any, 'o1' as any);
+
+			const receivers = notificationService.createNotification.mock.calls.map(([n]) => n.receiverId);
+			expect(receivers).toEqual(['m1', 'org1']);
+		});
+
+		it('does not notify when ticket issuing fails and the payment is rolled back', async () => {
+			orderModel.findOneAndUpdate.mockReturnValue(query(pendingOrder));
+			ticketModel.insertMany.mockRejectedValue(new Error('db down'));
+
+			await expect(service.payOrder('m1' as any, 'o1' as any)).rejects.toThrow();
+			expect(notificationService.createNotification).not.toHaveBeenCalled();
 		});
 
 		it('rejects an order that is expired, already paid or not the buyer\'s', async () => {

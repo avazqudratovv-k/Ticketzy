@@ -15,7 +15,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | ~~B7~~ (cancelled) | `MemberType` stays `USER / AGENT / ADMIN` by owner decision (DECISIONS #13) | role change |
 | ~~B8~~ (done) | Rewrite batch ranking jobs for events and organizers; set a sane cron cadence (currently every minute) | batch app |
 | B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`, `article`); still open: null-check `authMember` in `RolesGuard`, enable `ValidationPipe({ whitelist: true })`, disable the playground and restrict CORS in production | issues found during exploration |
-| B10 | Wire `Notice` and `Notification` modules | schemas exist, nothing uses them |
+| ~~B10~~ (done) | Wire `Notice` and `Notification` modules | done, see COMPLETED_TASKS section 8 |
 
 ## New backend follow-ups
 | # | Task | Why |

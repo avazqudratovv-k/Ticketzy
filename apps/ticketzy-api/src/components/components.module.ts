@@ -5,6 +5,8 @@ import { VenueModule } from './venue/venue.module';
 import { TicketTypeModule } from './ticket-type/ticket-type.module';
 import { OrderModule } from './order/order.module';
 import { TicketModule } from './ticket/ticket.module';
+import { NoticeModule } from './notice/notice.module';
+import { NotificationModule } from './notification/notification.module';
 import { AuthModule } from './auth/auth.module';
 import { CommentModule } from './comment/comment.module';
 import { LikeModule } from './like/like.module';
@@ -21,6 +23,8 @@ import { BoardArticleModule } from './board-article/board-article.module';
 		TicketTypeModule,
 		OrderModule,
 		TicketModule,
+		NoticeModule,
+		NotificationModule,
 		BoardArticleModule,
 		LikeModule,
 		ViewModule,

@@ -8,6 +8,7 @@ import TicketSchema from '../../libs/schemas/Ticket.model';
 import PaymentSchema from '../../libs/schemas/Payment.model';
 import { AuthModule } from '../auth/auth.module';
 import { TicketTypeModule } from '../ticket-type/ticket-type.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
 	imports: [
@@ -19,6 +20,7 @@ import { TicketTypeModule } from '../ticket-type/ticket-type.module';
 		]),
 		AuthModule,
 		TicketTypeModule,
+		NotificationModule,
 	],
 	providers: [OrderResolver, OrderService],
 	exports: [OrderService],

@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { MemberService } from '../member/member.service';
 import { EventService } from '../event/event.service';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import { BoardArticleService } from '../board-article/board-article.service';
 import { CommentInput, CommentsInquiry } from '../../libs/dto/comment/comment.input';
 import { Direction, Message } from '../../libs/enums/common.enum';
@@ -20,6 +22,7 @@ export class CommentService {
         private readonly memberService: MemberService,
         private readonly eventService: EventService,
         private readonly boardArticleService: BoardArticleService,
+        private readonly notificationService: NotificationService,
     ) {}
 
     public async createComment(memberId: ObjectId, input: CommentInput): Promise<Comment> {
@@ -34,28 +37,56 @@ export class CommentService {
         }
         if (!result) throw new InternalServerErrorException(Message.CREATE_FAILED);
 
+        const notice = {
+            notificationType: NotificationType.COMMENT,
+            notificationTitle: 'New comment',
+            notificationDesc: input.commentContent,
+            authorId: memberId,
+        };
+
         switch (input.commentGroup) {
-            case CommentGroup.EVENT:
-                await this.eventService.eventStatsEditor({
+            case CommentGroup.EVENT: {
+                const event = await this.eventService.eventStatsEditor({
                     _id: input.commentRefId,
                     targetKey: 'eventComments',
                     modifier: 1,
                 });
+                if (event)
+                    await this.notificationService.createNotification({
+                        ...notice,
+                        notificationGroup: NotificationGroup.EVENT,
+                        receiverId: event.organizerId,
+                        eventId: input.commentRefId,
+                    });
                 break;
-            case CommentGroup.ARTICLE:
-                await this.boardArticleService.boardArticleStatsEditor({
+            }
+            case CommentGroup.ARTICLE: {
+                const article = await this.boardArticleService.boardArticleStatsEditor({
                     _id: input.commentRefId,
                     targetKey: 'articleComments',
                     modifier: 1,
                 });
+                if (article)
+                    await this.notificationService.createNotification({
+                        ...notice,
+                        notificationGroup: NotificationGroup.ARTICLE,
+                        receiverId: article.memberId,
+                        articleId: input.commentRefId,
+                    });
                 break;
+            }
             case CommentGroup.MEMBER:
                 await this.memberService.memberStatsEditor({
                     _id: input.commentRefId,
                     targetKey: 'memberComments',
                     modifier: 1,
                 });
-                break;         
+                await this.notificationService.createNotification({
+                    ...notice,
+                    notificationGroup: NotificationGroup.MEMBER,
+                    receiverId: input.commentRefId,
+                });
+                break;
         }
         return result;
     }

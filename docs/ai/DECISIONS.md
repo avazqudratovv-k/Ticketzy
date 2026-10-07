@@ -22,6 +22,8 @@
 | 18 | The `properties` collection and `uploads/property/` are **left untouched**; new collections start empty, no migration | Owner did not ask to keep real-estate data, and nothing was deleted from the database | Old data is orphaned until dropped by hand | Migration script |
 | 19 | `getFavorites` and `getVisited` keep their names (now return events); the organizer listing is `getAgentEvents` | Renaming them is a frontend-visible change; `AGENT` stays (#13) | `FRONTEND_MIGRATION.md` and the `product-logic` skill still mention `getSavedEvents` / `getVisitedEvents` / `getOrganizerEvents` | Add aliases |
 | 20 | Like and view unique indexes now include the group: `{memberId, refId, group}` | A like on a member and one on an event are different things; the old index ignored the group | An existing database keeps its old two-field unique index until it is dropped by hand | None |
+| 21 | The `auths` collection (SMS login codes from Nestar, Eskiz) is **dropped from the ER**; the ER has 14 collections | No schema and no code use it; login is phone and password through `members` | If SMS verification is wanted later it needs a new schema and flow | Keep the collection |
+| 22 | Notifications are best-effort: `createNotification` swallows its own errors, never notifies people about their own LIKE or COMMENT, and ORDER_PAID goes to both buyer and organizer | A failed notification must not break a like, comment or payment | A lost notification is only logged | Throw and let the caller fail |
 
 ## Open questions (user cancelled these; still undecided)
 - Full rename of `propertyX` fields and collections vs. keeping internals.

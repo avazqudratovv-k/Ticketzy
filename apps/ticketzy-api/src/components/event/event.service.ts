@@ -16,6 +16,8 @@ import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import { lookupAuthMemberLiked, lookupOrganizer, lookupVenue, shapeIntoMongoObjectId } from '../../libs/config';
 
 const closedStatuses = [EventStatus.DELETE, EventStatus.CANCELLED];
@@ -28,6 +30,7 @@ export class EventService {
 		private memberService: MemberService,
 		private viewService: ViewService,
 		private likeService: LikeService,
+		private notificationService: NotificationService,
 	) {}
 
 	public async createEvent(input: EventInput): Promise<Event> {
@@ -198,6 +201,18 @@ export class EventService {
 		const result = await this.eventStatsEditor({ _id: likeRefId, targetKey: 'eventLikes', modifier: modifier });
 
 		if (!result) throw new InternalServerErrorException(Message.SOMETHING_WENT_WRONG);
+
+		if (modifier === 1) {
+			await this.notificationService.createNotification({
+				notificationType: NotificationType.LIKE,
+				notificationGroup: NotificationGroup.EVENT,
+				notificationTitle: 'Someone liked your event',
+				notificationDesc: target.eventTitle,
+				authorId: memberId,
+				receiverId: target.organizerId,
+				eventId: likeRefId,
+			});
+		}
 		return result;
 	}
 
