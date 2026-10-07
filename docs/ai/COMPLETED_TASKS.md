@@ -343,3 +343,19 @@ Backend only. Decision: DECISIONS #58. The old global socket chat (in-memory las
 | GraphQL schema built offline from the conversation and notification resolvers | pass: all operations present |
 | Live check against a dev database and a real WebSocket client | **not run** (tests use the in-memory model; the unique partial indexes and the aggregation lookups are untested against MongoDB) |
 
+## 17. Restricted accounts: notifications and socket cut-off
+
+Backend only. Decision: DECISIONS #59.
+
+- `NotificationGuard` (new, `components/auth/guards/notification.guard.ts`) on the four notification operations: REJECTED, SUSPENDED and PENDING members can read notifications, DELETE stays blocked, any member type is allowed
+- `rejectOrganizerByAdmin` and `suspendOrganizerByAdmin` remove the organizer's sockets from all non-support rooms (`ConversationRealtime.setMemberRestricted`, called from `OrganizerService`; `OrganizerModule` imports `ConversationModule`); verify and reinstate lift it
+- Gateway: `joinConversation` passes `isSupport` (`assertConversationAccess` now returns the conversation) and a restricted socket cannot join other rooms; every action re-syncs the restriction from the freshly loaded member; the room emitters never send non-support events to a restricted socket
+
+**Tests added**: `NotificationGuard` (REJECTED, SUSPENDED, PENDING, ACTIVE, USER, DELETE refused by `authenticate`, the four operations use it); `OrganizerService` calls (reject, suspend restrict; verify, reinstate lift; invalid transition and a throwing realtime); gateway (rejected member loses the event room but keeps support and gets no event-room events, status re-check on the next action, only that member's sockets, lift)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (420 tests, 23 suites) | pass |
+| Live check: built API on port 4777 against the dev database, real WebSocket and GraphQL clients, test admin and organizers inserted directly (48 checks): socket auth (header-less auth message, 10 s timeout 4408, bad token 4401, URL token ignored), start own and support conversation, admin sees both, other organizer refused, room-only delivery, unread counters and mark read, `adminId` on first admin reply, notifications for the other party only, rate limit (11th refused, not saved), PENDING and REJECTED support-only and notifications readable, 2001 character body refused, live reject and suspend cut sockets off event rooms | pass; test data deleted by id, no leftovers. Reject is only allowed from PENDING, so the rejected organizer was moved to PENDING in the database after its socket had joined. Real-database races (N19, N23) still not run |

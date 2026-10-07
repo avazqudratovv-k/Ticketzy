@@ -4,7 +4,7 @@ import { ObjectId } from 'mongoose';
 import { NotificationService } from './notification.service';
 import { Notification, Notifications } from '../../libs/dto/notification/notification';
 import { NotificationsInquiry } from '../../libs/dto/notification/notification.input';
-import { AuthGuard } from '../auth/guards/auth.guard';
+import { NotificationGuard } from '../auth/guards/notification.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
@@ -14,7 +14,7 @@ export class NotificationResolver {
 
 	constructor(private readonly notificationService: NotificationService) {}
 
-	@UseGuards(AuthGuard)
+	@UseGuards(NotificationGuard)
 	@Query(() => Notifications)
 	public async getMyNotifications(
 		@Args('input') input: NotificationsInquiry,
@@ -24,7 +24,7 @@ export class NotificationResolver {
 		return await this.notificationService.getMyNotifications(memberId, input);
 	}
 
-	@UseGuards(AuthGuard)
+	@UseGuards(NotificationGuard)
 	@Mutation(() => Notification)
 	public async markNotificationRead(
 		@Args('notificationId') input: string,
@@ -34,14 +34,14 @@ export class NotificationResolver {
 		return await this.notificationService.markNotificationRead(memberId, shapeIntoMongoObjectId(input));
 	}
 
-	@UseGuards(AuthGuard)
+	@UseGuards(NotificationGuard)
 	@Query(() => Int)
 	public async getUnreadNotificationCount(@AuthMember('_id') memberId: ObjectId): Promise<number> {
 		this.logger.log('Query: getUnreadNotificationCount');
 		return await this.notificationService.getUnreadNotificationCount(memberId);
 	}
 
-	@UseGuards(AuthGuard)
+	@UseGuards(NotificationGuard)
 	@Mutation(() => Int)
 	public async markAllNotificationsRead(@AuthMember('_id') memberId: ObjectId): Promise<number> {
 		this.logger.log('Mutation: markAllNotificationsRead');

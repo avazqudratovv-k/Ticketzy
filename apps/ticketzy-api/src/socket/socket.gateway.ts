@@ -5,7 +5,7 @@ import { AuthService } from '../components/auth/auth.service';
 import { ConversationRealtime } from '../components/conversation/conversation.realtime';
 import { ConversationService } from '../components/conversation/conversation.service';
 import { Member } from '../libs/dto/member/member';
-import { MemberType } from '../libs/enums/member.enum';
+import { MemberStatus, MemberType } from '../libs/enums/member.enum';
 import { Message } from '../libs/enums/common.enum';
 import { RateLimiter } from '../libs/rate-limiter';
 import { shapeIntoMongoObjectId } from '../libs/config';
@@ -73,8 +73,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 	public async handleJoin(client: WebSocket, data: { conversationId?: string }): Promise<void> {
 		await this.run(client, async (member) => {
 			const conversationId = this.conversationIdOf(data);
-			await this.conversationService.assertConversationAccess(member, shapeIntoMongoObjectId(conversationId));
-			this.realtime.join(client, conversationId);
+			const conversation = await this.conversationService.assertConversationAccess(member, shapeIntoMongoObjectId(conversationId));
+			if (!this.realtime.join(client, conversationId, Boolean(conversation?.isSupport))) {
+				throw new Error(Message.CONVERSATION_SUPPORT_ONLY);
+			}
 			this.send(client, 'joined', { conversationId });
 		});
 	}
@@ -129,6 +131,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 		} catch (err) {
 			return this.reject(client, err.message);
 		}
+
+		// the status is read fresh on every action, so a socket opened before a rejection loses its rooms at once
+		this.realtime.setRestricted(client, member.memberType === MemberType.ORGANIZER && member.memberStatus !== MemberStatus.ACTIVE);
 
 		try {
 			await action(member);

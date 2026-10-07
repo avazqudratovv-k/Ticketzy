@@ -3,6 +3,8 @@ import { FakeModel } from '../../../test/fake-model';
 import { ConversationService, MESSAGE_RATE_LIMIT } from './conversation.service';
 import { ConversationRealtime } from './conversation.realtime';
 import { ConversationGuard } from '../auth/guards/conversation.guard';
+import { NotificationGuard } from '../auth/guards/notification.guard';
+import { NotificationResolver } from '../notification/notification.resolver';
 import { NotificationService } from '../notification/notification.service';
 import { RateLimiter } from '../../libs/rate-limiter';
 import { Message } from '../../libs/enums/common.enum';
@@ -133,6 +135,37 @@ describe('ConversationService authorization', () => {
 
 		authService.authenticate.mockResolvedValue(member(MemberType.USER));
 		await expect(guard.canActivate(context)).rejects.toThrow(Message.ONLY_SPECIFIC_ROLES_ALLOWED);
+	});
+});
+
+describe('NotificationGuard', () => {
+	const run = async (m: any) => {
+		const authService: any = { getBearerToken: jest.fn().mockReturnValue('t'), authenticate: jest.fn().mockResolvedValue(m) };
+		const request: any = { body: {} };
+		const context: any = { contextType: 'graphql', getArgByIndex: () => ({ req: request }) };
+		return { authService, request, result: await new NotificationGuard(authService).canActivate(context) };
+	};
+
+	it.each([MemberStatus.REJECTED, MemberStatus.SUSPENDED, MemberStatus.PENDING, MemberStatus.ACTIVE])('lets a %s organizer in', async (status) => {
+		const { authService, request, result } = await run(member(MemberType.ORGANIZER, status));
+		expect(result).toBe(true);
+		expect(authService.authenticate).toHaveBeenCalledWith('t', { allowRestricted: true });
+		expect(request.body.authMember.memberStatus).toBe(status);
+	});
+
+	it('keeps USER members (their refund notices) and still passes DELETE to authenticate, which refuses it', async () => {
+		expect((await run(member(MemberType.USER))).result).toBe(true);
+
+		const authService: any = { getBearerToken: () => 't', authenticate: jest.fn().mockRejectedValue(new Error(Message.ACCOUNT_NOT_VERIFIED)) };
+		const context: any = { contextType: 'graphql', getArgByIndex: () => ({ req: { body: {} } }) };
+		await expect(new NotificationGuard(authService).canActivate(context)).rejects.toThrow(Message.ACCOUNT_NOT_VERIFIED);
+	});
+
+	it('the four notification operations use it, not AuthGuard', () => {
+		for (const name of ['getMyNotifications', 'getUnreadNotificationCount', 'markNotificationRead', 'markAllNotificationsRead']) {
+			const guards = Reflect.getMetadata('__guards__', NotificationResolver.prototype[name]);
+			expect(guards).toEqual([NotificationGuard]);
+		}
 	});
 });
 

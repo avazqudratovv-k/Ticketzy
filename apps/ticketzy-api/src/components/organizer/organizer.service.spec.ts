@@ -45,6 +45,7 @@ describe('OrganizerService status transitions', () => {
 	let auditLogService: any;
 	let notificationService: any;
 	let service: OrganizerService;
+	let realtime: any;
 
 	const run = (action: OrganizerAction): Promise<any> => {
 		switch (action) {
@@ -64,7 +65,8 @@ describe('OrganizerService status transitions', () => {
 		model = fakeMemberModel(members);
 		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
-		service = new OrganizerService(model, auditLogService, notificationService);
+		realtime = { setMemberRestricted: jest.fn() };
+		service = new OrganizerService(model, auditLogService, notificationService, realtime);
 	});
 
 	describe.each(Object.keys(organizerTransitions) as OrganizerAction[])('%s', (action) => {
@@ -193,7 +195,7 @@ describe('OrganizerService status transitions', () => {
 
 		it('a notification that fails to save never blocks the action (real NotificationService, broken database)', async () => {
 			const brokenNotifications = new NotificationService({ create: jest.fn().mockRejectedValue(new Error('db down')) } as any);
-			const withRealNotifications = new OrganizerService(model, auditLogService, brokenNotifications);
+			const withRealNotifications = new OrganizerService(model, auditLogService, brokenNotifications, realtime);
 
 			const result = await withRealNotifications.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
 
@@ -203,7 +205,7 @@ describe('OrganizerService status transitions', () => {
 
 		it('a failing audit write never blocks the action either', async () => {
 			const brokenAudit = new AuditLogService({ create: jest.fn().mockRejectedValue(new Error('db down')) } as any);
-			const withBrokenAudit = new OrganizerService(model, brokenAudit, notificationService);
+			const withBrokenAudit = new OrganizerService(model, brokenAudit, notificationService, realtime);
 
 			const result = await withBrokenAudit.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
 
@@ -241,10 +243,52 @@ describe('OrganizerService status transitions', () => {
 	});
 });
 
+describe('OrganizerService socket cut-off', () => {
+	const build = (status: MemberStatus) => {
+		const members: any[] = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: status }];
+		const realtime: any = { setMemberRestricted: jest.fn() };
+		const notifications: any = { createNotification: jest.fn().mockResolvedValue(undefined) };
+		const service = new OrganizerService(fakeMemberModel(members) as any, { record: jest.fn() } as any, notifications, realtime);
+		return { service, realtime };
+	};
+
+	it('reject and suspend restrict the sockets of the organizer', async () => {
+		const a = build(MemberStatus.PENDING);
+		await a.service.rejectOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'bad documents' });
+		expect(a.realtime.setMemberRestricted).toHaveBeenCalledWith(ORG, true);
+
+		const b = build(MemberStatus.ACTIVE);
+		await b.service.suspendOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'abuse' });
+		expect(b.realtime.setMemberRestricted).toHaveBeenCalledWith(ORG, true);
+	});
+
+	it('verify and reinstate lift the restriction', async () => {
+		const a = build(MemberStatus.PENDING);
+		await a.service.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
+		expect(a.realtime.setMemberRestricted).toHaveBeenCalledWith(ORG, false);
+
+		const b = build(MemberStatus.SUSPENDED);
+		await b.service.reinstateOrganizerByAdmin(ADMIN as any, ORG as any);
+		expect(b.realtime.setMemberRestricted).toHaveBeenCalledWith(ORG, false);
+	});
+
+	it('an invalid transition touches no socket, and a failing realtime never fails the action', async () => {
+		const a = build(MemberStatus.ACTIVE);
+		await expect(a.service.rejectOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' })).rejects.toThrow(Message.INVALID_STATUS_TRANSITION);
+		expect(a.realtime.setMemberRestricted).not.toHaveBeenCalled();
+
+		const b = build(MemberStatus.ACTIVE);
+		b.realtime.setMemberRestricted.mockImplementation(() => {
+			throw new Error('boom');
+		});
+		await expect(b.service.suspendOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' })).resolves.toBeDefined();
+	});
+});
+
 describe('OrganizerService.getOrganizersByAdmin', () => {
 	it('lists organizers only, filters by status, and searches name, nick and email with escaped text', async () => {
 		const memberModel: any = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }) };
-		const service = new OrganizerService(memberModel, {} as any, {} as any);
+		const service = new OrganizerService(memberModel, {} as any, {} as any, {} as any);
 
 		await service.getOrganizersByAdmin({ page: 2, limit: 10, search: { memberStatus: MemberStatus.PENDING, text: 'a.b+' } });
 

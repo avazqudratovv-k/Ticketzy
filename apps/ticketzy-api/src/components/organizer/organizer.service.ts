@@ -10,6 +10,7 @@ import { NotificationGroup, NotificationType } from '../../libs/enums/notificati
 import { T } from '../../libs/types/common';
 import { escapeRegExp } from '../../libs/config';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { ConversationRealtime } from '../conversation/conversation.realtime';
 import { NotificationService } from '../notification/notification.service';
 
 const transitionRecords: Record<OrganizerAction, { audit: AuditAction; notification: NotificationType; title: string }> = {
@@ -27,6 +28,7 @@ export class OrganizerService {
 		@InjectModel('Member') private readonly memberModel: Model<Member>,
 		private readonly auditLogService: AuditLogService,
 		private readonly notificationService: NotificationService,
+		private readonly realtime: ConversationRealtime,
 	) {}
 
 	/** ADMIN */
@@ -130,8 +132,18 @@ export class OrganizerService {
 			meta: { fromStatus: result.memberStatus, toStatus: to, ...(reason ? { reason } : {}) },
 		});
 		await this.notify(adminId, result._id, record.notification, record.title, reason);
+		this.syncSockets(result._id, action);
 
 		return await this.memberModel.findById(result._id).exec();
+	}
+
+	/** reject and suspend cut the organizer's sockets off every non-support room, reinstate and verify lift it */
+	private syncSockets(organizerId: ObjectId, action: OrganizerAction): void {
+		try {
+			this.realtime.setMemberRestricted(String(organizerId), action === 'reject' || action === 'suspend');
+		} catch (err) {
+			this.logger.error(`Error, syncSockets: ${err.message}`);
+		}
 	}
 
 	private requireReason(reason: string | undefined, message: string): string {

@@ -167,4 +167,69 @@ describe('SocketGateway', () => {
 		expect((ctx.gateway as any).handleMessage).toBeUndefined();
 		expect((ctx.gateway as any).messagesList).toBeUndefined();
 	});
+
+	describe('restricted organizers', () => {
+		const EVENT_ROOM = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+		const SUPPORT_ROOM = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+		const ROOM = 'cccccccccccccccccccccccc';
+		const joinAs = async (b: ReturnType<typeof build>, m: any, id: string, isSupport: boolean) => {
+			const client = socket();
+			b.authService.authenticate.mockResolvedValue(m);
+			b.authService.loadMember.mockResolvedValue(m);
+			b.conversationService.assertConversationAccess.mockResolvedValue({ isSupport });
+			await b.gateway.handleConnection(client, { headers: { authorization: 'Bearer t' } });
+			await b.gateway.handleJoin(client, { conversationId: id });
+			return client;
+		};
+
+		it('a member rejected after joining loses the event room, keeps the support room, and gets no events from the former', async () => {
+			const b = build();
+			const m = member();
+			const client = await joinAs(b, m, EVENT_ROOM, false);
+			b.conversationService.assertConversationAccess.mockResolvedValue({ isSupport: true });
+			await b.gateway.handleJoin(client, { conversationId: SUPPORT_ROOM });
+
+			expect(b.realtime.setMemberRestricted(String(m._id), true)).toBe(1);
+			expect(b.realtime.isInRoom(client, EVENT_ROOM)).toBe(false);
+			expect(b.realtime.isInRoom(client, SUPPORT_ROOM)).toBe(true);
+			expect(events(client).some((e: any) => e.event === 'left' && e.data.conversationId === EVENT_ROOM)).toBe(true);
+
+			client.send.mockClear();
+			b.realtime.emitToRoom(EVENT_ROOM, 'message', {});
+			b.realtime.emitToRoom(SUPPORT_ROOM, 'message', {});
+			expect(events(client).map((e: any) => e.event)).toEqual(['message']);
+		});
+
+		it('re-checks the status on the next action: a socket of a member rejected elsewhere is cut off and cannot join an event room', async () => {
+			const b = build();
+			const m = member();
+			const client = await joinAs(b, m, EVENT_ROOM, false);
+
+			const rejected = { ...m, memberStatus: MemberStatus.REJECTED };
+			b.authService.loadMember.mockResolvedValue(rejected);
+			await b.gateway.handleTyping(client, { conversationId: EVENT_ROOM, isTyping: true });
+
+			expect(b.realtime.isInRoom(client, EVENT_ROOM)).toBe(false);
+			expect(events(client).at(-1)).toEqual({ event: 'error', data: { message: Message.CONVERSATION_NOT_ALLOWED } });
+
+			await b.gateway.handleJoin(client, { conversationId: EVENT_ROOM });
+			expect(b.realtime.isInRoom(client, EVENT_ROOM)).toBe(false);
+			expect(events(client).at(-1).data.message).toBe(Message.CONVERSATION_SUPPORT_ONLY);
+		});
+
+		it('only the sockets of that member are touched, and lifting the restriction allows event rooms again', async () => {
+			const b = build();
+			const m = member();
+			const other = member();
+			const mine = await joinAs(b, m, ROOM, false);
+			const theirs = await joinAs(b, other, ROOM, false);
+
+			b.realtime.setMemberRestricted(String(m._id), true);
+			expect(b.realtime.isInRoom(mine, ROOM)).toBe(false);
+			expect(b.realtime.isInRoom(theirs, ROOM)).toBe(true);
+
+			b.realtime.setMemberRestricted(String(m._id), false);
+			expect(b.realtime.join(mine, ROOM, false)).toBe(true);
+		});
+	});
 });

@@ -187,9 +187,9 @@ export class ConversationService {
 		return await this.getConversation(member, conversation._id);
 	}
 
-	/** for the socket gateway: throws unless the member may use the conversation */
-	public async assertConversationAccess(member: Member, conversationId: ObjectId): Promise<void> {
-		await this.getAllowedConversation(member, conversationId);
+	/** for the socket gateway: returns the conversation, throws unless the member may use it */
+	public async assertConversationAccess(member: Member, conversationId: ObjectId): Promise<Conversation> {
+		return await this.getAllowedConversation(member, conversationId);
 	}
 
 	private async getAllowedConversation(member: Member, conversationId: ObjectId): Promise<Conversation> {
