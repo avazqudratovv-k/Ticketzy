@@ -1,9 +1,22 @@
-import { Field, ObjectType } from '@nestjs/graphql';
+import { Field, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { TicketStatus } from '../../enums/ticket.enum';
 import { TotalCounter } from '../member/member';
 import { Event } from '../event/event';
 import { TicketType } from '../ticket-type/ticket-type';
+
+/** where a reserved-seating ticket sits */
+@ObjectType()
+export class TicketSeat {
+	@Field(() => String)
+	sectionKey: string;
+
+	@Field(() => Int)
+	row: number;
+
+	@Field(() => Int)
+	number: number;
+}
 
 @ObjectType()
 export class Ticket {
@@ -15,6 +28,12 @@ export class Ticket {
 
 	@Field(() => TicketStatus)
 	ticketStatus: TicketStatus;
+
+	@Field(() => String, { nullable: true, description: 'signed token for the QR code; only the owner receives it' })
+	qrToken?: string;
+
+	@Field(() => String, { nullable: true })
+	seatId?: ObjectId;
 
 	@Field(() => String)
 	orderId: ObjectId;
@@ -44,6 +63,9 @@ export class Ticket {
 
 	@Field(() => TicketType, { nullable: true })
 	ticketTypeData?: TicketType;
+
+	@Field(() => TicketSeat, { nullable: true })
+	seatData?: TicketSeat;
 }
 
 @ObjectType()

@@ -84,6 +84,22 @@ export class TicketTypeService {
 		return result;
 	}
 
+	/** reserved-seating checkout: the ticket types (with their prices) that are ACTIVE and inside their sale window right now */
+	public async findSellable(ticketTypeIds: ObjectId[]): Promise<TicketType[]> {
+		const now = new Date();
+		return await this.ticketTypeModel
+			.find({
+				_id: { $in: ticketTypeIds },
+				ticketTypeStatus: TicketTypeStatus.ACTIVE,
+				$and: [
+					{ $or: [{ saleStartAt: null }, { saleStartAt: { $lte: now } }] },
+					{ $or: [{ saleEndAt: null }, { saleEndAt: { $gte: now } }] },
+				],
+			})
+			.lean()
+			.exec();
+	}
+
 	/**
 	 * Atomic stock reservation: one conditional update, so concurrent orders can never oversell.
 	 * The filter also enforces ACTIVE status, the sale window and maxPerOrder.

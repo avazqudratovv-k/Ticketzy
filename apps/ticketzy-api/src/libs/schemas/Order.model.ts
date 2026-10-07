@@ -34,7 +34,7 @@ const OrderSchema = new Schema(
 		orderStatus: {
 			type: String,
 			enum: OrderStatus,
-			default: OrderStatus.PENDING,
+			default: OrderStatus.PENDING_PAYMENT,
 		},
 
 		buyerId: {
@@ -54,6 +54,34 @@ const OrderSchema = new Schema(
 			required: true,
 		},
 
+		/** reserved-seating orders: the seats held for this order */
+		seatIds: {
+			type: [Schema.Types.ObjectId],
+			ref: 'EventSeat',
+			default: [],
+		},
+
+		currency: {
+			type: String,
+		},
+
+		subtotal: {
+			type: Number,
+			required: true,
+		},
+
+		/** percent, stored with the order so later rate changes never touch it */
+		commissionRate: {
+			type: Number,
+			required: true,
+		},
+
+		commissionAmount: {
+			type: Number,
+			required: true,
+		},
+
+		/** what the buyer pays (the commission comes out of the organizer's share) */
 		totalAmount: {
 			type: Number,
 			required: true,

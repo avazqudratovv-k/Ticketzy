@@ -19,18 +19,26 @@ export class OrderItemInput {
 	quantity: number;
 }
 
+/** RESERVED events send seatIds (held by the buyer), GENERAL events send items; prices always come from the server */
 @InputType()
-export class OrderInput {
+export class CheckoutInput {
 	@IsNotEmpty()
 	@Field(() => String)
 	eventId: ObjectId;
 
+	@IsOptional()
+	@ArrayMinSize(1)
+	@ArrayMaxSize(8)
+	@Field(() => [String], { nullable: true })
+	seatIds?: ObjectId[];
+
+	@IsOptional()
 	@ArrayMinSize(1)
 	@ArrayMaxSize(10)
 	@ValidateNested({ each: true })
 	@Type(() => OrderItemInput)
-	@Field(() => [OrderItemInput])
-	items: OrderItemInput[];
+	@Field(() => [OrderItemInput], { nullable: true })
+	items?: OrderItemInput[];
 }
 
 @InputType()

@@ -3,6 +3,8 @@ import { MemberModule } from './member/member.module';
 import { EventModule } from './event/event.module';
 import { VenueModule } from './venue/venue.module';
 import { TicketTypeModule } from './ticket-type/ticket-type.module';
+import { SeatModule } from './seat/seat.module';
+import { PaymentModule } from './payment/payment.module';
 import { OrderModule } from './order/order.module';
 import { TicketModule } from './ticket/ticket.module';
 import { NoticeModule } from './notice/notice.module';
@@ -22,6 +24,8 @@ import { FollowModule } from './follow/follow.module';
 		EventModule,
 		VenueModule,
 		TicketTypeModule,
+		SeatModule,
+		PaymentModule,
 		OrderModule,
 		TicketModule,
 		NoticeModule,

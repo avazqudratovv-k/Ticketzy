@@ -3,12 +3,13 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { TicketService } from './ticket.service';
 import { Ticket, Tickets } from '../../libs/dto/ticket/ticket';
-import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
+import { TicketsInquiry } from '../../libs/dto/ticket/ticket.input';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ActiveOrganizerGuard } from '../auth/guards/organizer.guard';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { shapeIntoMongoObjectId } from '../../libs/config';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 
 @Resolver()
@@ -20,11 +21,18 @@ export class TicketResolver {
 	@UseGuards(AuthGuard)
 	@Query(() => Tickets)
 	public async getMyTickets(
-		@Args('input') input: OrdinaryInquiry,
+		@Args('input') input: TicketsInquiry,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Tickets> {
 		this.logger.log('Query: getMyTickets');
 		return await this.ticketService.getMyTickets(memberId, input);
+	}
+
+	@UseGuards(AuthGuard)
+	@Query(() => Ticket)
+	public async getTicket(@Args('ticketId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Ticket> {
+		this.logger.log('Query: getTicket');
+		return await this.ticketService.getTicket(memberId, shapeIntoMongoObjectId(input));
 	}
 
 	@Roles(MemberType.ORGANIZER, MemberType.ADMIN)

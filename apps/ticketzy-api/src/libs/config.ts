@@ -250,3 +250,12 @@ export const lookupTicketType = {
     as: 'ticketTypeData',
   },
 };
+
+export const lookupSeat = {
+  $lookup: {
+    from: 'eventSeats',
+    localField: 'seatId',
+    foreignField: '_id',
+    as: 'seatData',
+  },
+};

@@ -1,14 +1,14 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, ObjectId } from 'mongoose';
+import { Model, ObjectId, PipelineStage } from 'mongoose';
 import { Ticket, Tickets } from '../../libs/dto/ticket/ticket';
 import { Event } from '../../libs/dto/event/event';
-import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
+import { TicketsInquiry } from '../../libs/dto/ticket/ticket.input';
 import { Message } from '../../libs/enums/common.enum';
 import { MemberType } from '../../libs/enums/member.enum';
-import { TicketStatus } from '../../libs/enums/ticket.enum';
+import { TicketStatus, TicketTimeFilter } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
-import { lookupEvent, lookupTicketType, shapeIntoMongoObjectId } from '../../libs/config';
+import { lookupEvent, lookupSeat, lookupTicketType, shapeIntoMongoObjectId } from '../../libs/config';
 
 @Injectable()
 export class TicketService {
@@ -17,29 +17,53 @@ export class TicketService {
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
 	) {}
 
-	public async getMyTickets(memberId: ObjectId, input: OrdinaryInquiry): Promise<Tickets> {
-		const match: T = { ownerId: shapeIntoMongoObjectId(memberId) };
+	/** the owner's tickets with event, ticket type and seat; UPCOMING means the event has not ended yet */
+	public async getMyTickets(memberId: ObjectId, input: TicketsInquiry): Promise<Tickets> {
+		const unwindEvent: PipelineStage.Unwind = { $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } };
+		const details: PipelineStage.FacetPipelineStage[] = [
+			lookupTicketType,
+			{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },
+			lookupSeat,
+			{ $unwind: { path: '$seatData', preserveNullAndEmptyArrays: true } },
+		];
+
+		const stages: PipelineStage[] = [{ $match: { ownerId: shapeIntoMongoObjectId(memberId) } }];
+		let listStages: PipelineStage.FacetPipelineStage[];
+		if (input.timeFilter) {
+			// the event is needed before paging, so the filter is applied to the right page
+			const upcoming = input.timeFilter === TicketTimeFilter.UPCOMING;
+			stages.push(
+				lookupEvent,
+				unwindEvent,
+				{ $match: { 'eventData.endAt': upcoming ? { $gte: new Date() } : { $lt: new Date() } } },
+				{ $sort: { 'eventData.startAt': upcoming ? 1 : -1, createdAt: -1 } },
+			);
+			listStages = [{ $skip: (input.page - 1) * input.limit }, { $limit: input.limit }, ...details];
+		} else {
+			stages.push({ $sort: { createdAt: -1 } });
+			listStages = [{ $skip: (input.page - 1) * input.limit }, { $limit: input.limit }, lookupEvent, unwindEvent, ...details];
+		}
 
 		const result = await this.ticketModel
+			.aggregate([...stages, { $facet: { list: listStages, metaCounter: [{ $count: 'total' }] } }])
+			.exec();
+		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		return result[0];
+	}
+
+	/** one ticket of the caller, with its qrToken; other members' tickets answer NO_DATA_FOUND */
+	public async getTicket(memberId: ObjectId, ticketId: ObjectId): Promise<Ticket> {
+		const result = await this.ticketModel
 			.aggregate([
-				{ $match: match },
-				{ $sort: { createdAt: -1 } },
-				{
-					$facet: {
-						list: [
-							{ $skip: (input.page - 1) * input.limit },
-							{ $limit: input.limit },
-							lookupEvent,
-							{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
-							lookupTicketType,
-							{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },
-						],
-						metaCounter: [{ $count: 'total' }],
-					},
-				},
+				{ $match: { _id: shapeIntoMongoObjectId(ticketId), ownerId: shapeIntoMongoObjectId(memberId) } },
+				lookupEvent,
+				{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
+				lookupTicketType,
+				{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },
+				lookupSeat,
+				{ $unwind: { path: '$seatData', preserveNullAndEmptyArrays: true } },
 			])
 			.exec();
-
 		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 		return result[0];
 	}
@@ -58,7 +82,7 @@ export class TicketService {
 			.findOneAndUpdate(
 				{ _id: ticket._id, ticketStatus: TicketStatus.VALID },
 				{ ticketStatus: TicketStatus.USED, checkedInAt: new Date() },
-				{ new: true },
+				{ new: true, projection: { qrToken: 0 } },
 			)
 			.exec();
 		if (!result) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);

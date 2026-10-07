@@ -9,6 +9,7 @@ import EventSchema from 'apps/ticketzy-api/src/libs/schemas/Event.model';
 import MemberSchema from 'apps/ticketzy-api/src/libs/schemas/Member.model';
 import OrderSchema from 'apps/ticketzy-api/src/libs/schemas/Order.model';
 import TicketTypeSchema from 'apps/ticketzy-api/src/libs/schemas/TicketType.model';
+import EventSeatSchema from 'apps/ticketzy-api/src/libs/schemas/EventSeat.model';
 import { validateEnv } from 'apps/ticketzy-api/src/libs/env.validation';
 
 @Module({
@@ -21,6 +22,7 @@ import { validateEnv } from 'apps/ticketzy-api/src/libs/env.validation';
 			{ name: 'Member', schema: MemberSchema },
 			{ name: 'Order', schema: OrderSchema },
 			{ name: 'TicketType', schema: TicketTypeSchema },
+			{ name: 'EventSeat', schema: EventSeatSchema },
 		]),
 	],
 	controllers: [BatchController],

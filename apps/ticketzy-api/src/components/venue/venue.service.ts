@@ -4,7 +4,9 @@ import { Model, ObjectId } from 'mongoose';
 import { Venue, Venues } from '../../libs/dto/venue/venue';
 import { VenueInput, VenueUpdate, VenuesInquiry } from '../../libs/dto/venue/venue.input';
 import { Direction, Message } from '../../libs/enums/common.enum';
-import { VenueStatus } from '../../libs/enums/event.enum';
+import { Event } from '../../libs/dto/event/event';
+import { EventSeat } from '../../libs/dto/event/event-seat';
+import { EventStatus, VenueStatus } from '../../libs/enums/event.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { T } from '../../libs/types/common';
 import { escapeRegExp } from '../../libs/config';
@@ -14,7 +16,11 @@ import { VenueLayout, computeLayoutCapacity, getVenueLayoutError, isValidTimezon
 export class VenueService {
 	private readonly logger = new Logger(VenueService.name);
 
-	constructor(@InjectModel('Venue') private readonly venueModel: Model<Venue>) {}
+	constructor(
+		@InjectModel('Venue') private readonly venueModel: Model<Venue>,
+		@InjectModel('Event') private readonly eventModel: Model<Event>,
+		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
+	) {}
 
 	/** throws for an invalid timezone or layout and returns the capacity the layout adds up to */
 	private assertValidLayoutAndTimezone(timezone?: string, layout?: VenueLayout): number | undefined {
@@ -44,6 +50,10 @@ export class VenueService {
 	/** the creator or an ADMIN can edit */
 	public async updateVenue(memberId: ObjectId, memberType: MemberType, input: VenueUpdate): Promise<Venue> {
 		const venueCapacity = this.assertValidLayoutAndTimezone(input.venueTimezone, input.venueLayout as VenueLayout);
+		if (input.venueLayout !== undefined && (await this.hasGeneratedSeats(input._id))) {
+			throw new BadRequestException(Message.VENUE_LAYOUT_LOCKED);
+		}
+
 		const search: T = { _id: input._id, venueStatus: { $ne: VenueStatus.DELETE } };
 		if (memberType !== MemberType.ADMIN) search.memberId = memberId;
 
@@ -51,6 +61,18 @@ export class VenueService {
 		const result = await this.venueModel.findOneAndUpdate(search, update, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;
+	}
+
+	/** seats are generated from the layout when an event is approved, so a non-DRAFT event with seats pins the layout */
+	private async hasGeneratedSeats(venueId: ObjectId): Promise<boolean> {
+		const events = await this.eventModel
+			.find({ venueId: venueId, eventStatus: { $ne: EventStatus.DRAFT } })
+			.select('_id')
+			.lean()
+			.exec();
+		if (!events.length) return false;
+		const seat = await this.eventSeatModel.exists({ eventId: { $in: events.map((event) => event._id) } });
+		return !!seat;
 	}
 
 	public async getVenues(input: VenuesInquiry): Promise<Venues> {

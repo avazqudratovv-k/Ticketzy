@@ -15,7 +15,7 @@ const logger = new Logger('GraphQL');
 
 @Module({
 	imports: [
-		ConfigModule.forRoot({ validate: validateEnv(['SECRET_TOKEN']) }),
+		ConfigModule.forRoot({ validate: validateEnv(['SECRET_TOKEN', 'QR_SECRET']) }),
 		GraphQLModule.forRootAsync<ApolloDriverConfig>({
 			driver: ApolloDriver,
 			// read after ConfigModule has loaded .env; playground and introspection stay off in production

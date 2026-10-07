@@ -260,3 +260,30 @@ Backend only. Decisions: DECISIONS #41 to #44.
 | `npm run build` | pass |
 | `npx jest apps` (257 tests; new: layout validation, capacity, timezone, venue create/update, seat generation incl. idempotency with an in-memory upsert store and the missing/duplicate tier failures, quantity computed from seats, seat map filter and privacy, submit checks, `getMyEvents` guards) | pass |
 | Live check against a dev database (real unique index, bulkWrite upserts) | **not run** (mock tests only) |
+
+## 14. Seat holds, mock payment, tickets
+
+Backend only. Decisions: DECISIONS #45 to #51.
+
+**Operations**
+- `holdSeats(eventId, seatIds)` and `releaseSeats(eventId)` (`AuthGuard`, ACTIVE members of any role): see #45. `holdSeats` returns `SeatHold { eventId, seats, heldUntil, serverTime }`
+- `createOrder` is now `createCheckout(input: CheckoutInput { eventId, seatIds?, items? })`; `cancelOrder` is now `cancelPendingOrder`; `payOrder(orderId, simulate: PaymentSimulation!)` takes SUCCESS or FAILURE (#46, #48)
+- `getMyTickets(input: TicketsInquiry { page, limit, timeFilter? })` (UPCOMING / PAST) and the new `getTicket(ticketId)`, both owner-only and returning `qrToken`, `eventData`, `ticketTypeData` and `seatData { sectionKey, row, number }` (#49)
+- `updateVenue` refuses `venueLayout` once a non-DRAFT event of the venue has generated seats (#51)
+- Batch `batchExpireOrders` (every minute) now also releases seats and sweeps expired holds (#50)
+
+**Environment**: `SEAT_HOLD_SECONDS` (optional, default 30, 1 to 3600) and `QR_SECRET` (required by the API) are checked at startup by `validateEnv`; both are in `.env.example`, and a `QR_SECRET` was added to the local `.env`
+
+**Schema and DTO**: `OrderStatus` PENDING renamed PENDING_PAYMENT, FAILED added; `PaymentProvider.MOCK`; new enums `PaymentSimulation`, `TicketTimeFilter`. `Order` gained `seatIds`, `currency`, `subtotal`, `commissionRate`, `commissionAmount` (`totalAmount` stays the buyer total). `Ticket` gained `qrToken`, `seatId`. `EventSeat` gained indexes `(seatStatus, heldUntil)` and `(eventId, heldBy)`. DTOs `CheckoutInput`, `TicketsInquiry`, `TicketSeat`, `HeldSeat`, `SeatHold`
+**Message constants**: `VENUE_LAYOUT_LOCKED`, `SEAT_HOLD_LIMIT`, `SEAT_JUST_TAKEN`, `SEATS_NOT_AVAILABLE_FOR_EVENT`, `HOLD_EXPIRED`, `CHECKOUT_RESERVED_NEEDS_SEATS`, `CHECKOUT_GENERAL_NEEDS_ITEMS`, `ORDER_NOT_PAYABLE`
+
+**Files added**: `components/seat/` (service, resolver, module, `seat-flow.spec.ts`), `components/payment/` (`payment.provider.ts` with the `PaymentProvider` interface and token, `mock-payment.provider.ts`, `payment.service.ts`, `payment.module.ts`), `libs/commission.ts` (+ spec), `libs/qr-token.ts`, `libs/env.validation.spec.ts`, `libs/dto/ticket/ticket.input.ts`, `components/ticket/ticket.service.spec.ts`, `apps/ticketzy-api/test/fake-model.ts` (in-memory model for tests, outside the build)
+**Files edited**: `env.validation.ts`, `app.module.ts`, `components.module.ts`, `order.service.ts` / `.resolver.ts` / `.module.ts` (the `Payment` model moved into `PaymentService`), `ticket.service.ts` / `.resolver.ts`, `ticket-type.service.ts` (`findSellable`), `venue.service.ts` / `.module.ts`, the Order, Ticket and EventSeat schemas, the order, ticket and event-seat DTOs, `ticket.enum.ts`, `common.enum.ts`, `config.ts` (`lookupSeat`), `batch.service.ts` / `.controller.ts` / `.module.ts`, the specs of order, venue and batch, `.env.example`
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` and `nest build ticketzy-batch` | pass |
+| `npx jest apps` (307 tests, 18 suites; new: the hold race of two members for one seat, release on partial failure, hold expiry and re-hold, the 8 seat limit, non-ACTIVE members and closed events, commission tiers and override, server-side pricing, payment SUCCESS, FAILURE and idempotency, the HOLD_EXPIRED rollback with refund, ticket issuing failure undo, general-admission checkout, batch expiry and the seat sweep, ticket filters and owner-only access, the venue layout lock, env validation) | pass |
+| GraphQL schema built offline from the three resolvers | pass: new operations, `CheckoutInput`, `PaymentSimulation` present |
+| Live check against a dev database, app start with the real DI graph | **not run** (no MongoDB used; the race and payment tests run on an in-memory model, see N19) |

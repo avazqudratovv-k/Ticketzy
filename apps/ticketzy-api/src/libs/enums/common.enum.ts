@@ -55,6 +55,15 @@ export enum Message {
 	TICKET_TYPE_QUANTITY_REQUIRED = 'A total quantity is required for this ticket type!',
 	TICKET_TYPE_TIER_LOCKED = 'The tier key cannot change after the seats of the event were generated!',
 	SEAT_GENERATION_FAILED = 'The seats of this event could not be generated, nothing was changed!',
+	VENUE_LAYOUT_LOCKED = 'The layout of this venue cannot change because an event that uses it already has seats!',
+
+	SEAT_HOLD_LIMIT = 'You can hold at most 8 seats at a time!',
+	SEAT_JUST_TAKEN = 'Seat just taken!',
+	SEATS_NOT_AVAILABLE_FOR_EVENT = 'Seats can only be held for an approved reserved-seating event that has not started!',
+	HOLD_EXPIRED = 'Hold expired!',
+	CHECKOUT_RESERVED_NEEDS_SEATS = 'A reserved-seating checkout needs seat ids and no ticket quantities!',
+	CHECKOUT_GENERAL_NEEDS_ITEMS = 'A general-admission checkout needs ticket quantities and no seat ids!',
+	ORDER_NOT_PAYABLE = 'This order can no longer be paid!',
 }
 
 export enum Direction {

@@ -3,7 +3,8 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { OrderService } from './order.service';
 import { Order, Orders } from '../../libs/dto/order/order';
-import { OrderInput, OrdersInquiry } from '../../libs/dto/order/order.input';
+import { CheckoutInput, OrdersInquiry } from '../../libs/dto/order/order.input';
+import { PaymentSimulation } from '../../libs/enums/ticket.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -19,23 +20,27 @@ export class OrderResolver {
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
-	public async createOrder(@Args('input') input: OrderInput, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		this.logger.log('Mutation: createOrder');
-		return await this.orderService.createOrder(memberId, input);
+	public async createCheckout(@Args('input') input: CheckoutInput, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
+		this.logger.log('Mutation: createCheckout');
+		return await this.orderService.createCheckout(memberId, input);
 	}
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
-	public async payOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
+	public async payOrder(
+		@Args('orderId') input: string,
+		@Args('simulate', { type: () => PaymentSimulation }) simulate: PaymentSimulation,
+		@AuthMember('_id') memberId: ObjectId,
+	): Promise<Order> {
 		this.logger.log('Mutation: payOrder');
-		return await this.orderService.payOrder(memberId, shapeIntoMongoObjectId(input));
+		return await this.orderService.payOrder(memberId, shapeIntoMongoObjectId(input), simulate);
 	}
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
-	public async cancelOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		this.logger.log('Mutation: cancelOrder');
-		return await this.orderService.cancelOrder(memberId, shapeIntoMongoObjectId(input));
+	public async cancelPendingOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
+		this.logger.log('Mutation: cancelPendingOrder');
+		return await this.orderService.cancelPendingOrder(memberId, shapeIntoMongoObjectId(input));
 	}
 
 	@UseGuards(AuthGuard)

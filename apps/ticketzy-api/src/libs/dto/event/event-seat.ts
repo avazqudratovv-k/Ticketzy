@@ -47,3 +47,37 @@ export class EventSeatMap {
 	@Field(() => [TakenSeat], { description: 'only SOLD seats and HELD seats whose hold has not expired' })
 	seats: TakenSeat[];
 }
+
+/** a seat the caller holds */
+@ObjectType()
+export class HeldSeat {
+	@Field(() => String)
+	_id: ObjectId;
+
+	@Field(() => String)
+	ticketTypeId: ObjectId;
+
+	@Field(() => String)
+	sectionKey: string;
+
+	@Field(() => Int)
+	row: number;
+
+	@Field(() => Int)
+	number: number;
+}
+
+@ObjectType()
+export class SeatHold {
+	@Field(() => String)
+	eventId: ObjectId;
+
+	@Field(() => [HeldSeat])
+	seats: HeldSeat[];
+
+	@Field(() => Date)
+	heldUntil: Date;
+
+	@Field(() => Date, { description: 'server clock, so the client can count down without trusting its own' })
+	serverTime: Date;
+}

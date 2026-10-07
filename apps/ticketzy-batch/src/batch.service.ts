@@ -6,6 +6,8 @@ import { Order } from 'apps/ticketzy-api/src/libs/dto/order/order';
 import { TicketType } from 'apps/ticketzy-api/src/libs/dto/ticket-type/ticket-type';
 import { MemberStatus, MemberType } from 'apps/ticketzy-api/src/libs/enums/member.enum';
 import { eventTransitions, publicEventStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
+import { EventSeat } from 'apps/ticketzy-api/src/libs/dto/event/event-seat';
+import { SeatStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
 import { OrderStatus, TicketTypeStatus } from 'apps/ticketzy-api/src/libs/enums/ticket.enum';
 import { Model } from 'mongoose';
 
@@ -18,6 +20,7 @@ export class BatchService {
 		@InjectModel('Member') private readonly memberModel: Model<Member>,
 		@InjectModel('Order') private readonly orderModel: Model<Order>,
 		@InjectModel('TicketType') private readonly ticketTypeModel: Model<TicketType>,
+		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 	) {}
 
 	public async batchRollback(): Promise<void> {
@@ -75,13 +78,13 @@ export class BatchService {
 	}
 
 	/**
-	 * PENDING orders past expiresAt become EXPIRED and give their stock back.
-	 * The status flip is a conditional update, so an order is only ever released once
-	 * even if a buyer pays or cancels at the same moment.
+	 * PENDING_PAYMENT orders past expiresAt become EXPIRED and give their seats or stock back, then every seat whose
+	 * hold has run out goes back to AVAILABLE. The status flip is a conditional update, so an order is only ever
+	 * released once even if a buyer pays or cancels at the same moment.
 	 */
 	public async batchExpireOrders(): Promise<void> {
 		const expired = await this.orderModel
-			.find({ orderStatus: OrderStatus.PENDING, expiresAt: { $lte: new Date() } })
+			.find({ orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: { $lte: new Date() } })
 			.limit(200)
 			.lean()
 			.exec();
@@ -89,12 +92,23 @@ export class BatchService {
 		for (const candidate of expired) {
 			const order = await this.orderModel
 				.findOneAndUpdate(
-					{ _id: candidate._id, orderStatus: OrderStatus.PENDING, expiresAt: { $lte: new Date() } },
+					{ _id: candidate._id, orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: { $lte: new Date() } },
 					{ orderStatus: OrderStatus.EXPIRED },
 					{ new: true },
 				)
 				.exec();
 			if (!order) continue;
+
+			if (order.seatIds?.length) {
+				// only the buyer's own holds that have run out: a newer hold of the same seats is left alone
+				await this.eventSeatModel
+					.updateMany(
+						{ _id: { $in: order.seatIds }, heldBy: order.buyerId, seatStatus: SeatStatus.HELD, heldUntil: { $lte: new Date() } },
+						{ seatStatus: SeatStatus.AVAILABLE, $unset: { heldBy: 1, heldUntil: 1 } },
+					)
+					.exec();
+				continue;
+			}
 
 			for (const item of order.items) {
 				const ticketType = await this.ticketTypeModel
@@ -119,6 +133,15 @@ export class BatchService {
 			}
 		}
 		if (expired.length) this.logger.debug(`Checked ${expired.length} expired order(s)`);
+
+		// holds that never became an order (the buyer left, or the order lived shorter than the hold)
+		const released = await this.eventSeatModel
+			.updateMany(
+				{ seatStatus: SeatStatus.HELD, heldUntil: { $lte: new Date() } },
+				{ seatStatus: SeatStatus.AVAILABLE, $unset: { heldBy: 1, heldUntil: 1 } },
+			)
+			.exec();
+		if (released.modifiedCount) this.logger.debug(`Released ${released.modifiedCount} expired seat hold(s)`);
 	}
 
 	/**

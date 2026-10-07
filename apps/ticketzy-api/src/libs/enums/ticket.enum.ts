@@ -20,8 +20,9 @@ registerEnumType(TicketCurrency, {
 });
 
 export enum OrderStatus {
-	PENDING = 'PENDING',
+	PENDING_PAYMENT = 'PENDING_PAYMENT',
 	PAID = 'PAID',
+	FAILED = 'FAILED',
 	CANCELLED = 'CANCELLED',
 	EXPIRED = 'EXPIRED',
 	REFUNDED = 'REFUNDED',
@@ -42,6 +43,7 @@ registerEnumType(TicketStatus, {
 
 export enum PaymentProvider {
 	MANUAL = 'MANUAL',
+	MOCK = 'MOCK',
 	STRIPE = 'STRIPE',
 	PAYME = 'PAYME',
 	CLICK = 'CLICK',
@@ -58,4 +60,21 @@ export enum PaymentStatus {
 }
 registerEnumType(PaymentStatus, {
 	name: 'PaymentStatus',
+});
+
+/** the mock provider only: which outcome payOrder should simulate */
+export enum PaymentSimulation {
+	SUCCESS = 'SUCCESS',
+	FAILURE = 'FAILURE',
+}
+registerEnumType(PaymentSimulation, {
+	name: 'PaymentSimulation',
+});
+
+export enum TicketTimeFilter {
+	UPCOMING = 'UPCOMING',
+	PAST = 'PAST',
+}
+registerEnumType(TicketTimeFilter, {
+	name: 'TicketTimeFilter',
 });

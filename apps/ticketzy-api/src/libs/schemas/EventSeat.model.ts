@@ -57,5 +57,8 @@ const EventSeatSchema = new Schema(
 
 EventSeatSchema.index({ eventId: 1, sectionKey: 1, row: 1, number: 1 }, { unique: true });
 EventSeatSchema.index({ eventId: 1, seatStatus: 1 });
+// the batch sweep that frees expired holds
+EventSeatSchema.index({ seatStatus: 1, heldUntil: 1 });
+EventSeatSchema.index({ eventId: 1, heldBy: 1 });
 
 export default EventSeatSchema;

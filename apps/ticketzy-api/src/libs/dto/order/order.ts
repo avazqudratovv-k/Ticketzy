@@ -36,7 +36,22 @@ export class Order {
 	@Field(() => [OrderItem])
 	items: OrderItem[];
 
+	@Field(() => [String])
+	seatIds: ObjectId[];
+
+	@Field(() => String, { nullable: true })
+	currency?: string;
+
 	@Field(() => Number)
+	subtotal: number;
+
+	@Field(() => Number, { description: 'percent' })
+	commissionRate: number;
+
+	@Field(() => Number)
+	commissionAmount: number;
+
+	@Field(() => Number, { description: 'what the buyer pays' })
 	totalAmount: number;
 
 	@Field(() => Date)

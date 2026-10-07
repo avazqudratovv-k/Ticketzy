@@ -15,6 +15,18 @@ const TicketSchema = new Schema(
 			default: TicketStatus.VALID,
 		},
 
+		/** HMAC of the ticket id with QR_SECRET, shown to the owner as a QR code */
+		qrToken: {
+			type: String,
+			required: true,
+		},
+
+		/** reserved-seating tickets only */
+		seatId: {
+			type: Schema.Types.ObjectId,
+			ref: 'EventSeat',
+		},
+
 		orderId: {
 			type: Schema.Types.ObjectId,
 			required: true,

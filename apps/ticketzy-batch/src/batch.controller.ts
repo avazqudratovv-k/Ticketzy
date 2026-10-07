@@ -48,7 +48,7 @@ export class BatchController {
     }
   }
 
-  // pending orders hold stock, so expiry runs every minute
+  // pending orders hold stock and seats, so expiry and the seat hold sweep run every minute
   @Cron('10 * * * * *', { name: BATCH_EXPIRE_ORDERS })
   public async batchExpireOrders() {
     try {
