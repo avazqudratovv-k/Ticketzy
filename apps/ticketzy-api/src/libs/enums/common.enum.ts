@@ -80,6 +80,14 @@ export enum Message {
 	REFUND_FAILED = 'The refund failed, nothing was changed. Please try again!',
 	REFUND_IN_PROGRESS = 'This order is being refunded right now!',
 	EVENT_NOT_CANCELLED = 'Only the orders of a cancelled event can be refunded this way!',
+
+	CONVERSATION_NOT_ALLOWED = 'You are not allowed to use this conversation!',
+	CONVERSATION_SUPPORT_ONLY = 'Your account can only use the support conversation!',
+	CONVERSATION_EVENT_NOT_YOURS = 'You can only start a conversation about your own event!',
+	CONVERSATION_ORGANIZERS_ONLY = 'Only organizers can start a conversation!',
+	MESSAGE_BODY_REQUIRED = 'The message cannot be empty!',
+	MESSAGE_BODY_TOO_LONG = 'A message can have at most 2000 characters!',
+	TOO_MANY_MESSAGES = 'You are sending messages too fast, please slow down!',
 }
 
 export enum Direction {

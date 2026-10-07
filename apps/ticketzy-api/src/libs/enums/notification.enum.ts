@@ -15,6 +15,7 @@ export enum NotificationType {
 	EVENT_CANCELLED = 'EVENT_CANCELLED',
 	REFUND_COMPLETED = 'REFUND_COMPLETED',
 	ORDER_REFUNDED = 'ORDER_REFUNDED',
+	NEW_MESSAGE = 'NEW_MESSAGE',
 }
 registerEnumType(NotificationType, {
 	name: 'NotificationType',
@@ -32,6 +33,7 @@ export enum NotificationGroup {
 	MEMBER = 'MEMBER',
 	EVENT = 'EVENT',
 	ORDER = 'ORDER',
+	CONVERSATION = 'CONVERSATION',
 }
 registerEnumType(NotificationGroup, {
 	name: 'NotificationGroup',

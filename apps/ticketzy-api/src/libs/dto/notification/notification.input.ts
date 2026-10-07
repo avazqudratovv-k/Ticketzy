@@ -13,6 +13,7 @@ export interface NotificationCreate {
 	receiverId: ObjectId;
 	eventId?: ObjectId;
 	orderId?: ObjectId;
+	conversationId?: ObjectId;
 }
 
 @InputType()
@@ -30,4 +31,9 @@ export class NotificationsInquiry {
 	@IsOptional()
 	@Field(() => NotificationStatus, { nullable: true })
 	notificationStatus?: NotificationStatus;
+
+	/** shortcut for notificationStatus WAIT; wins over notificationStatus when true */
+	@IsOptional()
+	@Field(() => Boolean, { nullable: true })
+	unreadOnly?: boolean;
 }

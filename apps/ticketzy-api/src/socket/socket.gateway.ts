@@ -1,119 +1,159 @@
 import { Logger } from '@nestjs/common';
-import { OnGatewayInit, SubscribeMessage,WebSocketServer ,WebSocketGateway } from '@nestjs/websockets';
-import { Server  } from 'ws';
+import { OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import * as WebSocket from 'ws';
 import { AuthService } from '../components/auth/auth.service';
+import { ConversationRealtime } from '../components/conversation/conversation.realtime';
+import { ConversationService } from '../components/conversation/conversation.service';
 import { Member } from '../libs/dto/member/member';
-import * as url from 'url'
+import { MemberType } from '../libs/enums/member.enum';
+import { Message } from '../libs/enums/common.enum';
+import { RateLimiter } from '../libs/rate-limiter';
+import { shapeIntoMongoObjectId } from '../libs/config';
 
-/** only these fields are broadcast to other chat clients: never email, phone or status */
-type SocketMember = Pick<Member, '_id' | 'memberType' | 'memberNick' | 'memberFullName' | 'memberImage'>;
+const CLOSE_UNAUTHORIZED = 4401;
+const CLOSE_AUTH_TIMEOUT = 4408;
+/** a client that connects without an Authorization header has this long to send its auth message */
+const AUTH_TIMEOUT_MS = 10_000;
+/** per member: 30 typing events in 10 seconds are plenty for a human */
+const TYPING_LIMIT = 30;
+const TYPING_WINDOW_MS = 10_000;
 
-interface MessagePayload {
-  event: string;
-  text: string;
-  memberData: SocketMember;
-}
-
-interface InfoPayload {
-  event: string;
-  totalClients: number;
-  memberData: SocketMember;
-  action: string;
-}
-
+/**
+ * Real time side of the organizer / admin conversations (the old global chat room is gone).
+ *
+ * Authentication (never a URL query, tokens in URLs end up in logs):
+ *  1. handshake: `Authorization: Bearer <token>` header (non browser clients), or
+ *  2. a first message `{ "event": "auth", "data": { "token": "<token>" } }` (browsers cannot set headers on a WebSocket).
+ * Either way the token is verified and the member is loaded from the database with its status checked.
+ *
+ * Client messages: auth, joinConversation { conversationId }, leaveConversation { conversationId },
+ *                  typing { conversationId, isTyping }
+ * Server messages: authenticated, joined, left, message, unread, read, typing, error
+ * Messages are sent with the GraphQL mutation sendMessage, the service publishes them to the room.
+ */
 @WebSocketGateway({ transports: ['websocket'], secure: false })
-export class SocketGateway implements OnGatewayInit {
-  private logger: Logger = new Logger('SocketEventsGateway');
-  private summaryClient: number = 0;
-  private clientsAuthMap = new Map<WebSocket, SocketMember>();
-  private messagesList: MessagePayload[] = [];
+export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+	private readonly logger = new Logger('SocketEventsGateway');
+	private readonly authTimers = new Map<WebSocket, NodeJS.Timeout>();
+	private readonly typingLimiter = new RateLimiter(TYPING_LIMIT, TYPING_WINDOW_MS);
 
-  constructor(private authService: AuthService) {}
+	constructor(
+		private readonly authService: AuthService,
+		private readonly conversationService: ConversationService,
+		private readonly realtime: ConversationRealtime,
+	) {}
 
-  @WebSocketServer()
-  server: Server;
+	public async handleConnection(client: WebSocket, req: any): Promise<void> {
+		const header: string | undefined = req?.headers?.authorization;
+		if (header) {
+			const [scheme, token] = header.split(' ');
+			if (scheme?.toLowerCase() === 'bearer' && token) return await this.authenticateClient(client, token);
+			return this.reject(client, Message.NOT_AUTHENTICATED);
+		}
 
-  public afterInit(server: Server) {
-    this.logger.verbose(`WebSocket Server Initialized & total [${this.summaryClient}]`);
-  }
+		this.authTimers.set(
+			client,
+			setTimeout(() => this.reject(client, Message.NOT_AUTHENTICATED, CLOSE_AUTH_TIMEOUT), AUTH_TIMEOUT_MS),
+		);
+	}
 
+	public handleDisconnect(client: WebSocket): void {
+		this.clearAuthTimer(client);
+		this.realtime.unregister(client);
+	}
 
-  private async retrieveAuth(req: any): Promise<SocketMember> {
-    try {
-        const parseUrl = url.parse(req.url, true);
-        const { token } = parseUrl.query;
-        const { _id, memberType, memberNick, memberFullName, memberImage } = await this.authService.authenticate(token as string);
-        return { _id, memberType, memberNick, memberFullName, memberImage };
-    } catch (err) {
-        return null;
-    }
-}
+	@SubscribeMessage('auth')
+	public async handleAuth(client: WebSocket, data: { token?: string }): Promise<void> {
+		if (this.realtime.getClient(client)) return;
+		if (typeof data?.token !== 'string' || !data.token) return this.reject(client, Message.NOT_AUTHENTICATED);
+		await this.authenticateClient(client, data.token);
+	}
 
-public async handleConnection(client: WebSocket, req: any) {
-    const authMember = await this.retrieveAuth(req);
-    this.summaryClient++;
-    this.clientsAuthMap.set(client, authMember);
+	@SubscribeMessage('joinConversation')
+	public async handleJoin(client: WebSocket, data: { conversationId?: string }): Promise<void> {
+		await this.run(client, async (member) => {
+			const conversationId = this.conversationIdOf(data);
+			await this.conversationService.assertConversationAccess(member, shapeIntoMongoObjectId(conversationId));
+			this.realtime.join(client, conversationId);
+			this.send(client, 'joined', { conversationId });
+		});
+	}
 
-    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
-    this.logger.verbose(`Connection [${clientNick}] & total [${this.summaryClient}]`);
+	@SubscribeMessage('leaveConversation')
+	public async handleLeave(client: WebSocket, data: { conversationId?: string }): Promise<void> {
+		await this.run(client, async () => {
+			const conversationId = this.conversationIdOf(data);
+			this.realtime.leave(client, conversationId);
+			this.send(client, 'left', { conversationId });
+		});
+	}
 
-    const infoMsg: InfoPayload = {
-        event: 'info',
-        totalClients: this.summaryClient,
-        memberData: authMember,
-        action: 'joined',
-    };
-    this.emitMessage(infoMsg);
-    client.send(JSON.stringify({ event: 'getMessages', list: this.messagesList }))
-  }
+	@SubscribeMessage('typing')
+	public async handleTyping(client: WebSocket, data: { conversationId?: string; isTyping?: boolean }): Promise<void> {
+		await this.run(client, async (member) => {
+			const conversationId = this.conversationIdOf(data);
+			// only sockets that joined (and were checked) may speak into the room
+			if (!this.realtime.isInRoom(client, conversationId)) throw new Error(Message.CONVERSATION_NOT_ALLOWED);
+			if (!this.typingLimiter.tryConsume(String(member._id))) return;
+			this.realtime.emitToRoom(
+				conversationId,
+				'typing',
+				{ conversationId, memberId: String(member._id), isTyping: data?.isTyping !== false },
+				client,
+			);
+		});
+	}
 
-  public handleDisconnect(client: WebSocket) {
-    const authMember = this.clientsAuthMap.get(client);
-    this.summaryClient--;
-    this.clientsAuthMap.delete(client);
+	private async authenticateClient(client: WebSocket, token: string): Promise<void> {
+		try {
+			const member = await this.authService.authenticate(token, { allowRestricted: true });
+			if (![MemberType.ORGANIZER, MemberType.ADMIN].includes(member.memberType)) throw new Error(Message.ONLY_SPECIFIC_ROLES_ALLOWED);
 
-    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
-    this.logger.verbose(`Disconnection [${clientNick}] & total [${this.summaryClient}]`);
+			this.clearAuthTimer(client);
+			this.realtime.register(client, { memberId: String(member._id), memberType: member.memberType });
+			this.logger.verbose(`Socket authenticated [${member._id}]`);
+			this.send(client, 'authenticated', { memberId: String(member._id) });
+		} catch (err) {
+			this.reject(client, err.message);
+		}
+	}
 
-    const infoMsg: InfoPayload = {
-        event: 'info',
-        totalClients: this.summaryClient,
-        memberData: authMember,
-        action: "left"
-    };
-    this.broadcastMessage(client, infoMsg);
-}
+	/** runs an action for an authenticated client with the member freshly loaded, so a status change applies at once */
+	private async run(client: WebSocket, action: (member: Member) => Promise<void>): Promise<void> {
+		const info = this.realtime.getClient(client);
+		if (!info) return this.reject(client, Message.NOT_AUTHENTICATED);
 
+		let member: Member;
+		try {
+			member = await this.authService.loadMember(info.memberId, { allowRestricted: true });
+		} catch (err) {
+			return this.reject(client, err.message);
+		}
 
-  @SubscribeMessage('message')
-  public async handleMessage(client: WebSocket, payload: string): Promise<void> {
-    const authMember = this.clientsAuthMap.get(client);
-    const newMessage: MessagePayload = { event: 'message', text: payload, memberData: authMember };
+		try {
+			await action(member);
+		} catch (err) {
+			this.send(client, 'error', { message: err.message ?? Message.SOMETHING_WENT_WRONG });
+		}
+	}
 
-    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
-    this.logger.verbose(`NEW MESSAGE [${clientNick}]: ${payload}`);
+	private conversationIdOf(data: { conversationId?: string } | undefined): string {
+		if (typeof data?.conversationId !== 'string' || !data.conversationId) throw new Error(Message.BAD_REQUEST);
+		return data.conversationId;
+	}
 
-    this.messagesList.push(newMessage);
-    if (this.messagesList.length > 5) this.messagesList.splice(0, this.messagesList.length - 5);
-    
-    this.emitMessage(newMessage);
-}
+	private send(client: WebSocket, event: string, data: unknown): void {
+		if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ event, data }));
+	}
 
+	private reject(client: WebSocket, message: string, code: number = CLOSE_UNAUTHORIZED): void {
+		this.clearAuthTimer(client);
+		this.send(client, 'error', { message });
+		client.close(code, message.slice(0, 120));
+	}
 
-  private broadcastMessage(sender: WebSocket, message: InfoPayload | MessagePayload) {
-    this.server.clients.forEach((client) => {
-      if (client !== sender && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
-      }
-    });
-  }
-
-  private emitMessage(message: InfoPayload | MessagePayload) {
-    this.server.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
-      }
-    });
-  }
+	private clearAuthTimer(client: WebSocket): void {
+		clearTimeout(this.authTimers.get(client));
+		this.authTimers.delete(client);
+	}
 }

@@ -53,6 +53,18 @@ describe('AuthService', () => {
 		},
 	);
 
+	it.each([MemberStatus.REJECTED, MemberStatus.SUSPENDED])(
+		'allowRestricted (contact support) lets a %s member in, but never a DELETE one',
+		async (memberStatus) => {
+			memberModel.findById.mockReturnValue(query({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus }));
+			const token = await service.createToken({ _id: memberId as any, memberType: MemberType.ORGANIZER });
+			await expect(service.authenticate(token, { allowRestricted: true })).resolves.toMatchObject({ memberStatus });
+
+			memberModel.findById.mockReturnValue(query({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.DELETE }));
+			await expect(service.authenticate(token, { allowRestricted: true })).rejects.toThrow(Message.ACCOUNT_NOT_VERIFIED);
+		},
+	);
+
 	it('lets a PENDING organizer authenticate', async () => {
 		memberModel.findById.mockReturnValue(
 			query({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.PENDING }),

@@ -35,6 +35,9 @@ export class Notification {
 	@Field(() => String, { nullable: true })
 	orderId?: ObjectId;
 
+	@Field(() => String, { nullable: true })
+	conversationId?: ObjectId;
+
 	@Field(() => Date)
 	createdAt: Date;
 

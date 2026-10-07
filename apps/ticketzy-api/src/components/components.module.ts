@@ -18,6 +18,7 @@ import { CommentModule } from './comment/comment.module';
 import { LikeModule } from './like/like.module';
 import { ViewModule } from './view/view.module';
 import { FollowModule } from './follow/follow.module';
+import { ConversationModule } from './conversation/conversation.module';
 
 @Module({
 	imports: [
@@ -40,6 +41,7 @@ import { FollowModule } from './follow/follow.module';
 		ViewModule,
 		CommentModule,
 		FollowModule,
+		ConversationModule,
 	],
 })
 export class ComponentsModule {}

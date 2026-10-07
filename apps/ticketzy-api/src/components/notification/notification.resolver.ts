@@ -1,4 +1,4 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { NotificationService } from './notification.service';
@@ -32,5 +32,19 @@ export class NotificationResolver {
 	): Promise<Notification> {
 		this.logger.log('Mutation: markNotificationRead');
 		return await this.notificationService.markNotificationRead(memberId, shapeIntoMongoObjectId(input));
+	}
+
+	@UseGuards(AuthGuard)
+	@Query(() => Int)
+	public async getUnreadNotificationCount(@AuthMember('_id') memberId: ObjectId): Promise<number> {
+		this.logger.log('Query: getUnreadNotificationCount');
+		return await this.notificationService.getUnreadNotificationCount(memberId);
+	}
+
+	@UseGuards(AuthGuard)
+	@Mutation(() => Int)
+	public async markAllNotificationsRead(@AuthMember('_id') memberId: ObjectId): Promise<number> {
+		this.logger.log('Mutation: markAllNotificationsRead');
+		return await this.notificationService.markAllNotificationsRead(memberId);
 	}
 }

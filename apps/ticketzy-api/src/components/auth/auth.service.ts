@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { Model, ObjectId } from 'mongoose';
 import { Member } from '../../libs/dto/member/member';
-import { MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
+import { MemberStatus, MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
 import { Message } from '../../libs/enums/common.enum';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
@@ -52,18 +52,27 @@ export class AuthService {
 		}
 	}
 
-	/** verifies the token, then loads the member so blocked accounts and role changes apply immediately */
-	public async authenticate(token: string): Promise<Member> {
+	/**
+	 * verifies the token, then loads the member so blocked accounts and role changes apply immediately.
+	 * `allowRestricted` also lets REJECTED and SUSPENDED members in; only the contact-support flow asks for it.
+	 */
+	public async authenticate(token: string, options: { allowRestricted?: boolean } = {}): Promise<Member> {
 		const payload = await this.verifyToken(token);
+		return await this.loadMember(payload._id, options);
+	}
 
+	/** the member by id with the same status rules as authenticate (used by sockets that outlive one request) */
+	public async loadMember(memberId: string | ObjectId, options: { allowRestricted?: boolean } = {}): Promise<Member> {
 		let member: Member | null = null;
 		try {
-			member = (await this.memberModel.findById(shapeIntoMongoObjectId(payload._id)).lean().exec()) as unknown as Member;
+			member = (await this.memberModel.findById(shapeIntoMongoObjectId(memberId)).lean().exec()) as unknown as Member;
 		} catch (err) {
 			this.logger.warn(`Member lookup failed: ${err.message}`);
 		}
 		if (!member) throw new UnauthorizedException(Message.NOT_AUTHENTICATED);
-		if (unverifiedMemberStatuses.includes(member.memberStatus)) {
+
+		const blocked = options.allowRestricted ? [MemberStatus.DELETE] : unverifiedMemberStatuses;
+		if (blocked.includes(member.memberStatus)) {
 			throw new UnauthorizedException(Message.ACCOUNT_NOT_VERIFIED);
 		}
 		return member;

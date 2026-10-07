@@ -88,18 +88,25 @@ export class FakeModel {
 	public find(filter?: any) {
 		let sortSpec: Record<string, number> | undefined;
 		let limitTo: number | undefined;
+		let skipBy = 0;
 		const q = this.query(() => {
 			let found = this.docs.filter((doc) => matches(doc, filter));
 			if (sortSpec) {
 				const [[key, direction]] = Object.entries(sortSpec);
 				found = [...found].sort((a, b) => order(a[key], b[key]) * direction);
 			}
+			found = found.slice(skipBy);
 			if (limitTo !== undefined) found = found.slice(0, limitTo);
 			return found.map(clone);
 		});
 		q.sort = (spec: Record<string, number>) => ((sortSpec = spec), q);
 		q.limit = (count: number) => ((limitTo = count), q);
+		q.skip = (count: number) => ((skipBy = count), q);
 		return q;
+	}
+
+	public countDocuments(filter?: any) {
+		return this.query(() => this.docs.filter((doc) => matches(doc, filter)).length);
 	}
 
 	public findOne(filter?: any) {

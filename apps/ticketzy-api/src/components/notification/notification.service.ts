@@ -9,7 +9,7 @@ import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
 /** people are not told about their own likes and comments; system messages (e.g. ORDER_PAID) may go to the author */
-const selfNotifiedTypes = [NotificationType.LIKE, NotificationType.COMMENT];
+const selfNotifiedTypes = [NotificationType.LIKE, NotificationType.COMMENT, NotificationType.NEW_MESSAGE];
 
 @Injectable()
 export class NotificationService {
@@ -32,7 +32,8 @@ export class NotificationService {
 
 	public async getMyNotifications(memberId: ObjectId, input: NotificationsInquiry): Promise<Notifications> {
 		const match: T = { receiverId: shapeIntoMongoObjectId(memberId) };
-		if (input.notificationStatus) match.notificationStatus = input.notificationStatus;
+		if (input.unreadOnly) match.notificationStatus = NotificationStatus.WAIT;
+		else if (input.notificationStatus) match.notificationStatus = input.notificationStatus;
 
 		const result = await this.notificationModel
 			.aggregate([
@@ -66,5 +67,22 @@ export class NotificationService {
 			.exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;
+	}
+
+	public async getUnreadNotificationCount(memberId: ObjectId): Promise<number> {
+		return await this.notificationModel
+			.countDocuments({ receiverId: shapeIntoMongoObjectId(memberId), notificationStatus: NotificationStatus.WAIT })
+			.exec();
+	}
+
+	/** returns how many notifications were unread and are now read */
+	public async markAllNotificationsRead(memberId: ObjectId): Promise<number> {
+		const result = await this.notificationModel
+			.updateMany(
+				{ receiverId: shapeIntoMongoObjectId(memberId), notificationStatus: NotificationStatus.WAIT },
+				{ notificationStatus: NotificationStatus.READ },
+			)
+			.exec();
+		return result.modifiedCount;
 	}
 }

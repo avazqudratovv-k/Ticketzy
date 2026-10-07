@@ -51,8 +51,15 @@ const NotificationSchema = new Schema(
 			type: Schema.Types.ObjectId,
 			ref: 'Order',
 		},
+
+		conversationId: {
+			type: Schema.Types.ObjectId,
+			ref: 'Conversation',
+		},
 	},
 	{ timestamps: true, collection: 'notifications' },
 );
+
+NotificationSchema.index({ receiverId: 1, notificationStatus: 1, createdAt: -1 });
 
 export default NotificationSchema;

@@ -316,3 +316,30 @@ Backend only. Decisions: DECISIONS #52 to #57. Closes N20.
 | GraphQL schema built offline from the refund, sales, ticket and order resolvers | pass: all new operations present |
 | Live check: built API (`SEAT_HOLD_SECONDS=5`) and built batch app against the dev database, driven over GraphQL: check-in, tampered and wrong-event tokens, refund, idempotent refund, refund after scan, deadlines in Seoul and Los Angeles, event cancel and retry, sales queries, batch sweep (26 checks) | pass; test data deleted by id, no leftovers. It found that `Order` did not expose `refundedAt` (fixed in `libs/dto/order/order.ts`). Real-database races (N19, N23) still not run |
 
+## 16. Organizer and admin messaging, notifications
+
+Backend only. Decision: DECISIONS #58. The old global socket chat (in-memory last 5 messages) is removed.
+
+**Operations** (`ConversationGuard`: ORGANIZER and ADMIN only, REJECTED and SUSPENDED accounts included; what they may do is decided in the service)
+- `startConversation(eventId?)` (organizer: own event, or the general support conversation; PENDING and REJECTED may open support only), `getMyConversations(input: OrdinaryInquiry)`, `getConversation(conversationId)` (with `eventData` card, `organizerData`, `adminData`), `getMessages(conversationId, input)` (newest first, page size capped at 100), `sendMessage(conversationId, body)`, `markConversationRead(conversationId)`
+- Notifications (still `AuthGuard`): `getMyNotifications` now takes `unreadOnly`, new `getUnreadNotificationCount`, `markAllNotificationsRead` (both `Int`); `markNotificationRead` was already there
+- Notification types: `NEW_MESSAGE` added; new message, event approved, rejected, cancelled, organizer verified, rejected, suspended and refund processed were already covered; group `CONVERSATION` added; notifications carry an optional `conversationId`
+
+**Sockets** (`socket/socket.gateway.ts`, `ConversationRealtime`): auth by `Authorization` header or a first `{event:'auth', data:{token}}` message within 10 seconds (close 4401 / 4408), member reloaded on every action; client events `joinConversation`, `leaveConversation`, `typing`; server events `authenticated`, `joined`, `left`, `message`, `unread`, `read`, `typing`, `error`. `AuthService.authenticate(token, { allowRestricted })` and `loadMember` are new
+
+**Schema**: `Conversation` (collection `conversations`), `Message` (`messages`, index `conversationId + createdAt`), `Notification.conversationId` and a `receiverId + notificationStatus + createdAt` index
+**Message constants**: `CONVERSATION_NOT_ALLOWED`, `CONVERSATION_SUPPORT_ONLY`, `CONVERSATION_EVENT_NOT_YOURS`, `CONVERSATION_ORGANIZERS_ONLY`, `MESSAGE_BODY_REQUIRED`, `MESSAGE_BODY_TOO_LONG`, `TOO_MANY_MESSAGES`
+
+**Files added**: `components/conversation/` (service, resolver, module, `conversation.realtime.ts`, spec), `components/auth/guards/conversation.guard.ts`, `socket/socket.gateway.spec.ts`, `libs/conversation-access.ts`, `libs/rate-limiter.ts`, `libs/schemas/Conversation.model.ts`, `libs/schemas/Message.model.ts`, `libs/dto/conversation/conversation.ts`
+**Files edited**: `socket/socket.gateway.ts` (rewritten) and `socket.module.ts`, `auth.service.ts` (+ spec), `notification.service.ts` / `.resolver.ts`, `libs/dto/notification/*`, `Notification.model.ts`, the notification and common enums, `components.module.ts`, `test/fake-model.ts` (`skip`, `countDocuments`)
+
+**Tests added**: only the conversation's organizer and admins read, write and mark read; USER, inactive admin and DELETE refused; PENDING, REJECTED and SUSPENDED limited to support (read, write, list, start); unread counters per side and mark read; first admin recorded and kept (also two admins at once); trimmed, empty and 2001 character bodies; private rooms and per-role unread counts; rate limit (429, per member, nothing saved when refused, sliding window); notification receivers (assigned admin, all active admins, organizer, never the sender, failures never throw); socket auth by header and by message, timeout, bad token, USER, join checks, typing, typing rate limit, disconnect
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (408 tests, 23 suites) | pass |
+| GraphQL schema built offline from the conversation and notification resolvers | pass: all operations present |
+| Live check against a dev database and a real WebSocket client | **not run** (tests use the in-memory model; the unique partial indexes and the aggregation lookups are untested against MongoDB) |
+
