@@ -181,6 +181,18 @@ export class SeatService {
 			.exec();
 	}
 
+	/** SOLD seats of a refunded order go back on sale; only seats this order sold match, so a retry changes nothing */
+	public async releaseSoldSeats(orderId: ObjectId, seatIds: ObjectId[]): Promise<number> {
+		if (!seatIds?.length) return 0;
+		const result = await this.eventSeatModel
+			.updateMany(
+				{ _id: { $in: seatIds }, orderId: orderId, seatStatus: SeatStatus.SOLD },
+				{ seatStatus: SeatStatus.AVAILABLE, $unset: { orderId: 1, heldBy: 1, heldUntil: 1 } },
+			)
+			.exec();
+		return result.modifiedCount;
+	}
+
 	private async releaseClaimed(memberId: ObjectId, claimed: EventSeat[]): Promise<void> {
 		await this.releaseOrderSeats(
 			memberId,

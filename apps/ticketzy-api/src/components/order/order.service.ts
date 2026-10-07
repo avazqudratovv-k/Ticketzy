@@ -16,7 +16,7 @@ import { T } from '../../libs/types/common';
 import { lookupEvent, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
-import { signQrToken } from '../../libs/qr-token';
+import { buildQrToken } from '../../libs/qr-token';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
 import { NotificationService } from '../notification/notification.service';
 import { SeatService } from '../seat/seat.service';
@@ -213,12 +213,16 @@ export class OrderService {
 			throw new BadRequestException(Message.HOLD_EXPIRED);
 		}
 
+		// reserved seats count in soldQuantity once they are sold (holds never do)
+		let counted: { ticketTypeId: ObjectId; quantity: number }[] = [];
 		try {
+			counted = await this.ticketTypeService.addSold(this.countByTicketType(soldSeats));
 			await this.paymentService.record(paid, charge);
 			await this.ticketModel.insertMany(this.buildTickets(paid, soldSeats));
 		} catch (err) {
 			this.logger.error(`Error, Service.model: ${err.message}`);
 			// undo so the buyer can retry while the hold is still valid
+			await Promise.all(counted.map((count) => this.ticketTypeService.release(count.ticketTypeId, count.quantity)));
 			await this.ticketModel.deleteMany({ orderId: paid._id }).exec();
 			await this.paymentService.deleteRecords(paid);
 			await this.orderModel
@@ -234,12 +238,23 @@ export class OrderService {
 		return paid;
 	}
 
+	private countByTicketType(seats: { ticketTypeId: ObjectId }[]): { ticketTypeId: ObjectId; quantity: number }[] {
+		const counts = new Map<string, { ticketTypeId: ObjectId; quantity: number }>();
+		for (const seat of seats) {
+			const key = String(seat.ticketTypeId);
+			const count = counts.get(key) ?? { ticketTypeId: seat.ticketTypeId, quantity: 0 };
+			count.quantity += 1;
+			counts.set(key, count);
+		}
+		return [...counts.values()];
+	}
+
 	/** one Ticket per seat (RESERVED) or per purchased quantity (GENERAL), each with its own signed QR token */
 	private buildTickets(order: Order, seats: { _id: ObjectId; ticketTypeId: ObjectId }[]): any[] {
 		const base = { ticketStatus: TicketStatus.VALID, orderId: order._id, eventId: order.eventId, ownerId: order.buyerId };
 		const make = (ticketTypeId: ObjectId, seatId?: ObjectId) => {
 			const _id = new Types.ObjectId();
-			return { ...base, _id, ticketTypeId, seatId, ticketCode: this.generateTicketCode(), qrToken: signQrToken(_id) };
+			return { ...base, _id, ticketTypeId, seatId, ticketCode: this.generateTicketCode(), qrToken: buildQrToken(_id) };
 		};
 		if (seats.length) return seats.map((seat) => make(seat.ticketTypeId, seat._id));
 		return order.items.flatMap((item) => Array.from({ length: item.quantity }, () => make(item.ticketTypeId)));

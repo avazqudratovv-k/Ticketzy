@@ -3,6 +3,12 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId, PipelineStage } from 'mongoose';
 import { Ticket, Tickets } from '../../libs/dto/ticket/ticket';
 import { Event } from '../../libs/dto/event/event';
+import { Member } from '../../libs/dto/member/member';
+import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
+import { EventSeat } from '../../libs/dto/event/event-seat';
+import { CheckInResult } from '../../libs/dto/ticket/check-in';
+import { EventStatus } from '../../libs/enums/event.enum';
+import { parseQrToken } from '../../libs/qr-token';
 import { TicketsInquiry } from '../../libs/dto/ticket/ticket.input';
 import { Message } from '../../libs/enums/common.enum';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -15,6 +21,9 @@ export class TicketService {
 	constructor(
 		@InjectModel('Ticket') private readonly ticketModel: Model<Ticket>,
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
+		@InjectModel('Member') private readonly memberModel: Model<Member>,
+		@InjectModel('TicketType') private readonly ticketTypeModel: Model<TicketType>,
+		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 	) {}
 
 	/** the owner's tickets with event, ticket type and seat; UPCOMING means the event has not ended yet */
@@ -68,24 +77,75 @@ export class TicketService {
 		return result[0];
 	}
 
-	/** Gate scan: the event's organizer (or an ADMIN) turns a VALID ticket into USED, exactly once. */
-	public async checkInTicket(memberId: ObjectId, memberType: MemberType, ticketCode: string): Promise<Ticket> {
-		const ticket = await this.ticketModel.findOne({ ticketCode: ticketCode }).lean().exec();
-		if (!ticket) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+	/** Gate scan: validates the QR code and turns a VALID ticket into USED, exactly once. */
+	public async checkInTicket(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<CheckInResult> {
+		const ticket = await this.validateScan(memberId, memberType, qrToken, eventId);
 
-		if (memberType !== MemberType.ADMIN) {
-			const event = await this.eventModel.findOne({ _id: ticket.eventId, organizerId: memberId }).lean().exec();
-			if (!event) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		}
-
+		// one conditional update: of two simultaneous scans only one matches VALID
 		const result = await this.ticketModel
 			.findOneAndUpdate(
 				{ _id: ticket._id, ticketStatus: TicketStatus.VALID },
 				{ ticketStatus: TicketStatus.USED, checkedInAt: new Date() },
 				{ new: true, projection: { qrToken: 0 } },
 			)
+			.lean()
 			.exec();
-		if (!result) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		return result;
+		if (!result) {
+			const current = await this.ticketModel.findOne({ _id: ticket._id }).select('ticketStatus').lean().exec();
+			throw new BadRequestException(this.statusMessage(current?.ticketStatus));
+		}
+		return await this.buildResult(result);
+	}
+
+	/** The same checks as checkInTicket, and nothing is changed. */
+	public async checkInPreview(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<CheckInResult> {
+		const ticket = await this.validateScan(memberId, memberType, qrToken, eventId);
+		const { qrToken: _hidden, ...visible } = ticket;
+		return await this.buildResult(visible as Ticket);
+	}
+
+	/**
+	 * The signature is verified first, with no database access, so forged or garbled codes never reach the database.
+	 * Then: the ticket exists with this exact token, belongs to the scanner's event (and the event the gate is set to,
+	 * when given), the event is APPROVED, and the ticket is VALID.
+	 */
+	private async validateScan(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<Ticket> {
+		const ticketId = parseQrToken(qrToken);
+		if (!ticketId) throw new BadRequestException(Message.QR_INVALID);
+
+		const ticket = await this.ticketModel.findOne({ _id: ticketId, qrToken: qrToken.trim() }).lean().exec();
+		if (!ticket) throw new BadRequestException(Message.QR_INVALID);
+
+		if (eventId && String(ticket.eventId) !== String(eventId)) throw new BadRequestException(Message.TICKET_WRONG_EVENT);
+
+		const event = await this.eventModel.findOne({ _id: ticket.eventId }).lean().exec();
+		if (!event) throw new BadRequestException(Message.QR_INVALID);
+		if (memberType !== MemberType.ADMIN && String(event.organizerId) !== String(memberId)) {
+			throw new BadRequestException(Message.TICKET_WRONG_ORGANIZER);
+		}
+		if (event.eventStatus !== EventStatus.APPROVED) throw new BadRequestException(Message.EVENT_NOT_OPEN_FOR_CHECKIN);
+		if (ticket.ticketStatus !== TicketStatus.VALID) throw new BadRequestException(this.statusMessage(ticket.ticketStatus));
+		return ticket;
+	}
+
+	private statusMessage(status?: TicketStatus): Message {
+		if (status === TicketStatus.USED) return Message.TICKET_ALREADY_USED;
+		if (status === TicketStatus.REFUNDED) return Message.TICKET_REFUNDED;
+		return Message.TICKET_NOT_VALID;
+	}
+
+	private async buildResult(ticket: Ticket): Promise<CheckInResult> {
+		const [buyer, ticketType, seat] = await Promise.all([
+			this.memberModel.findOne({ _id: ticket.ownerId }).select('memberFullName memberNick').lean().exec(),
+			this.ticketTypeModel.findOne({ _id: ticket.ticketTypeId }).select('ticketTypeName').lean().exec(),
+			ticket.seatId ? this.eventSeatModel.findOne({ _id: ticket.seatId }).select('sectionKey row number').lean().exec() : null,
+		]);
+		return {
+			ticket: ticket,
+			seat: seat ? { sectionKey: seat.sectionKey, row: seat.row, number: seat.number } : undefined,
+			buyerName: buyer?.memberFullName || buyer?.memberNick || '',
+			ticketTypeName: ticketType?.ticketTypeName,
+			ticketStatus: ticket.ticketStatus,
+		};
 	}
 }

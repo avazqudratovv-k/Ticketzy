@@ -7,6 +7,12 @@ import { ObjectId } from 'bson';
  * equality, $or, $and, $in, $nin, $ne, $gt, $gte, $lt, $lte and the $set, $unset, $inc update operators.
  */
 const same = (a: any, b: any): boolean => (a === undefined || a === null ? b === undefined || b === null : String(a) === String(b));
+const isObjectId = (value: any): boolean => value instanceof ObjectId;
+/** ObjectIds compare by their hex string (they grow with creation order), everything else as a time */
+const order = (a: any, b: any): number => {
+	if (isObjectId(a) && isObjectId(b)) return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
+	return new Date(a).getTime() - new Date(b).getTime();
+};
 const time = (value: any): number => new Date(value).getTime();
 
 const matchesCondition = (value: any, condition: any): boolean => {
@@ -23,13 +29,13 @@ const matchesCondition = (value: any, condition: any): boolean => {
 			case '$ne':
 				return !same(value, operand);
 			case '$gt':
-				return value != null && time(value) > time(operand);
+				return value != null && order(value, operand) > 0;
 			case '$gte':
-				return value != null && time(value) >= time(operand);
+				return value != null && order(value, operand) >= 0;
 			case '$lt':
-				return value != null && time(value) < time(operand);
+				return value != null && order(value, operand) < 0;
 			case '$lte':
-				return value != null && time(value) <= time(operand);
+				return value != null && order(value, operand) <= 0;
 			default:
 				throw new Error(`FakeModel does not support ${op}`);
 		}
@@ -80,7 +86,20 @@ export class FakeModel {
 	}
 
 	public find(filter?: any) {
-		return this.query(() => this.docs.filter((doc) => matches(doc, filter)).map(clone));
+		let sortSpec: Record<string, number> | undefined;
+		let limitTo: number | undefined;
+		const q = this.query(() => {
+			let found = this.docs.filter((doc) => matches(doc, filter));
+			if (sortSpec) {
+				const [[key, direction]] = Object.entries(sortSpec);
+				found = [...found].sort((a, b) => order(a[key], b[key]) * direction);
+			}
+			if (limitTo !== undefined) found = found.slice(0, limitTo);
+			return found.map(clone);
+		});
+		q.sort = (spec: Record<string, number>) => ((sortSpec = spec), q);
+		q.limit = (count: number) => ((limitTo = count), q);
+		return q;
 	}
 
 	public findOne(filter?: any) {

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, ObjectId } from 'mongoose';
 import { Order } from '../../libs/dto/order/order';
 import { PaymentStatus, PaymentSimulation } from '../../libs/enums/ticket.enum';
 import { ChargeResult, PAYMENT_PROVIDER, PaymentProvider } from './payment.provider';
@@ -39,5 +39,28 @@ export class PaymentService {
 
 	public refund(providerRef: string): Promise<void> {
 		return this.provider.refund(providerRef);
+	}
+
+	/**
+	 * Gives the money of an order back through the provider. The CAPTURED payment is claimed (set to REFUNDED) in one
+	 * conditional update before the provider is called and put back if the provider fails, so two parallel refunds never
+	 * reach the provider twice. An order whose payment is already REFUNDED is a no-op, which makes a retry safe.
+	 */
+	public async refundOrder(orderId: ObjectId): Promise<void> {
+		const claimed = await this.paymentModel
+			.findOneAndUpdate(
+				{ orderId: orderId, paymentStatus: PaymentStatus.CAPTURED },
+				{ paymentStatus: PaymentStatus.REFUNDED },
+				{ new: true },
+			)
+			.exec();
+		if (!claimed) return;
+
+		try {
+			await this.provider.refund(claimed.providerRef);
+		} catch (err) {
+			await this.paymentModel.updateOne({ _id: claimed._id }, { paymentStatus: PaymentStatus.CAPTURED }).exec();
+			throw err;
+		}
 	}
 }

@@ -9,7 +9,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { EventStatus, SeatStatus, SeatingType } from '../../libs/enums/event.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { OrderStatus, PaymentSimulation, PaymentStatus, TicketStatus } from '../../libs/enums/ticket.enum';
-import { verifyQrToken } from '../../libs/qr-token';
+import { parseQrToken } from '../../libs/qr-token';
 
 const oid = () => new ObjectId();
 const M1 = oid();
@@ -50,6 +50,7 @@ const build = (seatCount = 5) => {
 		findSellable: jest.fn(async () => [{ _id: TT, eventId: EVENT, ticketPrice: 50, ticketCurrency: 'USD' }]),
 		reserve: jest.fn(async () => ({ _id: GENERAL_TT, eventId: GENERAL_EVENT, ticketPrice: 20, ticketCurrency: 'USD' })),
 		release: jest.fn().mockResolvedValue(undefined),
+		addSold: jest.fn(async (counts: any[]) => counts),
 	};
 	const notificationService: any = { createNotification: jest.fn().mockResolvedValue(undefined) };
 	const provider = new MockPaymentProvider();
@@ -307,13 +308,16 @@ describe('checkout and payment of reserved seats', () => {
 		expect(ctx.payments.docs).toHaveLength(1);
 		expect(ctx.payments.docs[0]).toMatchObject({ paymentStatus: PaymentStatus.CAPTURED, amount: 100 });
 
+		// N20: the sold seats are counted on their ticket type
+		expect(ctx.ticketTypeService.addSold).toHaveBeenCalledWith([{ ticketTypeId: TT, quantity: 2 }]);
+
 		expect(ctx.tickets.docs).toHaveLength(2);
 		expect(new Set(ctx.tickets.docs.map((t) => t.ticketCode)).size).toBe(2);
 		for (const ticket of ctx.tickets.docs) {
 			expect(ticket.ticketStatus).toBe(TicketStatus.VALID);
 			expect(String(ticket.ownerId)).toBe(String(M1));
-			expect(verifyQrToken(ticket._id, ticket.qrToken)).toBe(true);
-			expect(verifyQrToken(oid(), ticket.qrToken)).toBe(false);
+			expect(parseQrToken(ticket.qrToken)).toBe(String(ticket._id));
+			expect(parseQrToken(ticket.qrToken.replace(String(ticket._id), String(oid())))).toBeNull();
 		}
 		expect(ctx.tickets.docs.map((t) => t.seatId).map(String).sort()).toEqual([ctx.seatOf(1)._id, ctx.seatOf(2)._id].map(String).sort());
 	});
@@ -441,7 +445,7 @@ describe('checkout and payment of general admission', () => {
 		const order: any = await ctx.orderService.createCheckout(M1 as any, generalInput);
 		await ctx.orderService.payOrder(M1 as any, order._id, PaymentSimulation.SUCCESS);
 		expect(ctx.tickets.docs).toHaveLength(3);
-		expect(ctx.tickets.docs.every((t) => t.seatId === undefined && verifyQrToken(t._id, t.qrToken))).toBe(true);
+		expect(ctx.tickets.docs.every((t) => t.seatId === undefined && parseQrToken(t.qrToken) === String(t._id))).toBe(true);
 		expect(ctx.ticketTypeService.release).not.toHaveBeenCalled();
 
 		const next: any = await ctx.orderService.createCheckout(M1 as any, generalInput);

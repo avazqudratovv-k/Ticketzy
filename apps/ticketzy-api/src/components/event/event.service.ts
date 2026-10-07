@@ -39,6 +39,7 @@ import {
 	listLayoutSeats,
 } from '../../libs/venue-layout';
 import { NotificationService } from '../notification/notification.service';
+import { RefundService } from '../refund/refund.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import {
 	escapeRegExp,
@@ -100,6 +101,7 @@ export class EventService {
 		private notificationService: NotificationService,
 		private auditLogService: AuditLogService,
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
+		private refundService: RefundService,
 	) {}
 
 	public async createEvent(input: EventInput): Promise<Event> {
@@ -487,16 +489,22 @@ export class EventService {
 		} catch (err) {
 			this.logger.error(`memberEvents NOT DECREMENTED for cancelled event ${result._id}: ${err.message}`);
 		}
-		await this.refundOrdersForCancelledEvent(result);
+		await this.refundOrdersForCancelledEvent(result, adminId);
 		return result;
 	}
 
 	/**
-	 * Hook for the refund flow (a later task): cancelling only marks the event CANCELLED for now.
-	 * It runs after the status change is committed and must never throw.
+	 * Refunds every PAID order of the cancelled event (RefundService works in batches and counts failures).
+	 * It runs after the status change is committed and must never throw; a failed order stays PAID and
+	 * retryEventRefundsByAdmin finishes it.
 	 */
-	protected async refundOrdersForCancelledEvent(event: Event): Promise<void> {
-		this.logger.warn(`Event ${event._id} cancelled: refunds for its PAID orders are not implemented yet`);
+	protected async refundOrdersForCancelledEvent(event: Event, adminId: ObjectId): Promise<void> {
+		try {
+			const summary = await this.refundService.refundOrdersForCancelledEvent(adminId, event);
+			this.logger.log(`Event ${event._id} cancelled: ${summary.refundedCount} order(s) refunded, ${summary.failedCount} failed`);
+		} catch (err) {
+			this.logger.error(`REFUNDS NOT PROCESSED for cancelled event ${event._id}: ${err.message}`);
+		}
 	}
 
 	/**

@@ -13,6 +13,8 @@ export enum NotificationType {
 	EVENT_APPROVED = 'EVENT_APPROVED',
 	EVENT_REJECTED = 'EVENT_REJECTED',
 	EVENT_CANCELLED = 'EVENT_CANCELLED',
+	REFUND_COMPLETED = 'REFUND_COMPLETED',
+	ORDER_REFUNDED = 'ORDER_REFUNDED',
 }
 registerEnumType(NotificationType, {
 	name: 'NotificationType',

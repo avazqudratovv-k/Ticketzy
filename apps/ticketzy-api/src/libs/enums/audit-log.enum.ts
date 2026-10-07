@@ -9,6 +9,8 @@ export enum AuditAction {
 	EVENT_APPROVED = 'EVENT_APPROVED',
 	EVENT_REJECTED = 'EVENT_REJECTED',
 	EVENT_CANCELLED = 'EVENT_CANCELLED',
+	ORDER_REFUNDED_BY_ADMIN = 'ORDER_REFUNDED_BY_ADMIN',
+	EVENT_REFUNDS_PROCESSED = 'EVENT_REFUNDS_PROCESSED',
 }
 registerEnumType(AuditAction, {
 	name: 'AuditAction',
@@ -17,6 +19,7 @@ registerEnumType(AuditAction, {
 export enum AuditTargetType {
 	MEMBER = 'MEMBER',
 	EVENT = 'EVENT',
+	ORDER = 'ORDER',
 }
 registerEnumType(AuditTargetType, {
 	name: 'AuditTargetType',

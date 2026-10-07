@@ -95,6 +95,10 @@ const OrderSchema = new Schema(
 		paidAt: {
 			type: Date,
 		},
+
+		refundedAt: {
+			type: Date,
+		},
 	},
 	{ timestamps: true, collection: 'orders' },
 );

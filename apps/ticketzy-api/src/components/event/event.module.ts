@@ -12,6 +12,7 @@ import { ViewModule } from '../view/view.module';
 import { MemberModule } from '../member/member.module';
 import { LikeModule } from '../like/like.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { RefundModule } from '../refund/refund.module';
 import { NotificationModule } from '../notification/notification.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { NotificationModule } from '../notification/notification.module';
 		LikeModule,
 		NotificationModule,
 		AuditLogModule,
+		RefundModule,
 	],
 	providers: [EventResolver, EventService],
 	exports: [EventService],

@@ -287,3 +287,32 @@ Backend only. Decisions: DECISIONS #45 to #51.
 | `npx jest apps` (307 tests, 18 suites; new: the hold race of two members for one seat, release on partial failure, hold expiry and re-hold, the 8 seat limit, non-ACTIVE members and closed events, commission tiers and override, server-side pricing, payment SUCCESS, FAILURE and idempotency, the HOLD_EXPIRED rollback with refund, ticket issuing failure undo, general-admission checkout, batch expiry and the seat sweep, ticket filters and owner-only access, the venue layout lock, env validation) | pass |
 | GraphQL schema built offline from the three resolvers | pass: new operations, `CheckoutInput`, `PaymentSimulation` present |
 | Live check against a dev database, app start with the real DI graph | **not run** (no MongoDB used; the race and payment tests run on an in-memory model, see N19) |
+
+## 15. Check-in, refunds, event cancellation, sales
+
+Backend only. Decisions: DECISIONS #52 to #57. Closes N20.
+
+**Operations**
+- `checkInTicket(qrToken, eventId?)` (replaces the `ticketCode` argument) and `checkInPreview(qrToken, eventId?)`: ORGANIZER (ACTIVE) or ADMIN, both return `CheckInResult { ticket, seat, buyerName, ticketTypeName, ticketStatus }` (#52, #53)
+- `getRefundQuote(orderId)` returns `RefundQuote { deadline, refundable, refundableAmount, venueTimezone, currency, reason }`; `requestRefund(orderId, reason?)` returns the `Order`; both buyer only (#54, #55)
+- `refundOrderByAdmin(input: AdminRefundInput { orderId, reason })` returns the `Order`, audited (#55)
+- `retryEventRefundsByAdmin(eventId)` returns `RefundSummary { eventId, refundedCount, failedCount, totalCount, failedOrderIds }` (#56)
+- `cancelEventByAdmin` now runs the refund hook (`refundOrdersForCancelledEvent`, in `RefundService`); its return type is unchanged
+- Organizer only: `getEventSales(eventId)` (`EventSales { ticketTypes[ { ticketsSold, revenue, commission, netPayout } ] }`, every ticket type listed), `getEventAttendees(input: AttendeesInquiry { eventId, page, limit, ticketStatus? })` (`Attendees`), `getMyEarnings` (`MyEarnings { earnings[] }`, one entry per currency, with `refundedAmount`) (#57)
+
+**Schema and DTO**: new `Refund` model (collection `refunds`, unique `orderId`); `Order.refundedAt`; enums `RefundStatus`, `RefundSource`, `AuditAction.ORDER_REFUNDED_BY_ADMIN` and `EVENT_REFUNDS_PROCESSED`, `AuditTargetType.ORDER`, `NotificationType.REFUND_COMPLETED` and `ORDER_REFUNDED`. New DTOs under `libs/dto/refund`, `libs/dto/sales` and `libs/dto/ticket/check-in.ts`
+**Message constants**: `QR_INVALID`, `TICKET_WRONG_EVENT`, `TICKET_WRONG_ORGANIZER`, `TICKET_ALREADY_USED`, `TICKET_REFUNDED`, `TICKET_NOT_VALID`, `EVENT_NOT_OPEN_FOR_CHECKIN`, `ORDER_NOT_REFUNDABLE`, `REFUND_DEADLINE_PASSED`, `REFUND_TICKET_CHECKED_IN`, `REFUND_REASON_REQUIRED`, `REFUND_FAILED`, `REFUND_IN_PROGRESS`, `EVENT_NOT_CANCELLED`
+
+**Files added**: `components/refund/` (service, resolver, module, `refund.service.spec.ts`), `components/sales/` (service, resolver, module, spec), `libs/refund-policy.ts` (+ spec), `libs/schemas/Refund.model.ts`, `libs/dto/refund/`, `libs/dto/sales/`, `libs/dto/ticket/check-in.ts`
+**Files edited**: `libs/qr-token.ts` (`buildQrToken`, `parseQrToken`), `ticket.service.ts` / `.resolver.ts` / `.module.ts` / spec, `order.service.ts` (token format, `addSold` after payment and its undo), `payment.service.ts` (`refundOrder`), `seat.service.ts` (`releaseSoldSeats`), `ticket-type.service.ts` (`addSold`), `event.service.ts` / `.module.ts` / spec (refund hook), `components.module.ts`, `seat-flow.spec.ts`, the enums, `Order.model.ts`, `test/fake-model.ts` (now supports `sort`, `limit` and ObjectId comparison)
+
+**Tests added**: signature (forged, garbled, missing, unsigned, wrong stored token, no database call), double scan (also in parallel), wrong event, wrong organizer, closed event, preview changes nothing; refund deadline in Seoul and Los Angeles at the same instant, to the millisecond, DST and the day boundary; idempotent refund and two parallel requests; refund after check-in (also a scan between check and flip); admin override with audit; cancel with a partial failure and a re-run, 120 orders over several batches, resume after a dead run, an order owned by another run; `soldQuantity` on sale, rollback, refund; sales owner check, commission and net payout, per-currency earnings
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (360 tests, 21 suites) | pass |
+| GraphQL schema built offline from the refund, sales, ticket and order resolvers | pass: all new operations present |
+| Live check against a dev database, app start with the real DI graph | **not run** (in-memory model only, see N19, N23) |
+

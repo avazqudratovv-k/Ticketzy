@@ -40,8 +40,12 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N17 | Editing ticket types of an APPROVED event does not send it back to review | known gap in #36 |
 | N18 | Data update before the next deploy: existing orders with `orderStatus: 'PENDING'` become `PENDING_PAYMENT` (or EXPIRED), and they need `subtotal`, `commissionRate`, `commissionAmount` (required now; `subtotal` = `totalAmount`, rate 10, amount computed). Existing tickets have no `qrToken` (required): backfill with `signQrToken(_id)` | the Order and Ticket schemas changed (DECISIONS #46, #49) |
 | N19 | Run the seat-hold race against a real MongoDB (two parallel `holdSeats` for one seat, two parallel `payOrder`); the unit tests use an in-memory model with the same atomic semantics | mocks cannot prove the real query operators |
-| N20 | Gate scanning should verify `qrToken` (`verifyQrToken`), not only `ticketCode`; `soldQuantity` of RESERVED ticket types is not updated when seats are sold | not built |
+| N20 | ~~Gate scanning and `soldQuantity`~~ done, see COMPLETED_TASKS section 15 and DECISIONS #52, #53, #57 | done |
 | N21 | The `Venue` layout lock is two steps (check, then update) and is skipped when `venueLayout` is absent; decide whether to compare layouts instead of refusing on presence | DECISIONS #51 |
+| N22 | Real refunds need a real provider: `MockPaymentProvider.refund` does nothing. When one is chosen, `PaymentService.refundOrder` already claims the payment and calls the provider once; check partial refunds and provider webhooks | DECISIONS #54 |
+| N23 | Run the refund races against a real MongoDB (two parallel `requestRefund`, a refund against a scan, the unique `orderId` index on `refunds`, cancel with a re-run); the tests use the in-memory model | like N19 |
+| N24 | Schedule a retry for FAILED refunds of a cancelled event (the batch app could call the same loop), and show admins which orders failed; today `retryEventRefundsByAdmin` is manual | DECISIONS #56 |
+| N25 | Existing tickets have the old bare-HMAC `qrToken` and cannot be scanned; re-issue them if any real data exists. The scanner client must send `qrToken` (and optionally `eventId`) instead of `ticketCode` | DECISIONS #52 |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)

@@ -64,6 +64,22 @@ export enum Message {
 	CHECKOUT_RESERVED_NEEDS_SEATS = 'A reserved-seating checkout needs seat ids and no ticket quantities!',
 	CHECKOUT_GENERAL_NEEDS_ITEMS = 'A general-admission checkout needs ticket quantities and no seat ids!',
 	ORDER_NOT_PAYABLE = 'This order can no longer be paid!',
+
+	QR_INVALID = 'This QR code is not valid!',
+	TICKET_WRONG_EVENT = 'This ticket is for another event!',
+	TICKET_WRONG_ORGANIZER = 'This ticket belongs to an event of another organizer!',
+	TICKET_ALREADY_USED = 'This ticket was already checked in!',
+	TICKET_REFUNDED = 'This ticket was refunded!',
+	TICKET_NOT_VALID = 'This ticket is not valid!',
+	EVENT_NOT_OPEN_FOR_CHECKIN = 'Check-in is only possible for an approved event!',
+
+	ORDER_NOT_REFUNDABLE = 'Only a paid order can be refunded!',
+	REFUND_DEADLINE_PASSED = 'The refund deadline of this order has passed!',
+	REFUND_TICKET_CHECKED_IN = 'An order with a checked-in ticket cannot be refunded!',
+	REFUND_REASON_REQUIRED = 'A reason is required to refund an order as an admin!',
+	REFUND_FAILED = 'The refund failed, nothing was changed. Please try again!',
+	REFUND_IN_PROGRESS = 'This order is being refunded right now!',
+	EVENT_NOT_CANCELLED = 'Only the orders of a cancelled event can be refunded this way!',
 }
 
 export enum Direction {

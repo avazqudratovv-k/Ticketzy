@@ -1,7 +1,11 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ObjectId } from 'bson';
+import { FakeModel } from '../../../test/fake-model';
 import { TicketService } from './ticket.service';
-import { TicketTimeFilter } from '../../libs/enums/ticket.enum';
+import { TicketStatus, TicketTimeFilter } from '../../libs/enums/ticket.enum';
+import { EventStatus } from '../../libs/enums/event.enum';
+import { Message } from '../../libs/enums/common.enum';
+import { buildQrToken, signQrToken } from '../../libs/qr-token';
 import { MemberType } from '../../libs/enums/member.enum';
 
 const ME = new ObjectId();
@@ -16,7 +20,7 @@ describe('TicketService', () => {
 	beforeEach(() => {
 		ticketModel = { aggregate: jest.fn().mockReturnValue(query([{ list: [], metaCounter: [] }])), findOne: jest.fn(), findOneAndUpdate: jest.fn() };
 		eventModel = { findOne: jest.fn() };
-		service = new TicketService(ticketModel, eventModel);
+		service = new TicketService(ticketModel, eventModel, {} as any, {} as any, {} as any);
 	});
 
 	const stages = () => ticketModel.aggregate.mock.calls[0][0];
@@ -63,13 +67,128 @@ describe('TicketService', () => {
 		});
 	});
 
-	it('does not hand the qrToken to the organizer who scans the ticket', async () => {
-		ticketModel.findOne.mockReturnValue(query({ _id: 't1', eventId: 'e1' }));
-		eventModel.findOne.mockReturnValue(query({ _id: 'e1' }));
-		ticketModel.findOneAndUpdate.mockReturnValue(query({ _id: 't1' }));
+});
 
-		await service.checkInTicket('org' as any, MemberType.ORGANIZER, 'CODE');
+describe('TicketService check-in', () => {
+	const ORG = new ObjectId();
+	const OTHER_ORG = new ObjectId();
+	const ADMIN = new ObjectId();
+	const BUYER = new ObjectId();
+	const EVENT = new ObjectId();
+	const OTHER_EVENT = new ObjectId();
+	const TYPE = new ObjectId();
+	const SEAT = new ObjectId();
+	const TICKET_ID = new ObjectId();
 
-		expect(ticketModel.findOneAndUpdate.mock.calls[0][2].projection).toEqual({ qrToken: 0 });
+	let tickets: FakeModel;
+	let events: FakeModel;
+	let service: TicketService;
+
+	beforeAll(() => {
+		process.env.QR_SECRET = 'test-qr-secret';
+	});
+
+	beforeEach(() => {
+		tickets = new FakeModel([
+			{ _id: TICKET_ID, ticketCode: 'CODE1', ticketStatus: TicketStatus.VALID, qrToken: buildQrToken(TICKET_ID), eventId: EVENT, ownerId: BUYER, ticketTypeId: TYPE, seatId: SEAT },
+		]);
+		events = new FakeModel([
+			{ _id: EVENT, organizerId: ORG, eventStatus: EventStatus.APPROVED },
+			{ _id: OTHER_EVENT, organizerId: OTHER_ORG, eventStatus: EventStatus.APPROVED },
+		]);
+		const members = new FakeModel([{ _id: BUYER, memberFullName: 'Ada Lovelace', memberNick: 'ada' }]);
+		const types = new FakeModel([{ _id: TYPE, ticketTypeName: 'VIP' }]);
+		const seats = new FakeModel([{ _id: SEAT, sectionKey: 'A', row: 3, number: 7 }]);
+		service = new TicketService(tickets as any, events as any, members as any, types as any, seats as any);
+	});
+
+	const token = () => tickets.docs[0].qrToken;
+	const scan = (qr = token(), member: any = ORG, type = MemberType.ORGANIZER, eventId?: any) =>
+		service.checkInTicket(member, type, qr, eventId);
+	const rejects = async (promise: Promise<any>, message: Message) => {
+		await expect(promise).rejects.toBeInstanceOf(BadRequestException);
+		await expect(promise).rejects.toThrow(message);
+	};
+
+	describe('signature', () => {
+		it('rejects a forged or garbled token before any database lookup', async () => {
+			const findOne = jest.spyOn(tickets, 'findOne');
+			const forged = `${TICKET_ID}.${'0'.repeat(64)}`;
+			const wrongSecretOfOtherTicket = `${TICKET_ID}.${signQrToken(new ObjectId())}`;
+
+			for (const bad of [forged, wrongSecretOfOtherTicket, 'garbage', '', `${TICKET_ID}`, signQrToken(TICKET_ID), null as any]) {
+				await rejects(scan(bad), Message.QR_INVALID);
+				await rejects(service.checkInPreview(ORG as any, MemberType.ORGANIZER, bad), Message.QR_INVALID);
+			}
+			expect(findOne).not.toHaveBeenCalled();
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+		});
+
+		it('rejects a genuine signature whose ticket does not exist or whose stored token differs', async () => {
+			await rejects(scan(buildQrToken(new ObjectId())), Message.QR_INVALID);
+			tickets.docs[0].qrToken = 'something-else';
+			await rejects(scan(buildQrToken(TICKET_ID)), Message.QR_INVALID);
+		});
+	});
+
+	describe('checkInTicket', () => {
+		it('marks the ticket USED with checkedInAt and returns ticket, seat, buyer name and status without the qrToken', async () => {
+			const result: any = await scan();
+
+			expect(result.ticketStatus).toBe(TicketStatus.USED);
+			expect(result.buyerName).toBe('Ada Lovelace');
+			expect(result.ticketTypeName).toBe('VIP');
+			expect(result.seat).toEqual({ sectionKey: 'A', row: 3, number: 7 });
+			expect(result.ticket.checkedInAt).toBeInstanceOf(Date);
+			expect(tickets.docs[0]).toMatchObject({ ticketStatus: TicketStatus.USED });
+			expect(tickets.docs[0].checkedInAt).toBeInstanceOf(Date);
+		});
+
+		it('a double scan cannot succeed twice, also when both scans pass validation together', async () => {
+			const results = await Promise.allSettled([scan(), scan()]);
+			expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+			const failure: any = results.find((r) => r.status === 'rejected');
+			expect(failure.reason.message).toBe(Message.TICKET_ALREADY_USED);
+
+			await rejects(scan(), Message.TICKET_ALREADY_USED);
+		});
+
+		it('a REFUNDED ticket is rejected', async () => {
+			tickets.docs[0].ticketStatus = TicketStatus.REFUNDED;
+			await rejects(scan(), Message.TICKET_REFUNDED);
+		});
+
+		it('a ticket of another event is rejected when the gate is set to an event', async () => {
+			await rejects(scan(token(), ORG, MemberType.ORGANIZER, OTHER_EVENT), Message.TICKET_WRONG_EVENT);
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+			await expect(scan(token(), ORG, MemberType.ORGANIZER, EVENT)).resolves.toBeDefined();
+		});
+
+		it('a ticket of another organizer is rejected, an admin may scan any', async () => {
+			await rejects(scan(token(), OTHER_ORG), Message.TICKET_WRONG_ORGANIZER);
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+			await expect(scan(token(), ADMIN, MemberType.ADMIN)).resolves.toBeDefined();
+		});
+
+		it.each([EventStatus.CANCELLED, EventStatus.ENDED, EventStatus.PENDING])('is rejected while the event is %s', async (eventStatus) => {
+			events.docs[0].eventStatus = eventStatus;
+			await rejects(scan(), Message.EVENT_NOT_OPEN_FOR_CHECKIN);
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+		});
+	});
+
+	describe('checkInPreview', () => {
+		it('validates without changing anything and applies the same rules', async () => {
+			const result: any = await service.checkInPreview(ORG as any, MemberType.ORGANIZER, token());
+			expect(result.ticketStatus).toBe(TicketStatus.VALID);
+			expect(result.buyerName).toBe('Ada Lovelace');
+			expect(result.ticket.qrToken).toBeUndefined();
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+			expect(tickets.docs[0].checkedInAt).toBeUndefined();
+
+			await expect(service.checkInPreview(OTHER_ORG as any, MemberType.ORGANIZER, token())).rejects.toThrow(Message.TICKET_WRONG_ORGANIZER);
+			await scan();
+			await expect(service.checkInPreview(ORG as any, MemberType.ORGANIZER, token())).rejects.toThrow(Message.TICKET_ALREADY_USED);
+		});
 	});
 });

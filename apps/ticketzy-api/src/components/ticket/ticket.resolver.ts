@@ -3,6 +3,7 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { TicketService } from './ticket.service';
 import { Ticket, Tickets } from '../../libs/dto/ticket/ticket';
+import { CheckInResult } from '../../libs/dto/ticket/check-in';
 import { TicketsInquiry } from '../../libs/dto/ticket/ticket.input';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -37,13 +38,28 @@ export class TicketResolver {
 
 	@Roles(MemberType.ORGANIZER, MemberType.ADMIN)
 	@UseGuards(RolesGuard, ActiveOrganizerGuard)
-	@Mutation(() => Ticket)
+	@Mutation(() => CheckInResult)
 	public async checkInTicket(
-		@Args('ticketCode') ticketCode: string,
+		@Args('qrToken') qrToken: string,
+		@Args('eventId', { type: () => String, nullable: true }) eventId: string | undefined,
 		@AuthMember('_id') memberId: ObjectId,
 		@AuthMember('memberType') memberType: MemberType,
-	): Promise<Ticket> {
+	): Promise<CheckInResult> {
 		this.logger.log('Mutation: checkInTicket');
-		return await this.ticketService.checkInTicket(memberId, memberType, ticketCode);
+		return await this.ticketService.checkInTicket(memberId, memberType, qrToken, eventId ? shapeIntoMongoObjectId(eventId) : undefined);
+	}
+
+	/** validates a scan like checkInTicket does, without changing anything */
+	@Roles(MemberType.ORGANIZER, MemberType.ADMIN)
+	@UseGuards(RolesGuard, ActiveOrganizerGuard)
+	@Query(() => CheckInResult)
+	public async checkInPreview(
+		@Args('qrToken') qrToken: string,
+		@Args('eventId', { type: () => String, nullable: true }) eventId: string | undefined,
+		@AuthMember('_id') memberId: ObjectId,
+		@AuthMember('memberType') memberType: MemberType,
+	): Promise<CheckInResult> {
+		this.logger.log('Query: checkInPreview');
+		return await this.ticketService.checkInPreview(memberId, memberType, qrToken, eventId ? shapeIntoMongoObjectId(eventId) : undefined);
 	}
 }

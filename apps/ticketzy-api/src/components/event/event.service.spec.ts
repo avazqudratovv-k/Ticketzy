@@ -138,6 +138,7 @@ describe('EventService', () => {
 	let notificationService: any;
 	let auditLogService: any;
 	let eventSeatModel: any;
+	let refundService: any;
 	let service: EventService;
 
 	beforeEach(() => {
@@ -156,6 +157,9 @@ describe('EventService', () => {
 		viewService = { recordView: jest.fn().mockResolvedValue(null) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
 		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
+		refundService = {
+			refundOrdersForCancelledEvent: jest.fn().mockResolvedValue({ refundedCount: 2, failedCount: 0, totalCount: 2, failedOrderIds: [] }),
+		};
 		service = new EventService(
 			eventModel,
 			venueModel,
@@ -167,6 +171,7 @@ describe('EventService', () => {
 			notificationService,
 			auditLogService,
 			eventSeatModel,
+			refundService,
 		);
 	});
 
@@ -349,7 +354,17 @@ describe('EventService', () => {
 
 			await service.cancelEventByAdmin('admin1' as any, { eventId: 'e1', reason: 'Venue closed' } as any);
 
-			expect(hook).toHaveBeenCalledWith(expect.objectContaining({ _id: 'e1', eventStatus: EventStatus.CANCELLED }));
+			expect(hook).toHaveBeenCalledWith(expect.objectContaining({ _id: 'e1', eventStatus: EventStatus.CANCELLED }), 'admin1');
+			expect(refundService.refundOrdersForCancelledEvent).toHaveBeenCalledWith('admin1', expect.objectContaining({ _id: 'e1' }));
+		});
+
+		it('a refund run that throws never fails the cancellation', async () => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.CANCELLED })));
+			refundService.refundOrdersForCancelledEvent.mockRejectedValue(new Error('db down'));
+
+			const result = await service.cancelEventByAdmin('admin1' as any, { eventId: 'e1', reason: 'Venue closed' } as any);
+
+			expect(result.eventStatus).toBe(EventStatus.CANCELLED);
 		});
 
 		it('a PENDING event cannot be cancelled', async () => {

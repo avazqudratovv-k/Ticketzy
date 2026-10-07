@@ -78,3 +78,22 @@ export enum TicketTimeFilter {
 registerEnumType(TicketTimeFilter, {
 	name: 'TicketTimeFilter',
 });
+
+export enum RefundStatus {
+	PENDING = 'PENDING',
+	COMPLETED = 'COMPLETED',
+	FAILED = 'FAILED',
+}
+registerEnumType(RefundStatus, {
+	name: 'RefundStatus',
+});
+
+/** who started the refund: the buyer, an admin override, or the cancellation of the event */
+export enum RefundSource {
+	BUYER = 'BUYER',
+	ADMIN = 'ADMIN',
+	EVENT_CANCELLED = 'EVENT_CANCELLED',
+}
+registerEnumType(RefundSource, {
+	name: 'RefundSource',
+});

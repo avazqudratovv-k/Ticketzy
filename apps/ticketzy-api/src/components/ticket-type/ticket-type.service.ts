@@ -140,6 +140,36 @@ export class TicketTypeService {
 		return result;
 	}
 
+	/**
+	 * Reserved-seating tickets are counted when their seats are sold (holds never count), so soldQuantity stays right for
+	 * analytics. One conditional update per ticket type; if one fails, the counts already added are taken back.
+	 * Returns what was added, so the caller can undo exactly that.
+	 */
+	public async addSold(counts: { ticketTypeId: ObjectId; quantity: number }[]): Promise<{ ticketTypeId: ObjectId; quantity: number }[]> {
+		const added: { ticketTypeId: ObjectId; quantity: number }[] = [];
+		try {
+			for (const count of counts) {
+				const result = await this.ticketTypeModel
+					.findOneAndUpdate({ _id: count.ticketTypeId }, { $inc: { soldQuantity: count.quantity } }, { new: true })
+					.exec();
+				if (!result) continue;
+				added.push(count);
+				if (result.soldQuantity >= result.totalQuantity) {
+					await this.ticketTypeModel
+						.updateOne(
+							{ _id: count.ticketTypeId, ticketTypeStatus: TicketTypeStatus.ACTIVE, $expr: { $gte: ['$soldQuantity', '$totalQuantity'] } },
+							{ ticketTypeStatus: TicketTypeStatus.SOLD_OUT },
+						)
+						.exec();
+				}
+			}
+			return added;
+		} catch (err) {
+			await Promise.all(added.map((count) => this.release(count.ticketTypeId, count.quantity)));
+			throw err;
+		}
+	}
+
 	/** gives reserved stock back (cancelled or expired order) */
 	public async release(ticketTypeId: ObjectId, quantity: number): Promise<void> {
 		const result = await this.ticketTypeModel

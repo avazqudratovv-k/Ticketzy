@@ -7,6 +7,8 @@ import { SeatModule } from './seat/seat.module';
 import { PaymentModule } from './payment/payment.module';
 import { OrderModule } from './order/order.module';
 import { TicketModule } from './ticket/ticket.module';
+import { RefundModule } from './refund/refund.module';
+import { SalesModule } from './sales/sales.module';
 import { NoticeModule } from './notice/notice.module';
 import { NotificationModule } from './notification/notification.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -28,6 +30,8 @@ import { FollowModule } from './follow/follow.module';
 		PaymentModule,
 		OrderModule,
 		TicketModule,
+		RefundModule,
+		SalesModule,
 		NoticeModule,
 		NotificationModule,
 		AuditLogModule,

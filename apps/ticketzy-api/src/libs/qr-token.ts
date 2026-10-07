@@ -15,3 +15,14 @@ export const verifyQrToken = (ticketId: unknown, token: string): boolean => {
 	const given = Buffer.from(String(token ?? ''));
 	return expected.length === given.length && timingSafeEqual(expected, given);
 };
+
+/** what the QR code carries: `<ticketId>.<signature>`, so a scan can be verified before any database lookup */
+export const buildQrToken = (ticketId: unknown): string => `${String(ticketId)}.${signQrToken(ticketId)}`;
+
+/** the ticket id of a well-formed token whose signature is genuine, otherwise null; touches no database */
+export const parseQrToken = (token: unknown): string | null => {
+	if (typeof token !== 'string') return null;
+	const match = /^([a-f0-9]{24})\.([a-f0-9]{64})$/.exec(token.trim());
+	if (!match) return null;
+	return verifyQrToken(match[1], match[2]) ? match[1] : null;
+};
