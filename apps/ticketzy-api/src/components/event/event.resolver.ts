@@ -10,6 +10,7 @@ import {
 	EventsInquiry,
 	OrganizerEventsInquiry,
 } from '../../libs/dto/event/event.input';
+import { EventSeatMap } from '../../libs/dto/event/event-seat';
 import { EventUpdate } from '../../libs/dto/event/event.update';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -93,6 +94,13 @@ export class EventResolver {
 		return await this.eventService.getEvents(memberId, input);
 	}
 
+	@UseGuards(WithoutGuard)
+	@Query(() => EventSeatMap)
+	public async getEventSeatMap(@Args('eventId') input: string): Promise<EventSeatMap> {
+		this.logger.log('Query: getEventSeatMap');
+		return await this.eventService.getEventSeatMap(shapeIntoMongoObjectId(input));
+	}
+
 	@UseGuards(AuthGuard)
 	@Query((returns) => Events)
 	public async getFavorites(
@@ -114,7 +122,7 @@ export class EventResolver {
 	}
 
 	@Roles(MemberType.ORGANIZER)
-	@UseGuards(RolesGuard)
+	@UseGuards(RolesGuard, ActiveOrganizerGuard)
 	@Query((returns) => Events)
 	public async getMyEvents(
 		@Args('input') input: OrganizerEventsInquiry,

@@ -19,6 +19,9 @@ export class TicketType {
 	@Field(() => TicketCurrency)
 	ticketCurrency: TicketCurrency;
 
+	@Field(() => String, { nullable: true })
+	tierKey?: string;
+
 	@Field(() => Int)
 	totalQuantity: number;
 

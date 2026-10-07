@@ -19,7 +19,7 @@ describe('TicketTypeService.reserve', () => {
 		};
 		eventModel = { updateOne: jest.fn().mockReturnValue(query({})) };
 		memberModel = { exists: jest.fn() };
-		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel);
+		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel, {} as any, {} as any);
 	});
 
 	it('reserves with ONE conditional update that checks stock, status and maxPerOrder', async () => {
@@ -82,7 +82,7 @@ describe('TicketTypeService.getTicketTypes hides ticket types of organizers that
 		ticketTypeModel = { find: jest.fn().mockReturnValue({ sort: () => ({ exec: jest.fn().mockResolvedValue([{ _id: 't1' }]) }) }) };
 		eventModel = { findById: jest.fn().mockReturnValue(lean({ organizerId: 'o1' })) };
 		memberModel = { exists: jest.fn() };
-		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel);
+		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel, {} as any, {} as any);
 	});
 
 	it('returns the ticket types when the organizer is ACTIVE', async () => {
@@ -107,3 +107,97 @@ describe('TicketTypeService.getTicketTypes hides ticket types of organizers that
 	});
 });
 
+
+describe('TicketTypeService quantity of RESERVED events', () => {
+	const leanQuery = (value: any) => ({ lean: () => query(value) });
+	const section = (over: any = {}) => ({ key: 'A', kind: 'SEATED', rows: 2, seatsPerRow: 5, tierKey: 'vip', ...over });
+	const layout = { sections: [section(), section({ key: 'B', rows: 1, seatsPerRow: 4 }), section({ key: 'C', tierKey: 'regular' })] };
+	const input = (over: any = {}): any => ({
+		eventId: '64b7f0f2a1b2c3d4e5f60718',
+		ticketTypeName: 'VIP',
+		ticketPrice: 100,
+		ticketCurrency: 'USD',
+		maxPerOrder: 4,
+		...over,
+	});
+
+	let ticketTypeModel: any;
+	let eventModel: any;
+	let venueModel: any;
+	let eventSeatModel: any;
+	let service: TicketTypeService;
+
+	const withEvent = (over: any = {}) =>
+		eventModel.findOne.mockReturnValue(leanQuery({ _id: 'e1', venueId: 'v1', organizerId: 'm1', seatingType: 'RESERVED', ...over }));
+
+	beforeEach(() => {
+		ticketTypeModel = {
+			create: jest.fn().mockImplementation(async (doc) => doc),
+			findById: jest.fn(),
+			findOneAndUpdate: jest.fn().mockReturnValue(query({ _id: 't1', eventId: 'e1' })),
+			aggregate: jest.fn().mockReturnValue(query([])),
+		};
+		eventModel = { findOne: jest.fn(), updateOne: jest.fn().mockReturnValue(query({})) };
+		venueModel = { findById: jest.fn().mockReturnValue(leanQuery({ _id: 'v1', venueLayout: layout })) };
+		eventSeatModel = { exists: jest.fn().mockResolvedValue(null) };
+		withEvent();
+		service = new TicketTypeService(ticketTypeModel, eventModel, { exists: jest.fn() } as any, venueModel, eventSeatModel);
+	});
+
+	it('computes totalQuantity from the seats of every section of the tier', async () => {
+		await service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'vip' }));
+		expect(ticketTypeModel.create.mock.calls[0][0]).toMatchObject({ tierKey: 'vip', totalQuantity: 14 });
+	});
+
+	it('refuses a client-set quantity', async () => {
+		await expect(
+			service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'vip', totalQuantity: 500 })),
+		).rejects.toThrow(Message.TICKET_TYPE_QUANTITY_FROM_SEATS);
+		expect(ticketTypeModel.create).not.toHaveBeenCalled();
+	});
+
+	it('needs a tier key that matches a seated section', async () => {
+		await expect(service.createTicketType('m1' as any, 'ORGANIZER' as any, input())).rejects.toThrow(Message.TICKET_TYPE_TIER_KEY_REQUIRED);
+		await expect(service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'nope' }))).rejects.toThrow(
+			Message.TICKET_TYPE_TIER_KEY_REQUIRED,
+		);
+		expect(ticketTypeModel.create).not.toHaveBeenCalled();
+	});
+
+	it('GENERAL events keep the client quantity, which is required', async () => {
+		withEvent({ seatingType: 'GENERAL' });
+		await service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ totalQuantity: 80 }));
+		expect(ticketTypeModel.create.mock.calls[0][0].totalQuantity).toBe(80);
+		await expect(service.createTicketType('m1' as any, 'ORGANIZER' as any, input())).rejects.toThrow(Message.TICKET_TYPE_QUANTITY_REQUIRED);
+	});
+
+	describe('update', () => {
+		beforeEach(() => ticketTypeModel.findById.mockReturnValue(leanQuery({ _id: 't1', eventId: 'e1', tierKey: 'vip' })));
+
+		it('refuses a client-set quantity', async () => {
+			await expect(
+				service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', totalQuantity: 5 } as any),
+			).rejects.toThrow(Message.TICKET_TYPE_QUANTITY_FROM_SEATS);
+			expect(ticketTypeModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('recomputes the quantity when the tier changes', async () => {
+			await service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', tierKey: 'regular' } as any);
+			const [filter, update] = ticketTypeModel.findOneAndUpdate.mock.calls[0];
+			expect(update).toMatchObject({ tierKey: 'regular', totalQuantity: 10 });
+			expect(filter.soldQuantity).toEqual({ $lte: 10 });
+		});
+
+		it('locks the tier once the seats of the event exist', async () => {
+			eventSeatModel.exists.mockResolvedValue({ _id: 's1' });
+			await expect(
+				service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', tierKey: 'regular' } as any),
+			).rejects.toThrow(Message.TICKET_TYPE_TIER_LOCKED);
+		});
+
+		it('still lets the price change', async () => {
+			await service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketPrice: 120 } as any);
+			expect(ticketTypeModel.findOneAndUpdate.mock.calls[0][1]).toEqual({ _id: 't1', ticketPrice: 120 });
+		});
+	});
+});

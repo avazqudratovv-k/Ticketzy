@@ -1,7 +1,49 @@
 import { Field, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
-import { VenueStatus, VenueType } from '../../enums/event.enum';
+import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
 import { TotalCounter } from '../member/member';
+
+@ObjectType()
+export class VenueSection {
+	@Field(() => String)
+	key: string;
+
+	@Field(() => String)
+	name: string;
+
+	@Field(() => SectionKind)
+	kind: SectionKind;
+
+	@Field(() => Int)
+	rows: number;
+
+	@Field(() => Int)
+	seatsPerRow: number;
+
+	@Field(() => Int, { nullable: true })
+	capacity?: number;
+
+	@Field(() => Number)
+	x: number;
+
+	@Field(() => Number)
+	y: number;
+
+	@Field(() => Number)
+	rotation: number;
+
+	@Field(() => SectionSpacing)
+	spacing: SectionSpacing;
+
+	@Field(() => String, { nullable: true })
+	tierKey?: string;
+}
+
+@ObjectType()
+export class VenueLayout {
+	@Field(() => [VenueSection])
+	sections: VenueSection[];
+}
 
 @ObjectType()
 export class Venue {
@@ -23,7 +65,13 @@ export class Venue {
 	@Field(() => [Number], { nullable: true })
 	venueCoordinates?: number[];
 
-	@Field(() => Int)
+	@Field(() => String)
+	venueTimezone: string;
+
+	@Field(() => VenueLayout, { nullable: true })
+	venueLayout?: VenueLayout;
+
+	@Field(() => Int, { description: 'computed from the layout' })
 	venueCapacity: number;
 
 	@Field(() => [String])

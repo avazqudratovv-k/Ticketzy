@@ -81,3 +81,29 @@ export enum VenueStatus {
 registerEnumType(VenueStatus, {
 	name: 'VenueStatus',
 });
+
+export enum SectionKind {
+	SEATED = 'SEATED',
+	STANDING = 'STANDING',
+}
+registerEnumType(SectionKind, {
+	name: 'SectionKind',
+});
+
+export enum SectionSpacing {
+	COMPACT = 'COMPACT',
+	NORMAL = 'NORMAL',
+	WIDE = 'WIDE',
+}
+registerEnumType(SectionSpacing, {
+	name: 'SectionSpacing',
+});
+
+export enum SeatStatus {
+	AVAILABLE = 'AVAILABLE',
+	HELD = 'HELD',
+	SOLD = 'SOLD',
+}
+registerEnumType(SeatStatus, {
+	name: 'SeatStatus',
+});

@@ -236,3 +236,27 @@ Backend only. Decisions: DECISIONS #35 to #40.
 | GraphQL schema generated offline | pass: new operations and fields present, `getOrganizerEvents` and `getAllEventsByAdmin` gone |
 | Live check against a dev database | **not run** (mock tests only) |
 
+## 13. Venue seat layout and seats
+
+Backend only. Decisions: DECISIONS #41 to #44.
+
+**Operations**
+- `getMyEvents` now uses `RolesGuard` + `ActiveOrganizerGuard` (suspended organizers are locked out)
+- `getEventSeatMap(eventId)` (public): layout, timezone and the HELD (hold in the future) and SOLD seats of an APPROVED RESERVED event, without `heldBy`
+- `approveEventByAdmin` generates the `EventSeat` documents of a RESERVED event first (see below), then changes the status
+- `submitEventForApproval` checks seated tiers for RESERVED events; GENERAL events need no layout
+- `createVenue` / `updateVenue` take `venueLayout` and `venueTimezone`; `venueCapacity` is no longer an input
+- `createTicketType` / `updateTicketType` take `tierKey`; `totalQuantity` is optional (required for GENERAL, refused for RESERVED where it is computed from the seats)
+
+**Schema and DTO**: `Venue.venueTimezone`, `Venue.venueLayout`; `TicketType.tierKey` (partial unique index `(eventId, tierKey)`); new `EventSeat` schema; enums `SectionKind`, `SectionSpacing`, `SeatStatus`; DTOs `VenueSection(Input)`, `VenueLayout(Input)`, `EventSeatMap`, `TakenSeat`
+**Message constants**: `INVALID_VENUE_LAYOUT`, `VENUE_LAYOUT_NO_SECTIONS`, `VENUE_LAYOUT_DUPLICATE_SECTION_KEY`, `VENUE_LAYOUT_BAD_SEAT_GRID`, `VENUE_LAYOUT_CAPACITY_REQUIRED`, `VENUE_LAYOUT_TIER_KEY_REQUIRED`, `INVALID_VENUE_TIMEZONE`, `EVENT_SUBMIT_LAYOUT_REQUIRED`, `SEAT_TIER_MISSING`, `SEAT_TIER_DUPLICATE`, `TICKET_TYPE_TIER_KEY_REQUIRED`, `TICKET_TYPE_QUANTITY_FROM_SEATS`, `TICKET_TYPE_QUANTITY_REQUIRED`, `TICKET_TYPE_TIER_LOCKED`, `SEAT_GENERATION_FAILED`
+
+**Files added**: `libs/venue-layout.ts` (+ spec), `libs/schemas/EventSeat.model.ts`, `libs/dto/event/event-seat.ts`, `components/venue/venue.service.spec.ts`
+**Files edited**: `event.enum.ts`, `common.enum.ts`, `Venue.model.ts`, `TicketType.model.ts`, `dto/venue/*`, `dto/ticket-type/*`, `venue.service.ts`, `ticket-type.service.ts` and module, `event.service.ts`, `event.resolver.ts`, `event.module.ts`, the specs of event and ticket-type
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest apps` (257 tests; new: layout validation, capacity, timezone, venue create/update, seat generation incl. idempotency with an in-memory upsert store and the missing/duplicate tier failures, quantity computed from seats, seat map filter and privacy, submit checks, `getMyEvents` guards) | pass |
+| Live check against a dev database (real unique index, bulkWrite upserts) | **not run** (mock tests only) |

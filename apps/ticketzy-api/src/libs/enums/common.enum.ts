@@ -39,6 +39,22 @@ export enum Message {
 	EVENT_SUBMIT_DATES_IN_PAST = 'The event start and end dates must be in the future to submit it!',
 	EVENT_SUBMIT_VENUE_REQUIRED = 'The event needs an active venue before it can be submitted!',
 	EVENT_SUBMIT_TICKET_TYPE_REQUIRED = 'The event needs at least one ticket type before it can be submitted!',
+
+	INVALID_VENUE_LAYOUT = 'The venue layout is not valid!',
+	VENUE_LAYOUT_NO_SECTIONS = 'The venue layout needs at least one section!',
+	VENUE_LAYOUT_DUPLICATE_SECTION_KEY = 'Section keys in a venue layout must be unique!',
+	VENUE_LAYOUT_BAD_SEAT_GRID = 'Rows and seats per row must be whole numbers between 1 and 100!',
+	VENUE_LAYOUT_CAPACITY_REQUIRED = 'A standing section needs a capacity of at least 1!',
+	VENUE_LAYOUT_TIER_KEY_REQUIRED = 'A seated section needs a tier key!',
+	INVALID_VENUE_TIMEZONE = 'The venue timezone must be a valid IANA timezone!',
+	EVENT_SUBMIT_LAYOUT_REQUIRED = 'A reserved-seating event needs a venue with a seated section before it can be submitted!',
+	SEAT_TIER_MISSING = 'Every seated section needs a ticket type with a matching tier key!',
+	SEAT_TIER_DUPLICATE = 'Only one ticket type of an event can use a tier key!',
+	TICKET_TYPE_TIER_KEY_REQUIRED = 'A ticket type of a reserved-seating event needs a tier key that matches a seated section!',
+	TICKET_TYPE_QUANTITY_FROM_SEATS = 'The quantity of a reserved-seating ticket type is computed from its seats and cannot be set!',
+	TICKET_TYPE_QUANTITY_REQUIRED = 'A total quantity is required for this ticket type!',
+	TICKET_TYPE_TIER_LOCKED = 'The tier key cannot change after the seats of the event were generated!',
+	SEAT_GENERATION_FAILED = 'The seats of this event could not be generated, nothing was changed!',
 }
 
 export enum Direction {

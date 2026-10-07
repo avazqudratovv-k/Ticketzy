@@ -1,9 +1,74 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
-import { IsIn, IsInt, IsNotEmpty, IsOptional, Length, Min } from 'class-validator';
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsNumber, Length, Max, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ObjectId } from 'mongoose';
-import { VenueStatus, VenueType } from '../../enums/event.enum';
+import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
 import { availableVenueSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
+
+@InputType()
+export class VenueSectionInput {
+	@IsNotEmpty()
+	@Length(1, 30)
+	@Field(() => String)
+	key: string;
+
+	@IsNotEmpty()
+	@Length(1, 60)
+	@Field(() => String)
+	name: string;
+
+	@IsNotEmpty()
+	@Field(() => SectionKind)
+	kind: SectionKind;
+
+	@IsInt()
+	@Min(1)
+	@Max(100)
+	@Field(() => Int)
+	rows: number;
+
+	@IsInt()
+	@Min(1)
+	@Max(100)
+	@Field(() => Int)
+	seatsPerRow: number;
+
+	@IsOptional()
+	@IsInt()
+	@Min(1)
+	@Field(() => Int, { nullable: true, description: 'required for STANDING sections' })
+	capacity?: number;
+
+	@IsNumber()
+	@Field(() => Number)
+	x: number;
+
+	@IsNumber()
+	@Field(() => Number)
+	y: number;
+
+	@IsNumber()
+	@Field(() => Number)
+	rotation: number;
+
+	@IsNotEmpty()
+	@Field(() => SectionSpacing)
+	spacing: SectionSpacing;
+
+	@IsOptional()
+	@Length(1, 30)
+	@Field(() => String, { nullable: true, description: 'required for SEATED sections: links to a ticket type' })
+	tierKey?: string;
+}
+
+@InputType()
+export class VenueLayoutInput {
+	@ValidateNested({ each: true })
+	@Type(() => VenueSectionInput)
+	@Field(() => [VenueSectionInput])
+	sections: VenueSectionInput[];
+}
 
 @InputType()
 export class VenueInput {
@@ -30,11 +95,16 @@ export class VenueInput {
 	@Field(() => [Number], { nullable: true, description: '[longitude, latitude]' })
 	venueCoordinates?: number[];
 
+	@IsOptional()
+	@Length(1, 64)
+	@Field(() => String, { nullable: true, description: 'IANA timezone, Asia/Seoul by default' })
+	venueTimezone?: string;
+
 	@IsNotEmpty()
-	@IsInt()
-	@Min(1)
-	@Field(() => Int)
-	venueCapacity: number;
+	@ValidateNested()
+	@Type(() => VenueLayoutInput)
+	@Field(() => VenueLayoutInput, { description: 'the venue capacity is computed from it' })
+	venueLayout: VenueLayoutInput;
 
 	@IsOptional()
 	@Field(() => [String], { nullable: true })
@@ -73,10 +143,15 @@ export class VenueUpdate {
 	venueCoordinates?: number[];
 
 	@IsOptional()
-	@IsInt()
-	@Min(1)
-	@Field(() => Int, { nullable: true })
-	venueCapacity?: number;
+	@Length(1, 64)
+	@Field(() => String, { nullable: true })
+	venueTimezone?: string;
+
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => VenueLayoutInput)
+	@Field(() => VenueLayoutInput, { nullable: true, description: 'the venue capacity is recomputed from it' })
+	venueLayout?: VenueLayoutInput;
 
 	@IsOptional()
 	@Field(() => [String], { nullable: true })

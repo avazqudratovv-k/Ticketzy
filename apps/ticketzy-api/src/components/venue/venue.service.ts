@@ -8,6 +8,7 @@ import { VenueStatus } from '../../libs/enums/event.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { T } from '../../libs/types/common';
 import { escapeRegExp } from '../../libs/config';
+import { VenueLayout, computeLayoutCapacity, getVenueLayoutError, isValidTimezone } from '../../libs/venue-layout';
 
 @Injectable()
 export class VenueService {
@@ -15,9 +16,19 @@ export class VenueService {
 
 	constructor(@InjectModel('Venue') private readonly venueModel: Model<Venue>) {}
 
+	/** throws for an invalid timezone or layout and returns the capacity the layout adds up to */
+	private assertValidLayoutAndTimezone(timezone?: string, layout?: VenueLayout): number | undefined {
+		if (timezone !== undefined && !isValidTimezone(timezone)) throw new BadRequestException(Message.INVALID_VENUE_TIMEZONE);
+		if (!layout) return undefined;
+		const error = getVenueLayoutError(layout);
+		if (error) throw new BadRequestException(error);
+		return computeLayoutCapacity(layout);
+	}
+
 	public async createVenue(input: VenueInput): Promise<Venue> {
+		const venueCapacity = this.assertValidLayoutAndTimezone(input.venueTimezone, input.venueLayout as VenueLayout);
 		try {
-			return await this.venueModel.create(input);
+			return await this.venueModel.create({ ...input, venueCapacity });
 		} catch (err) {
 			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
@@ -32,10 +43,12 @@ export class VenueService {
 
 	/** the creator or an ADMIN can edit */
 	public async updateVenue(memberId: ObjectId, memberType: MemberType, input: VenueUpdate): Promise<Venue> {
+		const venueCapacity = this.assertValidLayoutAndTimezone(input.venueTimezone, input.venueLayout as VenueLayout);
 		const search: T = { _id: input._id, venueStatus: { $ne: VenueStatus.DELETE } };
 		if (memberType !== MemberType.ADMIN) search.memberId = memberId;
 
-		const result = await this.venueModel.findOneAndUpdate(search, input, { new: true }).exec();
+		const update: T = venueCapacity === undefined ? input : { ...input, venueCapacity };
+		const result = await this.venueModel.findOneAndUpdate(search, update, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;
 	}

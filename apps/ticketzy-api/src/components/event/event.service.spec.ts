@@ -5,12 +5,31 @@ import { LikeService } from '../like/like.service';
 import { ViewService } from '../view/view.service';
 import { Message } from '../../libs/enums/common.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
-import { EventStatus, eventTransitions } from '../../libs/enums/event.enum';
+import { EventStatus, SeatStatus, SeatingType, SectionKind, SectionSpacing, eventTransitions } from '../../libs/enums/event.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { NotificationType } from '../../libs/enums/notification.enum';
 
 const exec = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
 const lean = (value: any) => ({ lean: () => exec(value) });
+
+const seatedSection = (over: any = {}) => ({
+	key: 'A',
+	name: 'Floor A',
+	kind: SectionKind.SEATED,
+	rows: 2,
+	seatsPerRow: 3,
+	x: 0,
+	y: 0,
+	rotation: 0,
+	spacing: SectionSpacing.NORMAL,
+	tierKey: 'vip',
+	...over,
+});
+const standingSection = (over: any = {}) => seatedSection({ key: 'S', kind: SectionKind.STANDING, capacity: 50, tierKey: undefined, ...over });
+/** 6 vip seats (A), 4 regular seats (B), one standing section */
+const layout = () => ({
+	sections: [seatedSection(), seatedSection({ key: 'B', rows: 1, seatsPerRow: 4, tierKey: 'regular' }), standingSection()],
+});
 
 const future = (days = 7) => new Date(Date.now() + days * 86400000);
 const draft = (over: any = {}) => ({
@@ -83,6 +102,30 @@ describe('getEventSubmitError', () => {
 	it('requires at least one ticket type', () => {
 		expect(getEventSubmitError(draft(), true, 0)).toBe(Message.EVENT_SUBMIT_TICKET_TYPE_REQUIRED);
 	});
+
+	describe('seated sections of a RESERVED event', () => {
+		const reserved = draft({ seatingType: SeatingType.RESERVED });
+		const check = (event: any, venueLayout: any, tierKeys: string[]) =>
+			getEventSubmitError(event, true, tierKeys.length || 1, new Date(), { venueLayout, tierKeys });
+
+		it('needs a layout with a seated section', () => {
+			expect(check(reserved, undefined, ['vip'])).toBe(Message.EVENT_SUBMIT_LAYOUT_REQUIRED);
+			expect(check(reserved, { sections: [standingSection()] }, ['vip'])).toBe(Message.EVENT_SUBMIT_LAYOUT_REQUIRED);
+		});
+
+		it('needs a ticket type for every seated tier', () => {
+			expect(check(reserved, layout(), ['vip'])).toBe(Message.SEAT_TIER_MISSING);
+			expect(check(reserved, layout(), [])).toBe(Message.SEAT_TIER_MISSING);
+		});
+
+		it('passes when every seated tier has a ticket type, standing sections need none', () => {
+			expect(check(reserved, layout(), ['vip', 'regular'])).toBeNull();
+		});
+
+		it('does not look at the layout of a GENERAL event', () => {
+			expect(getEventSubmitError(draft({ seatingType: SeatingType.GENERAL }), true, 1)).toBeNull();
+		});
+	});
 });
 
 describe('EventService', () => {
@@ -94,18 +137,20 @@ describe('EventService', () => {
 	let viewService: any;
 	let notificationService: any;
 	let auditLogService: any;
+	let eventSeatModel: any;
 	let service: EventService;
 
 	beforeEach(() => {
 		eventModel = {
 			findOne: jest.fn(),
-			findById: jest.fn(),
+			findById: jest.fn().mockReturnValue(lean(null)),
 			findOneAndUpdate: jest.fn(),
 			findOneAndDelete: jest.fn(),
 			aggregate: jest.fn().mockReturnValue(exec([{ list: [], metaCounter: [] }])),
 		};
 		venueModel = { exists: jest.fn().mockResolvedValue({ _id: 'v1' }), findById: jest.fn().mockReturnValue(lean(null)), findOne: jest.fn().mockReturnValue(lean({ _id: 'v1' })) };
-		ticketTypeModel = { countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
+		eventSeatModel = { bulkWrite: jest.fn().mockResolvedValue({}), find: jest.fn() };
+		ticketTypeModel = { find: jest.fn(), bulkWrite: jest.fn().mockResolvedValue({}), countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
 		memberModel = { findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
 		memberService = { getMember: jest.fn().mockResolvedValue({ _id: 'org1' }), memberStatsEditor: jest.fn().mockResolvedValue({}) };
 		viewService = { recordView: jest.fn().mockResolvedValue(null) };
@@ -121,6 +166,7 @@ describe('EventService', () => {
 			{ checkLikeExistence: jest.fn().mockResolvedValue([]) } as any,
 			notificationService,
 			auditLogService,
+			eventSeatModel,
 		);
 	});
 
@@ -333,6 +379,214 @@ describe('EventService', () => {
 		});
 	});
 
+	describe('RESERVED events: submit, seat generation and seat map', () => {
+		const selectLean = (value: any) => ({ select: () => lean(value) });
+		const reservedEvent = (over: any = {}) =>
+			draft({ seatingType: SeatingType.RESERVED, eventStatus: EventStatus.PENDING, venueId: 'v1', ...over });
+		const tickets = (...tierKeys: string[]) => tierKeys.map((tierKey) => ({ _id: `tt-${tierKey}`, tierKey }));
+
+		beforeEach(() => {
+			venueModel.findById.mockReturnValue(lean({ _id: 'v1', venueTimezone: 'Asia/Seoul', venueLayout: layout() }));
+			venueModel.findOne.mockReturnValue(selectLean({ venueLayout: layout() }));
+			ticketTypeModel.find.mockReturnValue(selectLean(tickets('vip', 'regular')));
+			eventModel.findById.mockReturnValue(lean(reservedEvent()));
+			eventModel.findOneAndUpdate.mockReturnValue(exec(reservedEvent({ eventStatus: EventStatus.APPROVED })));
+		});
+
+		describe('submitEventForApproval', () => {
+			beforeEach(() => eventModel.findOne.mockReturnValue(lean(reservedEvent({ eventStatus: EventStatus.DRAFT }))));
+
+			it('moves a RESERVED event whose seated tiers are all covered to PENDING', async () => {
+				eventModel.findOneAndUpdate.mockReturnValue(exec(reservedEvent()));
+				const result = await service.submitEventForApproval('org1' as any, 'e1' as any);
+				expect(result.eventStatus).toBe(EventStatus.PENDING);
+			});
+
+			it('refuses a RESERVED event with a seated section that has no ticket type', async () => {
+				ticketTypeModel.find.mockReturnValue(selectLean(tickets('vip')));
+				await expect(service.submitEventForApproval('org1' as any, 'e1' as any)).rejects.toThrow(Message.SEAT_TIER_MISSING);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('does not load the layout of a GENERAL event', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft()));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.PENDING })));
+				await service.submitEventForApproval('org1' as any, 'e1' as any);
+				expect(ticketTypeModel.find).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('approveEventByAdmin seat generation', () => {
+			const allOps = () => eventSeatModel.bulkWrite.mock.calls.flatMap(([ops]: any) => ops);
+
+			it('creates one seat per seated seat (10), linked to the ticket type of its tier, standing sections get none', async () => {
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+
+				const ops = allOps();
+				expect(ops).toHaveLength(10);
+				const byTier = (tt: string) => ops.filter((op: any) => op.updateOne.update.$setOnInsert.ticketTypeId === tt);
+				expect(byTier('tt-vip')).toHaveLength(6);
+				expect(byTier('tt-regular')).toHaveLength(4);
+				expect(ops.some((op: any) => op.updateOne.filter.sectionKey === 'S')).toBe(false);
+				expect(ops[0].updateOne).toEqual({
+					filter: { eventId: 'e1', sectionKey: 'A', row: 1, number: 1 },
+					update: { $setOnInsert: { ticketTypeId: 'tt-vip', seatStatus: SeatStatus.AVAILABLE } },
+					upsert: true,
+				});
+				expect(eventSeatModel.bulkWrite.mock.calls[0][1]).toEqual({ ordered: false });
+			});
+
+			it('brings the ticket type quantities in line with the seats', async () => {
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+
+				const ops = ticketTypeModel.bulkWrite.mock.calls[0][0];
+				expect(ops.map((op: any) => [op.updateOne.filter._id, op.updateOne.update.$set.totalQuantity])).toEqual([
+					['tt-vip', 6],
+					['tt-regular', 4],
+				]);
+			});
+
+			it('generates the seats before the status changes', async () => {
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+				expect(eventSeatModel.bulkWrite.mock.invocationCallOrder[0]).toBeLessThan(eventModel.findOneAndUpdate.mock.invocationCallOrder[0]);
+			});
+
+			it('is idempotent: a retry upserts the same seats and creates no duplicates', async () => {
+				const stored = new Map<string, any>();
+				eventSeatModel.bulkWrite.mockImplementation(async (ops: any[]) => {
+					for (const { updateOne } of ops) {
+						const { eventId, sectionKey, row, number } = updateOne.filter;
+						const key = [eventId, sectionKey, row, number].join('|');
+						if (!stored.has(key)) stored.set(key, { ...updateOne.filter, ...updateOne.update.$setOnInsert });
+					}
+				});
+
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+				stored.get('e1|A|1|1').seatStatus = SeatStatus.SOLD; // sold between the two attempts
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+
+				expect(stored.size).toBe(10);
+				expect(stored.get('e1|A|1|1').seatStatus).toBe(SeatStatus.SOLD); // never reset to AVAILABLE
+			});
+
+			it('fails with a clear message when a seated section has no ticket type, and changes nothing', async () => {
+				ticketTypeModel.find.mockReturnValue(selectLean(tickets('vip')));
+
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow(
+					`${Message.SEAT_TIER_MISSING} Missing: regular`,
+				);
+				expect(eventSeatModel.bulkWrite).not.toHaveBeenCalled();
+				expect(ticketTypeModel.bulkWrite).not.toHaveBeenCalled();
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+				expect(auditLogService.record).not.toHaveBeenCalled();
+				expect(notificationService.createNotification).not.toHaveBeenCalled();
+			});
+
+			it('fails when two ticket types share a tier key', async () => {
+				ticketTypeModel.find.mockReturnValue(selectLean([...tickets('vip', 'regular'), { _id: 'tt-dup', tierKey: 'vip' }]));
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow(Message.SEAT_TIER_DUPLICATE);
+				expect(eventSeatModel.bulkWrite).not.toHaveBeenCalled();
+			});
+
+			it('fails when the venue has no seated section', async () => {
+				venueModel.findById.mockReturnValue(lean({ _id: 'v1', venueLayout: { sections: [standingSection()] } }));
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow(Message.EVENT_SUBMIT_LAYOUT_REQUIRED);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('answers SEAT_GENERATION_FAILED and leaves the event status alone when the bulk write fails', async () => {
+				eventSeatModel.bulkWrite.mockRejectedValue(new Error('boom'));
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow(Message.SEAT_GENERATION_FAILED);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it.each([
+				['a GENERAL event', { seatingType: SeatingType.GENERAL }],
+				['an event that is not PENDING', { eventStatus: EventStatus.DRAFT }],
+				["the admin's own event", { organizerId: 'admin1' }],
+			])('does not generate seats for %s', async (_name, over) => {
+				eventModel.findById.mockReturnValue(lean(reservedEvent(over)));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(null));
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow();
+				expect(eventSeatModel.bulkWrite).not.toHaveBeenCalled();
+			});
+
+			it('does not touch seats for a GENERAL event that is approved normally', async () => {
+				eventModel.findById.mockReturnValue(lean(reservedEvent({ seatingType: SeatingType.GENERAL })));
+				await service.approveEventByAdmin('admin1' as any, 'e1' as any);
+				expect(eventSeatModel.bulkWrite).not.toHaveBeenCalled();
+				expect(eventModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+			});
+		});
+
+		describe('getEventSeatMap', () => {
+			let seatQuery: any;
+			beforeEach(() => {
+				eventModel.findOne.mockReturnValue(lean(reservedEvent({ eventStatus: EventStatus.APPROVED })));
+				seatQuery = {
+					select: jest.fn().mockReturnThis(),
+					lean: jest.fn().mockReturnThis(),
+					exec: jest.fn().mockResolvedValue([
+						{ sectionKey: 'A', row: 1, number: 2, seatStatus: SeatStatus.SOLD, heldBy: 'secret', orderId: 'o1' },
+						{ sectionKey: 'A', row: 1, number: 3, seatStatus: SeatStatus.HELD, heldBy: 'secret', heldUntil: future(1) },
+					]),
+				};
+				eventSeatModel.find.mockReturnValue(seatQuery);
+			});
+
+			it('looks up APPROVED events only', async () => {
+				await service.getEventSeatMap('e1' as any);
+				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+			});
+
+			it.each(['DRAFT', 'PENDING', 'REJECTED', 'CANCELLED', 'ENDED'])('hides a %s event (it is not found)', async () => {
+				eventModel.findOne.mockReturnValue(lean(null));
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+				expect(eventSeatModel.find).not.toHaveBeenCalled();
+			});
+
+			it('has no seat map for a GENERAL event or a venue without a layout', async () => {
+				eventModel.findOne.mockReturnValue(lean(reservedEvent({ seatingType: SeatingType.GENERAL })));
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+
+				eventModel.findOne.mockReturnValue(lean(reservedEvent({ eventStatus: EventStatus.APPROVED })));
+				venueModel.findById.mockReturnValue(lean({ _id: 'v1' }));
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+			});
+
+			it('is hidden when the organizer is not ACTIVE', async () => {
+				memberService.getMember.mockRejectedValue(new InternalServerErrorException(Message.NO_DATA_FOUND));
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+			});
+
+			it('asks only for SOLD seats and for HELD seats whose hold is in the future', async () => {
+				const before = Date.now();
+				await service.getEventSeatMap('e1' as any);
+
+				const filter = eventSeatModel.find.mock.calls[0][0];
+				expect(filter.eventId).toBe('e1');
+				expect(filter.$or).toHaveLength(2);
+				expect(filter.$or[0]).toEqual({ seatStatus: SeatStatus.SOLD });
+				expect(filter.$or[1].seatStatus).toBe(SeatStatus.HELD);
+				expect(filter.$or[1].heldUntil.$gt.getTime()).toBeGreaterThanOrEqual(before);
+				expect(JSON.stringify(filter)).not.toContain(SeatStatus.AVAILABLE);
+			});
+
+			it('returns the layout, the timezone and a compact seat list without heldBy', async () => {
+				const result = await service.getEventSeatMap('e1' as any);
+
+				expect(result.venueLayout).toEqual(layout());
+				expect(result.venueTimezone).toBe('Asia/Seoul');
+				expect(result.seats).toEqual([
+					{ sectionKey: 'A', row: 1, number: 2, seatStatus: SeatStatus.SOLD },
+					{ sectionKey: 'A', row: 1, number: 3, seatStatus: SeatStatus.HELD },
+				]);
+				expect(JSON.stringify(result)).not.toContain('secret');
+				expect(seatQuery.select.mock.calls[0][0]).not.toContain('heldBy');
+			});
+		});
+	});
+
 	describe('visibility', () => {
 		it('getEvents matches APPROVED only and drops non-ACTIVE organizers before pagination', async () => {
 			await service.getEvents(null as any, { page: 1, limit: 10, search: {} } as any);
@@ -439,7 +693,7 @@ describe('EventResolver access', () => {
 		},
 	);
 
-	it.each(['createEvent', 'updateEvent', 'submitEventForApproval'] as (keyof EventResolver)[])(
+	it.each(['createEvent', 'updateEvent', 'submitEventForApproval', 'getMyEvents'] as (keyof EventResolver)[])(
 		'%s is for active organizers',
 		(name) => {
 			expect(rolesOf(name)).toEqual([MemberType.ORGANIZER]);

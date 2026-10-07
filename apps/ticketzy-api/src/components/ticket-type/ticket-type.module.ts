@@ -4,6 +4,8 @@ import { TicketTypeResolver } from './ticket-type.resolver';
 import { TicketTypeService } from './ticket-type.service';
 import TicketTypeSchema from '../../libs/schemas/TicketType.model';
 import EventSchema from '../../libs/schemas/Event.model';
+import VenueSchema from '../../libs/schemas/Venue.model';
+import EventSeatSchema from '../../libs/schemas/EventSeat.model';
 import MemberSchema from '../../libs/schemas/Member.model';
 import { AuthModule } from '../auth/auth.module';
 
@@ -13,6 +15,8 @@ import { AuthModule } from '../auth/auth.module';
 			{ name: 'TicketType', schema: TicketTypeSchema },
 			{ name: 'Event', schema: EventSchema },
 			{ name: 'Member', schema: MemberSchema },
+			{ name: 'Venue', schema: VenueSchema },
+			{ name: 'EventSeat', schema: EventSeatSchema },
 		]),
 		AuthModule,
 	],

@@ -5,6 +5,7 @@ import { EventService } from './event.service';
 import EventSchema from '../../libs/schemas/Event.model';
 import MemberSchema from '../../libs/schemas/Member.model';
 import TicketTypeSchema from '../../libs/schemas/TicketType.model';
+import EventSeatSchema from '../../libs/schemas/EventSeat.model';
 import VenueSchema from '../../libs/schemas/Venue.model';
 import { AuthModule } from '../auth/auth.module';
 import { ViewModule } from '../view/view.module';
@@ -20,6 +21,7 @@ import { NotificationModule } from '../notification/notification.module';
 			{ name: 'Venue', schema: VenueSchema },
 			{ name: 'TicketType', schema: TicketTypeSchema },
 			{ name: 'Member', schema: MemberSchema },
+			{ name: 'EventSeat', schema: EventSeatSchema },
 		]),
 		AuthModule,
 		ViewModule,

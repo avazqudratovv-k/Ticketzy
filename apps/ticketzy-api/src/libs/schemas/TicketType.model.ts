@@ -26,6 +26,11 @@ const TicketTypeSchema = new Schema(
 			required: true,
 		},
 
+		/** links the ticket type to the SEATED sections of the venue layout with this tier key */
+		tierKey: {
+			type: String,
+		},
+
 		totalQuantity: {
 			type: Number,
 			required: true,
@@ -62,5 +67,7 @@ const TicketTypeSchema = new Schema(
 );
 
 TicketTypeSchema.index({ eventId: 1, ticketTypeName: 1 }, { unique: true });
+// one ticket type per tier, so every seat has exactly one ticket type
+TicketTypeSchema.index({ eventId: 1, tierKey: 1 }, { unique: true, partialFilterExpression: { tierKey: { $type: 'string' } } });
 
 export default TicketTypeSchema;

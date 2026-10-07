@@ -11,6 +11,8 @@ import { MemberService } from '../member/member.service';
 import { StatisticModifier, T } from '../../libs/types/common';
 import {
 	EventStatus,
+	SeatStatus,
+	SeatingType,
 	VenueStatus,
 	closedEventStatuses,
 	editableEventStatuses,
@@ -28,6 +30,14 @@ import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
+import { EventSeat, EventSeatMap } from '../../libs/dto/event/event-seat';
+import {
+	VenueLayout,
+	countTierSeats,
+	getMissingTierKeys,
+	getSeatedSections,
+	listLayoutSeats,
+} from '../../libs/venue-layout';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import {
@@ -38,6 +48,8 @@ import {
 	lookupVenue,
 	shapeIntoMongoObjectId,
 } from '../../libs/config';
+
+const SEAT_BULK_SIZE = 5000;
 
 /** audit action, notification and wording of each admin transition */
 const adminTransitionRecords: Record<
@@ -54,16 +66,22 @@ const adminTransitionRecords: Record<
  * Pure on purpose: the service passes in what it looked up.
  */
 export const getEventSubmitError = (
-	event: Pick<Event, 'eventTitle' | 'eventImages' | 'startAt' | 'endAt'>,
+	event: Pick<Event, 'eventTitle' | 'eventImages' | 'startAt' | 'endAt'> & { seatingType?: SeatingType },
 	venueUsable: boolean,
 	ticketTypeCount: number,
 	now: Date = new Date(),
+	seating?: { venueLayout?: VenueLayout | null; tierKeys: (string | undefined)[] },
 ): Message | null => {
 	if (!event.eventTitle?.trim()) return Message.EVENT_SUBMIT_TITLE_REQUIRED;
 	if (!event.eventImages?.length) return Message.EVENT_SUBMIT_IMAGE_REQUIRED;
 	if (!(moment(event.startAt).isAfter(now) && moment(event.endAt).isAfter(now))) return Message.EVENT_SUBMIT_DATES_IN_PAST;
 	if (!venueUsable) return Message.EVENT_SUBMIT_VENUE_REQUIRED;
 	if (ticketTypeCount < 1) return Message.EVENT_SUBMIT_TICKET_TYPE_REQUIRED;
+	// the layout is optional for GENERAL events; a RESERVED event needs every SEATED section covered by a ticket type
+	if (event.seatingType === SeatingType.RESERVED) {
+		if (!getSeatedSections(seating?.venueLayout).length) return Message.EVENT_SUBMIT_LAYOUT_REQUIRED;
+		if (getMissingTierKeys(seating.venueLayout, seating.tierKeys).length) return Message.SEAT_TIER_MISSING;
+	}
 	return null;
 };
 
@@ -81,6 +99,7 @@ export class EventService {
 		private likeService: LikeService,
 		private notificationService: NotificationService,
 		private auditLogService: AuditLogService,
+		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 	) {}
 
 	public async createEvent(input: EventInput): Promise<Event> {
@@ -252,7 +271,15 @@ export class EventService {
 			this.venueModel.exists({ _id: event.venueId, venueStatus: VenueStatus.ACTIVE }),
 			this.ticketTypeModel.countDocuments({ eventId: event._id }).exec(),
 		]);
-		const error = getEventSubmitError(event, !!venueUsable, ticketTypeCount);
+		let seating: { venueLayout?: VenueLayout; tierKeys: string[] } | undefined;
+		if (event.seatingType === SeatingType.RESERVED) {
+			const [venue, ticketTypes] = await Promise.all([
+				this.venueModel.findOne({ _id: event.venueId, venueStatus: VenueStatus.ACTIVE }).select('venueLayout').lean().exec(),
+				this.ticketTypeModel.find({ eventId: event._id }).select('tierKey').lean().exec(),
+			]);
+			seating = { venueLayout: venue?.venueLayout as VenueLayout, tierKeys: ticketTypes.map((ticketType) => ticketType.tierKey) };
+		}
+		const error = getEventSubmitError(event, !!venueUsable, ticketTypeCount, new Date(), seating);
 		if (error) throw new BadRequestException(error);
 
 		// conditional on the status we validated, so a concurrent edit or submit cannot slip through
@@ -354,8 +381,95 @@ export class EventService {
 		return result;
 	}
 
+	/**
+	 * A RESERVED event gets its seats before the status changes, so a layout problem fails the approval with nothing changed.
+	 * Seat generation is idempotent: when the status change then loses a race or fails, a retry creates no duplicates.
+	 */
 	public async approveEventByAdmin(adminId: ObjectId, eventId: ObjectId): Promise<Event> {
+		const event: Event = await this.eventModel.findById(eventId).lean().exec();
+		const approvable =
+			event &&
+			event.seatingType === SeatingType.RESERVED &&
+			eventTransitions.approve.from.includes(event.eventStatus) &&
+			String(event.organizerId) !== String(adminId);
+		if (approvable) await this.generateEventSeats(event);
+
 		return await this.changeStatusByAdmin(adminId, eventId, 'approve');
+	}
+
+	/**
+	 * One EventSeat per seat of every SEATED section, linked to the ticket type with the section's tier key.
+	 * Upserts with $setOnInsert, so seats that already exist (even HELD or SOLD ones) are never touched or duplicated.
+	 * The ticket type quantities are brought in line with the seats.
+	 */
+	private async generateEventSeats(event: Event): Promise<void> {
+		const [venue, ticketTypes] = await Promise.all([
+			this.venueModel.findById(event.venueId).lean().exec(),
+			this.ticketTypeModel.find({ eventId: event._id }).select('tierKey').lean().exec(),
+		]);
+		const layout = venue?.venueLayout as VenueLayout;
+		if (!getSeatedSections(layout).length) throw new BadRequestException(Message.EVENT_SUBMIT_LAYOUT_REQUIRED);
+
+		const missing = getMissingTierKeys(layout, ticketTypes.map((ticketType) => ticketType.tierKey));
+		if (missing.length) throw new BadRequestException(`${Message.SEAT_TIER_MISSING} Missing: ${missing.join(', ')}`);
+
+		const ticketTypeByTier = new Map<string, TicketType>();
+		for (const ticketType of ticketTypes) {
+			if (!ticketType.tierKey) continue;
+			if (ticketTypeByTier.has(ticketType.tierKey)) throw new BadRequestException(Message.SEAT_TIER_DUPLICATE);
+			ticketTypeByTier.set(ticketType.tierKey, ticketType);
+		}
+
+		const operations = listLayoutSeats(layout).map((seat) => ({
+			updateOne: {
+				filter: { eventId: event._id, sectionKey: seat.sectionKey, row: seat.row, number: seat.number },
+				update: { $setOnInsert: { ticketTypeId: ticketTypeByTier.get(seat.tierKey)._id, seatStatus: SeatStatus.AVAILABLE } },
+				upsert: true,
+			},
+		}));
+
+		try {
+			for (let start = 0; start < operations.length; start += SEAT_BULK_SIZE) {
+				await this.eventSeatModel.bulkWrite(operations.slice(start, start + SEAT_BULK_SIZE) as any, { ordered: false });
+			}
+			await this.ticketTypeModel.bulkWrite(
+				[...ticketTypeByTier].map(([tierKey, ticketType]) => ({
+					updateOne: { filter: { _id: ticketType._id }, update: { $set: { totalQuantity: countTierSeats(layout, tierKey) } } },
+				})) as any,
+			);
+		} catch (err) {
+			this.logger.error(`Seat generation failed for event ${event._id}: ${err.message}`);
+			throw new InternalServerErrorException(Message.SEAT_GENERATION_FAILED);
+		}
+	}
+
+	/** public: APPROVED events of ACTIVE organizers; only seats that are not free are listed, and never who holds them */
+	public async getEventSeatMap(eventId: ObjectId): Promise<EventSeatMap> {
+		const event: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
+		if (!event || event.seatingType !== SeatingType.RESERVED) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		await this.memberService.getMember(null, event.organizerId); // hidden when the organizer is not ACTIVE
+
+		const venue = await this.venueModel.findById(event.venueId).lean().exec();
+		if (!venue?.venueLayout) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+
+		const seats = await this.eventSeatModel
+			.find({
+				eventId: event._id,
+				$or: [
+					{ seatStatus: SeatStatus.SOLD },
+					{ seatStatus: SeatStatus.HELD, heldUntil: { $gt: new Date() } }, // an expired hold is a free seat
+				],
+			})
+			.select('sectionKey row number seatStatus -_id')
+			.lean()
+			.exec();
+
+		return {
+			eventId: event._id,
+			venueTimezone: venue.venueTimezone,
+			venueLayout: venue.venueLayout as VenueLayout,
+			seats: seats.map(({ sectionKey, row, number, seatStatus }) => ({ sectionKey, row, number, seatStatus })),
+		};
 	}
 
 	public async rejectEventByAdmin(adminId: ObjectId, input: EventReasonInput): Promise<Event> {

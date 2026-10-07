@@ -23,11 +23,16 @@ export class TicketTypeInput {
 	@Field(() => TicketCurrency)
 	ticketCurrency: TicketCurrency;
 
-	@IsNotEmpty()
+	@IsOptional()
+	@Length(1, 30)
+	@Field(() => String, { nullable: true, description: 'links to the SEATED sections of the venue layout with this tier key' })
+	tierKey?: string;
+
+	@IsOptional()
 	@IsInt()
 	@Min(1)
-	@Field(() => Int)
-	totalQuantity: number;
+	@Field(() => Int, { nullable: true, description: 'required for GENERAL events; computed from the seats for RESERVED events' })
+	totalQuantity?: number;
 
 	@IsNotEmpty()
 	@IsInt()
@@ -65,9 +70,14 @@ export class TicketTypeUpdate {
 	ticketCurrency?: TicketCurrency;
 
 	@IsOptional()
+	@Length(1, 30)
+	@Field(() => String, { nullable: true })
+	tierKey?: string;
+
+	@IsOptional()
 	@IsInt()
 	@Min(1)
-	@Field(() => Int, { nullable: true })
+	@Field(() => Int, { nullable: true, description: 'not allowed for RESERVED events' })
 	totalQuantity?: number;
 
 	@IsOptional()
