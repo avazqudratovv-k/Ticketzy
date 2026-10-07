@@ -2,7 +2,7 @@ import { registerEnumType } from '@nestjs/graphql';
 
 export enum MemberType {
 	USER = 'USER',
-	AGENT = 'AGENT',
+	ORGANIZER = 'ORGANIZER',
 	ADMIN = 'ADMIN',
 }
 registerEnumType(MemberType, {
@@ -10,18 +10,22 @@ registerEnumType(MemberType, {
 });
 
 export enum MemberStatus {
+	PENDING = 'PENDING',
 	ACTIVE = 'ACTIVE',
-	BLOCK = 'BLOCK',
+	REJECTED = 'REJECTED',
+	SUSPENDED = 'SUSPENDED',
 	DELETE = 'DELETE',
 }
 registerEnumType(MemberStatus, {
 	name: 'MemberStatus',
 });
 
+/** accounts that cannot log in or use a token */
+export const unverifiedMemberStatuses = [MemberStatus.REJECTED, MemberStatus.SUSPENDED, MemberStatus.DELETE];
+
 export enum MemberAuthType {
 	PHONE = 'PHONE',
 	EMAIL = 'EMAIL',
-	TELEGRAM = 'TELEGRAM',
 }
 registerEnumType(MemberAuthType, {
 	name: 'MemberAuthType',

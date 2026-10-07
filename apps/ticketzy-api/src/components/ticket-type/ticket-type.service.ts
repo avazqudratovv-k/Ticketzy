@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
@@ -13,6 +13,8 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 
 @Injectable()
 export class TicketTypeService {
+	private readonly logger = new Logger(TicketTypeService.name);
+
 	constructor(
 		@InjectModel('TicketType') private readonly ticketTypeModel: Model<TicketType>,
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
@@ -27,7 +29,7 @@ export class TicketTypeService {
 			await this.refreshEventMinPrice(eventId);
 			return result;
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}

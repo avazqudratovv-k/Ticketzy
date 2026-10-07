@@ -1,5 +1,5 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { UseGuards } from '@nestjs/common';
+import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { OrderService } from './order.service';
 import { Order, Orders } from '../../libs/dto/order/order';
@@ -13,33 +13,35 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 
 @Resolver()
 export class OrderResolver {
+	private readonly logger = new Logger(OrderResolver.name);
+
 	constructor(private readonly orderService: OrderService) {}
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
 	public async createOrder(@Args('input') input: OrderInput, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		console.log('Mutation: createOrder');
+		this.logger.log('Mutation: createOrder');
 		return await this.orderService.createOrder(memberId, input);
 	}
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
 	public async payOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		console.log('Mutation: payOrder');
+		this.logger.log('Mutation: payOrder');
 		return await this.orderService.payOrder(memberId, shapeIntoMongoObjectId(input));
 	}
 
 	@UseGuards(AuthGuard)
 	@Mutation(() => Order)
 	public async cancelOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		console.log('Mutation: cancelOrder');
+		this.logger.log('Mutation: cancelOrder');
 		return await this.orderService.cancelOrder(memberId, shapeIntoMongoObjectId(input));
 	}
 
 	@UseGuards(AuthGuard)
 	@Query(() => Order)
 	public async getOrder(@Args('orderId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Order> {
-		console.log('Query: getOrder');
+		this.logger.log('Query: getOrder');
 		return await this.orderService.getOrder(memberId, shapeIntoMongoObjectId(input));
 	}
 
@@ -49,7 +51,7 @@ export class OrderResolver {
 		@Args('input') input: OrdersInquiry,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Orders> {
-		console.log('Query: getMyOrders');
+		this.logger.log('Query: getMyOrders');
 		return await this.orderService.getMyOrders(memberId, input);
 	}
 
@@ -59,7 +61,7 @@ export class OrderResolver {
 	@UseGuards(RolesGuard)
 	@Query(() => Orders)
 	public async getAllOrdersByAdmin(@Args('input') input: OrdersInquiry): Promise<Orders> {
-		console.log('Query: getAllOrdersByAdmin');
+		this.logger.log('Query: getAllOrdersByAdmin');
 		return await this.orderService.getAllOrdersByAdmin(input);
 	}
 }

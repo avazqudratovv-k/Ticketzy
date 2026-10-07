@@ -18,15 +18,67 @@ export const availableCommentSorts= ['createdAt', 'updatedAt']
 
 /** IMAGE CONFIGURATION */
 import { v4 as uuidv4 } from 'uuid';
-import * as path from 'path';
+import { createWriteStream, mkdirSync } from 'fs';
+import { unlink } from 'fs/promises';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import { Message } from './enums/common.enum';
 import { T } from './types/common';
 
-export const validMimeTypes = ['image/png', 'image/jpg', 'image/jpeg'];
 export const validUploadTargets = ['member', 'event', 'venue', 'article'];
-export const getSerialForImage = (filename: string) => {
-	const ext = path.parse(filename).ext;
-	return uuidv4() + ext;
+
+/** the real file type is read from the first bytes, the client-sent filename and mimetype are never trusted */
+const imageSignatures: { ext: string; signature: number[] }[] = [
+	{ ext: '.png', signature: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+	{ ext: '.jpg', signature: [0xff, 0xd8, 0xff] },
+];
+const IMAGE_HEAD_BYTES = 8;
+
+export const detectImageExtension = (head: Buffer): string | null => {
+	const found = imageSignatures.find(({ signature }) => signature.every((byte, i) => head[i] === byte));
+	return found ? found.ext : null;
 };
+
+/**
+ * Streams an uploaded image to uploads/<target>/<uuid><ext>, where ext comes from the detected type.
+ * Rejects (and writes nothing) when the content is not a png or jpeg.
+ */
+export const saveVerifiedImage = async (stream: Readable, target: string): Promise<string> => {
+	const iterator = stream[Symbol.asyncIterator]();
+	const chunks: Buffer[] = [];
+	let size = 0;
+	while (size < IMAGE_HEAD_BYTES) {
+		const { value, done } = await iterator.next();
+		if (done) break;
+		chunks.push(Buffer.from(value));
+		size += value.length;
+	}
+
+	const head = Buffer.concat(chunks);
+	const ext = detectImageExtension(head);
+	if (!ext) {
+		stream.destroy();
+		throw new Error(Message.PROVIDE_ALLOWED_FORMAT);
+	}
+
+	mkdirSync(`uploads/${target}`, { recursive: true });
+	const url = `uploads/${target}/${uuidv4()}${ext}`;
+	async function* withHead() {
+		yield head;
+		for (let next = await iterator.next(); !next.done; next = await iterator.next()) yield next.value;
+	}
+
+	try {
+		await pipeline(Readable.from(withHead()), createWriteStream(url));
+	} catch (err) {
+		await unlink(url).catch(() => undefined);
+		throw new Error(Message.UPLOAD_FAILED);
+	}
+	return url;
+};
+
+/** user text must never reach new RegExp unescaped (regex injection / ReDoS) */
+export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const shapeIntoMongoObjectId = (target: any) => {
 	return typeof target === 'string' ? new ObjectId(target) : target;

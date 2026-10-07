@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Member, Members } from '../../libs/dto/member/member';
 import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
-import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
+import { MemberAuthType, MemberStatus, MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { AuthService } from '../auth/auth.service';
 import { MemberUpdate } from '../../libs/dto/member/member.update';
@@ -14,10 +14,12 @@ import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { LikeService } from '../like/like.service';
 import { Follower, Following, MeFollowed } from '../../libs/dto/follow/follow';
-import { lookupAuthMemberLiked } from '../../libs/config';
+import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
 
 @Injectable()
 export class MemberService {
+	private readonly logger = new Logger(MemberService.name);
+
 	constructor(
 		@InjectModel('Member')
 		private readonly memberModel: Model<Member>,
@@ -28,45 +30,68 @@ export class MemberService {
 		private likeService: LikeService,
 	) {}
 
-	public async signup(input: MemberInput): Promise<Member> {
-		input.memberPassword = await this.authService.hashPassword(input.memberPassword);
+	/** the server decides role and status: users are active at once, organizers wait for admin approval */
+	public async signupUser(input: MemberInput): Promise<Member> {
+		return await this.signup(input, MemberType.USER, MemberStatus.ACTIVE);
+	}
+
+	public async signupOrganizer(input: MemberInput): Promise<Member> {
+		return await this.signup(input, MemberType.ORGANIZER, MemberStatus.PENDING);
+	}
+
+	private async signup(input: MemberInput, memberType: MemberType, memberStatus: MemberStatus): Promise<Member> {
+		const memberPassword = await this.authService.hashPassword(input.memberPassword);
 		try {
-			const result = await this.memberModel.create(input);
-			// TODO: Authentication via TOKEN
+			const result = await this.memberModel.create({
+				memberEmail: input.memberEmail,
+				memberPassword,
+				memberNick: input.memberNick,
+				memberPhone: input.memberPhone,
+				memberFullName: input.memberFullName,
+				memberType,
+				memberStatus,
+				memberAuthType: MemberAuthType.EMAIL,
+			});
 			result.accessToken = await this.authService.createToken(result);
 			return result;
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
-			throw new BadRequestException(Message.USED_MEMBER_NICK_OR_PHONE);
+			this.logger.error(`signup failed: ${err.message}`);
+			if (err?.code === 11000) throw new BadRequestException(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
+			throw new InternalServerErrorException(Message.SOMETHING_WENT_WRONG);
 		}
 	}
 
 	public async login(input: LoginInput): Promise<Member> {
-		const { memberNick, memberPassword } = input;
+		const { memberEmail, memberPassword } = input;
 		const response: Member = await this.memberModel
-			.findOne({ memberNick: memberNick })
+			.findOne({ memberEmail: memberEmail })
 			.select('+memberPassword')
 			.exec();
 
-		if (!response || response.memberStatus === MemberStatus.DELETE) {
-			throw new InternalServerErrorException(Message.NO_MEMBER_NICK);
-		} else if (response.memberStatus === MemberStatus.BLOCK) {
-			throw new InternalServerErrorException(Message.BLOCKED_USER);
+		// one message for an unknown email and a wrong password, and the password is always compared
+		const isMatch = await this.authService.comparePasswords(memberPassword, response?.memberPassword);
+		if (!response || !isMatch) throw new UnauthorizedException(Message.WRONG_EMAIL_OR_PASSWORD);
+
+		// PENDING organizers may log in, they just cannot use organizer features yet
+		if (unverifiedMemberStatuses.includes(response.memberStatus)) {
+			throw new UnauthorizedException(Message.ACCOUNT_NOT_VERIFIED);
 		}
 
-		// TODO: Compare passwords
-		const isMatch = await this.authService.comparePasswords(input.memberPassword, response.memberPassword);
-		if (!isMatch) throw new InternalServerErrorException(Message.WRONG_PASSWORD);
 		response.accessToken = await this.authService.createToken(response);
 		return response;
 	}
 
 	public async updateMember(memberId: ObjectId, input: MemberUpdate): Promise<Member> {
+		// role and status can only be changed by an admin (updateMemberByAdmin)
+		delete input.memberType;
+		delete input.memberStatus;
+		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
+
 		const result: Member = await this.memberModel
 			.findOneAndUpdate(
 				{
 					_id: memberId,
-					memberStatus: MemberStatus.ACTIVE,
+					memberStatus: { $in: [MemberStatus.ACTIVE, MemberStatus.PENDING] },
 				},
 				input,
 				{ new: true },
@@ -81,8 +106,8 @@ export class MemberService {
 	public async getMember(memberId: ObjectId, targetId: ObjectId): Promise<Member> {
 		const search: T = {
 			_id: targetId,
-			MemberStatus: {
-				$in: [MemberStatus.ACTIVE, MemberStatus.BLOCK],
+			memberStatus: {
+				$in: [MemberStatus.ACTIVE, MemberStatus.SUSPENDED],
 			},
 		};
 		const targetMember = await this.memberModel.findOne(search).lean().exec();
@@ -111,11 +136,11 @@ export class MemberService {
 
 	public async getAgents(memberId: ObjectId, input: AgentsInquiry): Promise<Members> {
 		const { text } = input.search;
-		const match: T = { memberType: MemberType.AGENT, memberStatus: MemberStatus.ACTIVE };
+		const match: T = { memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE };
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
-		if (text) match.memberNick = { $regex: new RegExp(text, 'i') };
-		console.log('match:', match);
+		if (text) match.memberNick = { $regex: new RegExp(escapeRegExp(text), 'i') };
+		this.logger.log(`match: ${JSON.stringify(match)}`);
 
 		const result = await this.memberModel
 			.aggregate([
@@ -165,8 +190,8 @@ export class MemberService {
 
 		if (memberStatus) match.memberStatus = memberStatus;
 		if (memberType) match.memberType = memberType;
-		if (text) match.memberNick = { $regex: new RegExp(text, 'i') };
-		console.log('match:', match);
+		if (text) match.memberNick = { $regex: new RegExp(escapeRegExp(text), 'i') };
+		this.logger.log(`match: ${JSON.stringify(match)}`);
 
 		const result = await this.memberModel
 			.aggregate([
@@ -186,6 +211,7 @@ export class MemberService {
 	}
 
 	public async updateMemberByAdmin(input: MemberUpdate): Promise<Member> {
+		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;

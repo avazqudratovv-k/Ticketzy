@@ -109,3 +109,41 @@ Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner
 | `npx jest apps/ticketzy-api/src` (26 mock-based tests) | pass |
 | GraphQL schema generated with the new resolvers | pass |
 | Run against a database | **not run** |
+
+## 9. Security and auth milestone (organizer role, email login, hardening)
+
+Backend only, branch `modification`. Decisions: DECISIONS #13 (updated) and #23 to #26.
+
+**Roles and members**
+- `MemberType.AGENT` renamed to `ORGANIZER` (enum, `@Roles` in event, venue, ticket-type and ticket resolvers, member service, batch jobs). `MemberStatus` is now PENDING, ACTIVE, REJECTED, SUSPENDED, DELETE (no BLOCK). `MemberAuthType` lost TELEGRAM.
+- `Member`: new `memberEmail` (required, unique index, lowercase, trimmed, format check); `memberNick` and `memberPhone` optional; `memberArticles` and `memberPoints` removed (schema, DTO, batch ranking formula, board-article counter calls). The `Member` GraphQL type exposes `memberEmail` only to the member and to admins (`MemberResolver.memberEmail`).
+- Fixed on the way: `MISearch.memberStatus` used the `MemberType` enum; `updateMember` let any member set their own `memberType` and `memberStatus` and stored `memberPassword` unhashed (now ignored and hashed); `getMember` filtered on `MemberStatus` (capital M), so the filter did nothing.
+
+**Operations changed**
+- Removed `signup`. Added `signupUser` and `signupOrganizer` (`MemberInput`: memberEmail, memberPassword min 8, optional memberNick, memberPhone, memberFullName). `login` now takes `LoginInput { memberEmail, memberPassword }`.
+- Unchanged: every other operation. Frontend impact: login and signup inputs, the JWT now holds only `_id` and `memberType` (the client must load the profile with `getMember`), and `MemberType` / `MemberStatus` values changed.
+
+**Auth**
+- `AuthService`: token payload `{ _id, memberType }`, expiry 1 day (`JwtModule.registerAsync`, secret read at startup instead of import time); `verifyToken` never leaks jwt errors (401); new `authenticate` (loads the member, rejects REJECTED, SUSPENDED and DELETE with `ACCOUNT_NOT_VERIFIED`); constant-time password check for unknown emails.
+- Guards: `AuthGuard`, `RolesGuard` (null-checks the member first) and `WithoutGuard` all go through `authenticate`; new `ActiveOrganizerGuard` (`guards/organizer.guard.ts`) on the seven organizer mutations. New `Message` constants: `WRONG_EMAIL_OR_PASSWORD`, `ACCOUNT_NOT_VERIFIED`, `ORGANIZER_NOT_APPROVED`, `USED_MEMBER_EMAIL_NICK_OR_PHONE` (replaced `NO_MEMBER_NICK`, `WRONG_PASSWORD`, `BLOCKED_USER`, `USED_MEMBER_NICK_OR_PHONE`).
+- Socket gateway authenticates through the database and broadcasts only id, role, nick, full name and image.
+- `npm run seed` (`apps/ticketzy-api/src/seed.ts`): creates the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists.
+
+**Hardening**
+- `libs/env.validation.ts`: API crashes without `SECRET_TOKEN` or the Mongo URI, batch without the Mongo URI. `.env.example` added (`CLIENT_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` are new keys).
+- `ValidationPipe({ whitelist: true, transform: true })`; CORS limited to `CLIENT_URL`; playground and introspection off in production (`GraphQLModule.forRootAsync`).
+- `escapeRegExp` (`libs/config.ts`) used for every `new RegExp` (member, board article, event, venue).
+- Nest `Logger` instead of `console.*` in guards, resolvers, services and database modules; the logging interceptor no longer prints request variables (passwords).
+- Uploads: `saveVerifiedImage` checks png and jpeg magic bytes, picks the extension and name itself, and deletes partial files; the client mimetype and filename are ignored.
+
+**Existing data (not migrated, no script was run):** members need a `memberEmail`; `memberType: 'AGENT'` and `memberStatus: 'BLOCK'` documents must be updated by hand; the new unique `memberEmail` index cannot build while members without an email exist.
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` and `nest build ticketzy-batch` | pass |
+| `npx jest apps/ticketzy-api/src` (52 tests: auth service, guards, signup and login, input validation, magic bytes, regex escaping, env validation, plus the earlier order and ticket-type tests) | pass |
+| GraphQL schema generated offline from all resolvers | pass: `signupUser`, `signupOrganizer`, new enums, `memberEmail` once on `Member` |
+| `npm run seed` without admin env, API and batch started with a missing secret or Mongo URI | fail fast with a clear message, as intended |
+| Seed against a database, real login and signup, guards over HTTP, upload of a real file | **not run** (no database was touched) |
+

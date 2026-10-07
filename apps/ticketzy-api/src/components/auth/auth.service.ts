@@ -1,35 +1,80 @@
-import { Injectable } from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
-import { Member } from '../../libs/dto/member/member';
-import { T } from '../../libs/types/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcryptjs';
+import { Model, ObjectId } from 'mongoose';
+import { Member } from '../../libs/dto/member/member';
+import { MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
+import { Message } from '../../libs/enums/common.enum';
 import { shapeIntoMongoObjectId } from '../../libs/config';
+
+/** the token only identifies the member; everything else is loaded from the database on each request */
+export interface TokenPayload {
+	_id: string;
+	memberType: MemberType;
+}
+
 @Injectable()
 export class AuthService {
-	constructor(private jwtService: JwtService) {}
+	/** compared against when the email is unknown, so a missing account costs as much time as a wrong password */
+	private static readonly DUMMY_HASH = bcrypt.hashSync('ticketzy-dummy-password', 10);
+	private readonly logger = new Logger(AuthService.name);
+
+	constructor(
+		private jwtService: JwtService,
+		@InjectModel('Member') private readonly memberModel: Model<Member>,
+	) {}
 
 	public async hashPassword(memberPassword: string): Promise<string> {
 		const salt = await bcrypt.genSalt();
 		return await bcrypt.hash(memberPassword, salt);
 	}
 
-	public async comparePasswords(password: string, hashedPassword: string): Promise<boolean> {
-		return await bcrypt.compare(password, hashedPassword);
+	public async comparePasswords(password: string, hashedPassword?: string): Promise<boolean> {
+		const isMatch = await bcrypt.compare(password, hashedPassword ?? AuthService.DUMMY_HASH);
+		return Boolean(hashedPassword) && isMatch;
 	}
 
-	public async createToken(member: Member): Promise<string> {
-		const payload: T = {};
-		Object.keys(member['_doc'] ? member['_doc'] : member).map((ele) => {
-			payload[`${ele}`] = member[`${ele}`];
-		});
-		delete payload.memberPassword;
-
+	public async createToken(member: { _id: ObjectId; memberType: MemberType }): Promise<string> {
+		const payload: TokenPayload = { _id: String(member._id), memberType: member.memberType };
 		return await this.jwtService.signAsync(payload);
 	}
 
-	public async verifyToken(token: string): Promise<Member> {
-		const member = await this.jwtService.verifyAsync(token);
-		member._id = shapeIntoMongoObjectId(member._id);
+	/** never leaks jwt library errors: any invalid, expired or malformed token is a plain 401 */
+	public async verifyToken(token: string): Promise<TokenPayload> {
+		try {
+			const payload = await this.jwtService.verifyAsync<TokenPayload>(token);
+			if (!payload?._id || !payload?.memberType) throw new Error('Malformed token payload');
+			return payload;
+		} catch (err) {
+			this.logger.warn(`Token rejected: ${err.message}`);
+			throw new UnauthorizedException(Message.NOT_AUTHENTICATED);
+		}
+	}
+
+	/** verifies the token, then loads the member so blocked accounts and role changes apply immediately */
+	public async authenticate(token: string): Promise<Member> {
+		const payload = await this.verifyToken(token);
+
+		let member: Member | null = null;
+		try {
+			member = (await this.memberModel.findById(shapeIntoMongoObjectId(payload._id)).lean().exec()) as unknown as Member;
+		} catch (err) {
+			this.logger.warn(`Member lookup failed: ${err.message}`);
+		}
+		if (!member) throw new UnauthorizedException(Message.NOT_AUTHENTICATED);
+		if (unverifiedMemberStatuses.includes(member.memberStatus)) {
+			throw new UnauthorizedException(Message.ACCOUNT_NOT_VERIFIED);
+		}
 		return member;
+	}
+
+	public getBearerToken(request: any): string {
+		const header: string | undefined = request?.headers?.authorization;
+		if (!header) throw new UnauthorizedException(Message.TOKEN_NOT_EXIST);
+
+		const [scheme, token] = header.split(' ');
+		if (scheme?.toLowerCase() !== 'bearer' || !token) throw new UnauthorizedException(Message.NOT_AUTHENTICATED);
+		return token;
 	}
 }

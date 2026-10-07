@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Notification, Notifications } from '../../libs/dto/notification/notification';
@@ -13,6 +13,8 @@ const selfNotifiedTypes = [NotificationType.LIKE, NotificationType.COMMENT];
 
 @Injectable()
 export class NotificationService {
+	private readonly logger = new Logger(NotificationService.name);
+
 	constructor(@InjectModel('Notification') private readonly notificationModel: Model<Notification>) {}
 
 	/**
@@ -24,7 +26,7 @@ export class NotificationService {
 			if (selfNotifiedTypes.includes(input.notificationType) && String(input.authorId) === String(input.receiverId)) return;
 			await this.notificationModel.create(input);
 		} catch (err) {
-			console.log('Error, NotificationService.createNotification:', err.message);
+			this.logger.error(`Error, NotificationService.createNotification: ${err.message}`);
 		}
 	}
 

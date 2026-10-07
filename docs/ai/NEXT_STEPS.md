@@ -12,9 +12,9 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | ~~B4~~ (done) | Fix `Like.model.ts` (uses `ViewGroup` as its enum) and make `*Group` enums entity-agnostic | correctness plus decoupling |
 | ~~B5~~ (done) | Replace Property with Event, Venue, TicketType (schemas, DTOs, resolver, service) | core domain |
 | ~~B6~~ (done) | Add Order and Ticket with atomic inventory (conditional `findOneAndUpdate`); issue ticket codes | selling tickets |
-| ~~B7~~ (cancelled) | `MemberType` stays `USER / AGENT / ADMIN` by owner decision (DECISIONS #13) | role change |
+| ~~B7~~ (done) | `MemberType.AGENT` renamed to `ORGANIZER`, statuses PENDING / ACTIVE / REJECTED / SUSPENDED / DELETE (DECISIONS #13, #23 to #25) | role change |
 | ~~B8~~ (done) | Rewrite batch ranking jobs for events and organizers; set a sane cron cadence (currently every minute) | batch app |
-| B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`, `article`); still open: null-check `authMember` in `RolesGuard`, enable `ValidationPipe({ whitelist: true })`, disable the playground and restrict CORS in production | issues found during exploration |
+| B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`, `article`); ~~null-check `authMember` in `RolesGuard`~~, ~~`ValidationPipe({ whitelist: true })`~~, ~~playground off and CORS restricted in production~~ (all done, COMPLETED_TASKS section 9); still open: refresh tokens, rate limiting, the admin approve and reject flow for organizers (today `updateMemberByAdmin` sets `memberStatus`) | issues found during exploration |
 | ~~B10~~ (done) | Wire `Notice` and `Notification` modules | done, see COMPLETED_TASKS section 8 |
 
 ## New backend follow-ups
@@ -26,6 +26,10 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N4 | Decide whether to drop the orphaned `properties` collection and `uploads/property/` | left untouched on purpose |
 | N5 | Refund / cancel for PAID orders (`REFUNDED` status exists, no flow) | not built |
 | N6 | Admin-side listing of venues and ticket types, delete flows for both | only create, update and public reads exist |
+
+| N7 | Data update before the next deploy: give existing members a `memberEmail`, change `memberType: 'AGENT'` to `ORGANIZER` and `memberStatus: 'BLOCK'` to `SUSPENDED`, then let the unique `memberEmail` index build; run `npm run seed` | the enums and the schema changed |
+| N8 | Rename the remaining AGENT-named operations and internals (`getAgents`, `getAgentEvents`, `AgentsInquiry`, `availableAgentSorts`, `batchTopAgents`) once the frontend is ready | frontend-visible, deliberately not done |
+| N9 | Frontend: new signup and login inputs, JWT no longer holds the profile, new enum values | breaking API change |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)

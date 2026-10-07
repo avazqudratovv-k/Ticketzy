@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Venue, Venues } from '../../libs/dto/venue/venue';
@@ -7,16 +7,19 @@ import { Direction, Message } from '../../libs/enums/common.enum';
 import { VenueStatus } from '../../libs/enums/event.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { T } from '../../libs/types/common';
+import { escapeRegExp } from '../../libs/config';
 
 @Injectable()
 export class VenueService {
+	private readonly logger = new Logger(VenueService.name);
+
 	constructor(@InjectModel('Venue') private readonly venueModel: Model<Venue>) {}
 
 	public async createVenue(input: VenueInput): Promise<Venue> {
 		try {
 			return await this.venueModel.create(input);
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}
@@ -44,7 +47,7 @@ export class VenueService {
 
 		if (cityList && cityList.length) match.venueCity = { $in: cityList };
 		if (typeList && typeList.length) match.venueType = { $in: typeList };
-		if (text) match.venueName = { $regex: new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') };
+		if (text) match.venueName = { $regex: new RegExp(escapeRegExp(text), 'i') };
 
 		const result = await this.venueModel
 			.aggregate([

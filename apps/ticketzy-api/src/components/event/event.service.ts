@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import * as moment from 'moment';
@@ -18,12 +18,14 @@ import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
-import { lookupAuthMemberLiked, lookupOrganizer, lookupVenue, shapeIntoMongoObjectId } from '../../libs/config';
+import { escapeRegExp, lookupAuthMemberLiked, lookupOrganizer, lookupVenue, shapeIntoMongoObjectId } from '../../libs/config';
 
 const closedStatuses = [EventStatus.DELETE, EventStatus.CANCELLED];
 
 @Injectable()
 export class EventService {
+	private readonly logger = new Logger(EventService.name);
+
 	constructor(
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
 		@InjectModel('Venue') private readonly venueModel: Model<Venue>,
@@ -46,7 +48,7 @@ export class EventService {
 			});
 			return result;
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}
@@ -91,7 +93,7 @@ export class EventService {
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		await this.shapeMatchQuery(match, input);
-		console.log('match:', match);
+		this.logger.log(`match: ${JSON.stringify(match)}`);
 
 		const result = await this.eventModel
 			.aggregate([
@@ -139,7 +141,7 @@ export class EventService {
 		if (pricesRange) match.eventMinPrice = { $gte: pricesRange.start, $lte: pricesRange.end };
 		if (periodsRange) match.startAt = { $gte: periodsRange.start, $lte: periodsRange.end };
 
-		if (text) match.eventTitle = { $regex: new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') };
+		if (text) match.eventTitle = { $regex: new RegExp(escapeRegExp(text), 'i') };
 	}
 
 	public async getFavorites(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {

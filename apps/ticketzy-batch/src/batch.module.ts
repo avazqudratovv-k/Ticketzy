@@ -9,10 +9,11 @@ import EventSchema from 'apps/ticketzy-api/src/libs/schemas/Event.model';
 import MemberSchema from 'apps/ticketzy-api/src/libs/schemas/Member.model';
 import OrderSchema from 'apps/ticketzy-api/src/libs/schemas/Order.model';
 import TicketTypeSchema from 'apps/ticketzy-api/src/libs/schemas/TicketType.model';
+import { validateEnv } from 'apps/ticketzy-api/src/libs/env.validation';
 
 @Module({
 	imports: [
-		ConfigModule.forRoot(), 
+		ConfigModule.forRoot({ validate: validateEnv() }),
 		DatabaseModule, 
 		ScheduleModule.forRoot(),
 		MongooseModule.forFeature([

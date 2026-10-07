@@ -1,6 +1,6 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { BoardArticleService } from './board-article.service';
-import { UseGuards } from '@nestjs/common';
+import { UseGuards, Logger } from '@nestjs/common';
 import { AllBoardArticlesInquiry, BoardArticleInput, BoardArticlesInquiry } from '../../libs/dto/board-article/board-article.input';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -15,6 +15,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 
 @Resolver()
 export class BoardArticleResolver {
+	private readonly logger = new Logger(BoardArticleResolver.name);
+
     constructor (private readonly boardArticleService: BoardArticleService) {}
 
     @UseGuards(AuthGuard)
@@ -23,7 +25,7 @@ export class BoardArticleResolver {
         @Args('input') input: BoardArticleInput,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Mutation: createBoardArticle');
+        this.logger.log('Mutation: createBoardArticle');
         return await this.boardArticleService.createBoardArticle(memberId, input);
     }
 
@@ -33,7 +35,7 @@ export class BoardArticleResolver {
         @Args('articleId') input: string,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Query: getBoardArticle');
+        this.logger.log('Query: getBoardArticle');
         const articleId = shapeIntoMongoObjectId(input);
         return await this.boardArticleService.getBoardArticle(memberId, articleId);
     }
@@ -44,7 +46,7 @@ export class BoardArticleResolver {
         @Args('input') input: BoardArticleUpdate,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Mutation: updateBoardArticle');
+        this.logger.log('Mutation: updateBoardArticle');
         input._id = shapeIntoMongoObjectId(input._id);
         return await this.boardArticleService.updateBoardArticle(memberId, input);
     }
@@ -55,7 +57,7 @@ export class BoardArticleResolver {
         @Args('input') input: BoardArticlesInquiry,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticles> {
-        console.log('Query: getBoardArticles');
+        this.logger.log('Query: getBoardArticles');
         return await this.boardArticleService.getBoardArticles(memberId, input);
     }
     
@@ -65,7 +67,7 @@ export class BoardArticleResolver {
     @Args('articleId') input: string,
     @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Mutation: likeTargetBoardArticle');
+        this.logger.log('Mutation: likeTargetBoardArticle');
         const likeRefId = shapeIntoMongoObjectId(input);
         return await this.boardArticleService.likeTargetBoardArticle(memberId, likeRefId);
     }
@@ -80,7 +82,7 @@ export class BoardArticleResolver {
         @Args('input') input: AllBoardArticlesInquiry,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticles> {
-        console.log('Query: getAllBoardArticlesByAdmin');
+        this.logger.log('Query: getAllBoardArticlesByAdmin');
         return await this.boardArticleService.getAllBoardArticlesByAdmin(input);
     }
 
@@ -91,7 +93,7 @@ export class BoardArticleResolver {
         @Args('input') input: BoardArticleUpdate,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Mutation: updateBoardArticleByAdmin');
+        this.logger.log('Mutation: updateBoardArticleByAdmin');
         input._id = shapeIntoMongoObjectId(input._id);
         return await this.boardArticleService.updateBoardArticleByAdmin(input);
     }
@@ -103,7 +105,7 @@ export class BoardArticleResolver {
         @Args('articleId') input: string,
         @AuthMember('_id') memberId: ObjectId,
     ): Promise<BoardArticle> {
-        console.log('Mutation: removeBoardArticleByAdmin');
+        this.logger.log('Mutation: removeBoardArticleByAdmin');
         const articleId = shapeIntoMongoObjectId(input);
         return await this.boardArticleService.removeBoardArticleByAdmin(articleId);
 }

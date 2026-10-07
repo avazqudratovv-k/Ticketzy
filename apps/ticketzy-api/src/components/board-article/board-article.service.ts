@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { BoardArticle, BoardArticles } from '../../libs/dto/board-article/board-article';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
@@ -10,13 +10,15 @@ import { BoardArticleStatus } from '../../libs/enums/board-article.enum';
 import { ViewGroup } from '../../libs/enums/view.enum';
 import { StatisticModifier, T } from '../../libs/types/common';
 import { BoardArticleUpdate } from '../../libs/dto/board-article/board-article.update';
-import { lookupAuthMemberLiked, lookupMember, shapeIntoMongoObjectId } from '../../libs/config';
+import { escapeRegExp, lookupAuthMemberLiked, lookupMember, shapeIntoMongoObjectId } from '../../libs/config';
 import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 
 @Injectable()
 export class BoardArticleService {
+	private readonly logger = new Logger(BoardArticleService.name);
+
     constructor(
         @InjectModel('BoardArticle') private readonly boardArticleModel: Model<BoardArticle>,
         private readonly memberService: MemberService,
@@ -28,15 +30,10 @@ export class BoardArticleService {
         input.memberId = memberId;
         try {
             const result = await this.boardArticleModel.create(input);
-            await this.memberService.memberStatsEditor({
-                 _id: memberId,
-                 targetKey: 'memberArticles',
-                 modifier: 1,
-             });
 
     return result;
     } catch (err) {
-        console.log('Error, Service.model:', err.message);
+        this.logger.error(`Error, Service.model: ${err.message}`);
         throw new BadRequestException(Message.CREATE_FAILED);
         }
     }
@@ -67,7 +64,7 @@ export class BoardArticleService {
     }
 
     public async updateBoardArticle(memberId: ObjectId, input: BoardArticleUpdate): Promise<BoardArticle> {
-    const { _id, articleStatus } = input;
+    const { _id } = input;
 
     const result = await this.boardArticleModel
         .findOneAndUpdate({ _id: _id, memberId: memberId, articleStatus: BoardArticleStatus.ACTIVE }, input, {
@@ -76,14 +73,6 @@ export class BoardArticleService {
         .exec();
 
     if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
-
-    if (articleStatus === BoardArticleStatus.DELETE) {
-        await this.memberService.memberStatsEditor({
-            _id: memberId,
-            targetKey: 'memberArticles',
-            modifier: -1,
-        });
-    }
 
     return result;
     }
@@ -94,11 +83,11 @@ export class BoardArticleService {
     const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
     if (articleCategory) match.articleCategory = articleCategory;
-    if (text) match.articleTitle = { $regex: new RegExp(text, 'i') };
+    if (text) match.articleTitle = { $regex: new RegExp(escapeRegExp(text), 'i') };
     if (input.search?.memberId) {
         match.memberId = shapeIntoMongoObjectId(input.search.memberId);
     }
-    console.log('match:', match);
+    this.logger.log(`match: ${JSON.stringify(match)}`);
 
     const result = await this.boardArticleModel
         .aggregate([
@@ -180,7 +169,7 @@ export class BoardArticleService {
     }
 
     public async updateBoardArticleByAdmin(input: BoardArticleUpdate): Promise<BoardArticle> {
-    const { _id, articleStatus } = input;
+    const { _id } = input;
 
     const result = await this.boardArticleModel
         .findOneAndUpdate({ _id: _id, articleStatus: BoardArticleStatus.ACTIVE }, input, {
@@ -188,14 +177,6 @@ export class BoardArticleService {
         })
         .exec();
     if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
-
-    if (articleStatus === BoardArticleStatus.DELETE) {
-        await this.memberService.memberStatsEditor({
-            _id: result.memberId,
-            targetKey: 'memberArticles',
-            modifier: -1,
-        });
-    }
 
     return result;
     }

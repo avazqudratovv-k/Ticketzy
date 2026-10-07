@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Notice, Notices } from '../../libs/dto/notice/notice';
@@ -9,6 +9,8 @@ import { T } from '../../libs/types/common';
 
 @Injectable()
 export class NoticeService {
+	private readonly logger = new Logger(NoticeService.name);
+
 	constructor(@InjectModel('Notice') private readonly noticeModel: Model<Notice>) {}
 
 	public async getNotices(input: NoticesInquiry): Promise<Notices> {
@@ -24,7 +26,7 @@ export class NoticeService {
 		try {
 			return await this.noticeModel.create(input);
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}

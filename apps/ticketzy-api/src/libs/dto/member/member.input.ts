@@ -1,43 +1,50 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
-import { IsIn, isNotEmpty, IsNotEmpty, IsOptional, Length, Min } from 'class-validator';
-import { MemberAuthType, MemberStatus, MemberType } from '../../enums/member.enum';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, Length, Min, MinLength } from 'class-validator';
+import { MemberStatus, MemberType } from '../../enums/member.enum';
 import { availableAgentSorts, availableMemberSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 
+const normalizeEmail = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim().toLowerCase() : value);
+
+/** used by signupUser and signupOrganizer: the role and status are set by the server, never by the client */
 @InputType()
 export class MemberInput {
 	@IsNotEmpty()
-	@Length(3, 12)
+	@IsEmail()
+	@Transform(normalizeEmail)
 	@Field(() => String)
-	memberNick: string;
+	memberEmail: string;
 
 	@IsNotEmpty()
-	@Length(5, 12)
+	@MinLength(8)
 	@Field(() => String)
 	memberPassword: string;
 
-	@IsNotEmpty()
-	@Field(() => String)
-	memberPhone: string;
+	@IsOptional()
+	@Length(3, 12)
+	@Field(() => String, { nullable: true })
+	memberNick?: string;
 
 	@IsOptional()
-	@Field(() => MemberType, { nullable: true })
-	memberType?: MemberType;
+	@Field(() => String, { nullable: true })
+	memberPhone?: string;
 
 	@IsOptional()
-	@Field(() => MemberAuthType, { nullable: true })
-	memberAuthType?: MemberAuthType;
+	@Length(3, 100)
+	@Field(() => String, { nullable: true })
+	memberFullName?: string;
 }
 
 @InputType()
 export class LoginInput {
 	@IsNotEmpty()
-	@Length(3, 12)
+	@IsEmail()
+	@Transform(normalizeEmail)
 	@Field(() => String)
-	memberNick: string;
+	memberEmail: string;
 
 	@IsNotEmpty()
-	@Length(5, 12)
 	@Field(() => String)
 	memberPassword: string;
 }
@@ -78,7 +85,7 @@ export class AgentsInquiry {
 @InputType()
 class MISearch {
 	@IsOptional()
-	@Field(() => MemberType, { nullable: true })
+	@Field(() => MemberStatus, { nullable: true })
 	memberStatus?: MemberStatus;
 
 	@IsOptional()

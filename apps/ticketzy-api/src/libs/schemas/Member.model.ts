@@ -18,19 +18,26 @@ const MemberSchema = new Schema(
 		memberAuthType: {
 			type: String,
 			enum: MemberAuthType,
-			default: MemberAuthType.PHONE,
+			default: MemberAuthType.EMAIL,
+		},
+
+		memberEmail: {
+			type: String,
+			index: { unique: true },
+			required: true,
+			lowercase: true,
+			trim: true,
+			match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
 		},
 
 		memberPhone: {
 			type: String,
 			index: { unique: true, sparse: true },
-			required: true,
 		},
 
 		memberNick: {
 			type: String,
 			index: { unique: true, sparse: true },
-			required: true,
 		},
 
 		memberPassword: {
@@ -61,22 +68,12 @@ const MemberSchema = new Schema(
 			default: 0,
 		},
 
-		memberArticles: {
-			type: Number,
-			default: 0,
-		},
-
 		memberFollowers: {
 			type: Number,
 			default: 0,
 		},
 
 		memberFollowings: {
-			type: Number,
-			default: 0,
-		},
-
-		memberPoints: {
 			type: Number,
 			default: 0,
 		},

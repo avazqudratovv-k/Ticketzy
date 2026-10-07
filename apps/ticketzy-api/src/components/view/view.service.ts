@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { View } from '../../libs/dto/view/view';
@@ -11,12 +11,14 @@ import { lookupVisit } from '../../libs/config';
 
 @Injectable()
 export class ViewService {
+	private readonly logger = new Logger(ViewService.name);
+
 	constructor(@InjectModel('View') private readonly viewModel: Model<View>) {}
 
 	public async recordView(input: ViewInput): Promise<View | null> {
 		const viewExist = await this.checkViewExistence(input);
 		if (!viewExist) {
-			console.log('- New View Insert -');
+			this.logger.log('- New View Insert -');
 			return await this.viewModel.create(input);
 		} else return null;
 	}

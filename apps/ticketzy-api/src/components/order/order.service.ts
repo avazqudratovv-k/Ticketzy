@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { randomBytes } from 'crypto';
@@ -21,6 +21,8 @@ export const ORDER_HOLD_MINUTES = 15;
 
 @Injectable()
 export class OrderService {
+	private readonly logger = new Logger(OrderService.name);
+
 	constructor(
 		@InjectModel('Order') private readonly orderModel: Model<Order>,
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
@@ -70,7 +72,7 @@ export class OrderService {
 			// give every reservation made so far back
 			await Promise.all(reserved.map((item) => this.ticketTypeService.release(item.ticketTypeId, item.quantity)));
 			if (err instanceof BadRequestException) throw err;
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}
@@ -110,7 +112,7 @@ export class OrderService {
 			}
 			await this.ticketModel.insertMany(tickets);
 		} catch (err) {
-			console.log('Error, Service.model:', err.message);
+			this.logger.error(`Error, Service.model: ${err.message}`);
 			// undo so the buyer can retry while the hold is still valid
 			await this.ticketModel.deleteMany({ orderId: order._id }).exec();
 			await this.paymentModel.deleteMany({ orderId: order._id }).exec();

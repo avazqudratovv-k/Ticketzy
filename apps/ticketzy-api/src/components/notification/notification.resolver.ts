@@ -1,5 +1,5 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { UseGuards } from '@nestjs/common';
+import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { NotificationService } from './notification.service';
 import { Notification, Notifications } from '../../libs/dto/notification/notification';
@@ -10,6 +10,8 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 
 @Resolver()
 export class NotificationResolver {
+	private readonly logger = new Logger(NotificationResolver.name);
+
 	constructor(private readonly notificationService: NotificationService) {}
 
 	@UseGuards(AuthGuard)
@@ -18,7 +20,7 @@ export class NotificationResolver {
 		@Args('input') input: NotificationsInquiry,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Notifications> {
-		console.log('Query: getMyNotifications');
+		this.logger.log('Query: getMyNotifications');
 		return await this.notificationService.getMyNotifications(memberId, input);
 	}
 
@@ -28,7 +30,7 @@ export class NotificationResolver {
 		@Args('notificationId') input: string,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Notification> {
-		console.log('Mutation: markNotificationRead');
+		this.logger.log('Mutation: markNotificationRead');
 		return await this.notificationService.markNotificationRead(memberId, shapeIntoMongoObjectId(input));
 	}
 }

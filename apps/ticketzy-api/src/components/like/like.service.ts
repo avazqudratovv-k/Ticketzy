@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Like, MeLiked } from '../../libs/dto/like/like';
 import { Model, ObjectId } from 'mongoose';
@@ -12,6 +12,8 @@ import { lookupFavorite } from '../../libs/config';
 
 @Injectable()
 export class LikeService {
+	private readonly logger = new Logger(LikeService.name);
+
     constructor(@InjectModel('Like') private readonly likeModel: Model<Like>) {}
 
     public async toggleLike(input: LikeInput): Promise<number> {
@@ -26,12 +28,12 @@ export class LikeService {
             try {
                 await this.likeModel.create(input);
             } catch (err) {
-                console.log('Error, Service.model:', err.message);
+                this.logger.error(`Error, Service.model: ${err.message}`);
                 throw new BadRequestException(Message.CREATE_FAILED);
             }
         }
 
-        console.log(`- Like modifier ${modifier} -`);
+        this.logger.log(`- Like modifier ${modifier} -`);
         return modifier;
     }
 

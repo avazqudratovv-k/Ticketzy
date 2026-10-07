@@ -18,11 +18,15 @@ export class Member {
 	@Field(() => MemberAuthType)
 	memberAuthType: MemberAuthType;
 
-	@Field(() => String)
-	memberPhone: string;
+	/** only returned to the member themselves and to admins, see MemberResolver.memberEmail */
+	@Field(() => String, { nullable: true })
+	memberEmail?: string;
 
-	@Field(() => String)
-	memberNick: string;
+	@Field(() => String, { nullable: true })
+	memberPhone?: string;
+
+	@Field(() => String, { nullable: true })
+	memberNick?: string;
 
 	memberPassword?: string;
 
@@ -42,16 +46,10 @@ export class Member {
 	memberEvents: number;
 
 	@Field(() => Int)
-	memberArticles: number;
-
-	@Field(() => Int)
 	memberFollowers: number;
 
 	@Field(() => Int)
 	memberFollowings: number;
-
-	@Field(() => Int)
-	memberPoints: number;
 
 	@Field(() => Int)
 	memberLikes: number;

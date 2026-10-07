@@ -6,16 +6,19 @@ import { AuthService } from '../components/auth/auth.service';
 import { Member } from '../libs/dto/member/member';
 import * as url from 'url'
 
+/** only these fields are broadcast to other chat clients: never email, phone or status */
+type SocketMember = Pick<Member, '_id' | 'memberType' | 'memberNick' | 'memberFullName' | 'memberImage'>;
+
 interface MessagePayload {
   event: string;
   text: string;
-  memberData: Member;
+  memberData: SocketMember;
 }
 
 interface InfoPayload {
   event: string;
   totalClients: number;
-  memberData: Member;
+  memberData: SocketMember;
   action: string;
 }
 
@@ -23,7 +26,7 @@ interface InfoPayload {
 export class SocketGateway implements OnGatewayInit {
   private logger: Logger = new Logger('SocketEventsGateway');
   private summaryClient: number = 0;
-  private clientsAuthMap = new Map<WebSocket, Member>();
+  private clientsAuthMap = new Map<WebSocket, SocketMember>();
   private messagesList: MessagePayload[] = [];
 
   constructor(private authService: AuthService) {}
@@ -36,11 +39,12 @@ export class SocketGateway implements OnGatewayInit {
   }
 
 
-  private async retrieveAuth(req: any): Promise<Member> {
+  private async retrieveAuth(req: any): Promise<SocketMember> {
     try {
         const parseUrl = url.parse(req.url, true);
         const { token } = parseUrl.query;
-        return await this.authService.verifyToken(token as string);
+        const { _id, memberType, memberNick, memberFullName, memberImage } = await this.authService.authenticate(token as string);
+        return { _id, memberType, memberNick, memberFullName, memberImage };
     } catch (err) {
         return null;
     }
@@ -51,7 +55,7 @@ public async handleConnection(client: WebSocket, req: any) {
     this.summaryClient++;
     this.clientsAuthMap.set(client, authMember);
 
-    const clientNick: string = authMember?.memberNick ?? 'Guest';
+    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
     this.logger.verbose(`Connection [${clientNick}] & total [${this.summaryClient}]`);
 
     const infoMsg: InfoPayload = {
@@ -69,7 +73,7 @@ public async handleConnection(client: WebSocket, req: any) {
     this.summaryClient--;
     this.clientsAuthMap.delete(client);
 
-    const clientNick: string = authMember?.memberNick ?? 'Guest';
+    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
     this.logger.verbose(`Disconnection [${clientNick}] & total [${this.summaryClient}]`);
 
     const infoMsg: InfoPayload = {
@@ -87,7 +91,7 @@ public async handleConnection(client: WebSocket, req: any) {
     const authMember = this.clientsAuthMap.get(client);
     const newMessage: MessagePayload = { event: 'message', text: payload, memberData: authMember };
 
-    const clientNick: string = authMember?.memberNick ?? 'Guest';
+    const clientNick: string = authMember?.memberNick ?? authMember?.memberFullName ?? 'Guest';
     this.logger.verbose(`NEW MESSAGE [${clientNick}]: ${payload}`);
 
     this.messagesList.push(newMessage);

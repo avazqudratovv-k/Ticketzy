@@ -24,8 +24,8 @@ Use those files as the source of truth for AI Agent related migration history, a
 
 - Use ticketing terminology: the main catalog entity is Event, with Venue, TicketType, Order and Ticket as supporting entities (planned, see `docs/ai/BACKEND_MIGRATION.md`).
 - Do not reintroduce property, real-estate or petshop fields.
-- `MemberType.AGENT` is replaced by `MemberType.ORGANIZER` in the Organizer layer (`docs/ai/NEXT_STEPS.md` B7). Until then keep `USER`, `AGENT` and `ADMIN` unchanged.
-- Event ownership uses the organizer role once it exists; until then it uses `MemberType.AGENT`.
+- `MemberType` is `USER`, `ORGANIZER` and `ADMIN` (AGENT was renamed, `docs/ai/DECISIONS.md` #13). Roles are set only by the server; admins come from `npm run seed`.
+- Event ownership uses `MemberType.ORGANIZER`; organizer-only mutations also use `ActiveOrganizerGuard` so PENDING organizers cannot write.
 - Ticket inventory changes must be atomic (conditional `findOneAndUpdate`) so tickets cannot be oversold.
 - Event category, city and other enum values are still to be decided; record them in `docs/ai/DECISIONS.md`.
 
