@@ -60,6 +60,9 @@ export class Order {
 	@Field(() => Date, { nullable: true })
 	paidAt?: Date;
 
+	@Field(() => Date, { nullable: true })
+	refundedAt?: Date;
+
 	@Field(() => Date)
 	createdAt: Date;
 

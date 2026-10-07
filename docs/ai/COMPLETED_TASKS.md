@@ -314,5 +314,5 @@ Backend only. Decisions: DECISIONS #52 to #57. Closes N20.
 | `npm run build` | pass |
 | `npx jest` (360 tests, 21 suites) | pass |
 | GraphQL schema built offline from the refund, sales, ticket and order resolvers | pass: all new operations present |
-| Live check against a dev database, app start with the real DI graph | **not run** (in-memory model only, see N19, N23) |
+| Live check: built API (`SEAT_HOLD_SECONDS=5`) and built batch app against the dev database, driven over GraphQL: check-in, tampered and wrong-event tokens, refund, idempotent refund, refund after scan, deadlines in Seoul and Los Angeles, event cancel and retry, sales queries, batch sweep (26 checks) | pass; test data deleted by id, no leftovers. It found that `Order` did not expose `refundedAt` (fixed in `libs/dto/order/order.ts`). Real-database races (N19, N23) still not run |
 
