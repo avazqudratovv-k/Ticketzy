@@ -5,7 +5,7 @@
 **1. Analysis**
 > Analyze the current Nestar monorepo structure to transform the existing NestJS monorepo into a ticket selling platform.
 
-Produced the module, schema and enum inventory and the Property to Event mapping.
+Produced the module, schema and enum inventory and the mapping from the old catalog to Event.
 
 **2. Safe rename layer** (the scoped version worked best)
 > Safe rename layer (no business logic change). Rename all visible project/app identifiers from Nestar to Ticketzy. Do not change domain logic. Keep APIs and database collections unchanged. Update package names, environment labels, constants. Run lint and typecheck after refactoring. Please make a plan first!
@@ -23,10 +23,10 @@ Lesson: name the project and tool correctly (Ticketzy / Claude Code, not Petoria
 > Start `ticketzy-api` against the dev DB and diff the GraphQL schema against the pre-rename one (git stash or checkout `73c416b` for the baseline). Report any difference. Do not edit code.
 
 **Decouple generic services**
-> Plan first. Make LikeService, ViewService and CommentService independent of Property DTOs and PropertyService. Fix the `ViewGroup` enum used in `Like.model.ts`. No API or collection changes. Run tsc and the build after.
+> Plan first. Make LikeService, ViewService and CommentService independent of the old catalog's DTOs and service. Fix the `ViewGroup` enum used in `Like.model.ts`. No API or collection changes. Run tsc and the build after.
 
-**Property to Event**
-> Plan first. Replace the Property module with Event, Venue and TicketType. Keep deprecated Property operations as aliases for one release. List every file touched, the schema changes and the data migration. Ask me about open decisions in `docs/DECISIONS.md` before writing code.
+**Old catalog to Event**
+> Plan first. Replace the old catalog module with Event, Venue and TicketType. Keep its deprecated operations as aliases for one release. List every file touched, the schema changes and the data migration. Ask me about open decisions in `docs/DECISIONS.md` before writing code.
 
 **Orders and inventory**
 > Design Order and Ticket schemas and a createOrder mutation with atomic stock decrement (conditional `findOneAndUpdate`) and no overselling under concurrency. Include a concurrency test. No payment gateway.

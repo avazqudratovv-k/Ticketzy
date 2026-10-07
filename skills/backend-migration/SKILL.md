@@ -1,6 +1,6 @@
 ---
 name: backend-migration
-description: Continue the Ticketzy backend migration from Nestar property concepts to Ticketzy ticketing concepts while preserving the existing NestJS architecture.
+description: Continue the Ticketzy backend migration from the Nestar codebase to Ticketzy ticketing concepts while preserving the existing NestJS architecture.
 ---
 
 # Ticketzy Backend Migration
@@ -9,7 +9,7 @@ Use this skill when changing backend code for the Ticketzy ticketing migration.
 
 ## Workflow
 
-1. Search for affected property/event references before editing.
+1. Search for affected references to leftovers of the old catalog and to the entities you change before editing.
 2. Preserve the resolver/service/module structure already used by `ticketzy-api`.
 3. Keep DTOs, enums, and schemas in their existing folders.
 4. Keep `MemberType.USER | ORGANIZER | ADMIN`; never accept a role or status from client input.

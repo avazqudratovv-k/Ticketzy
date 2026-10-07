@@ -3,7 +3,7 @@
 Session: Claude Code (Sonnet 5.5), branch `modification`. The request text referred to "Codex" and "Petoria"; the actual tool and project are Claude Code and Ticketzy.
 
 ## 1. Analysis
-- Explored the monorepo: apps, modules, schemas, enums, auth, upload, WebSocket and batch. Mapped real-estate concepts to ticketing equivalents (Property to Event, Agent to Organizer; Venue, TicketType, Order, Ticket missing). Findings are summarized in `BACKEND_MIGRATION.md`.
+- Explored the monorepo: apps, modules, schemas, enums, auth, upload, WebSocket and batch. Mapped the inherited concepts to ticketing equivalents (old catalog entity to Event, agent to Organizer; Venue, TicketType, Order, Ticket missing). Findings are summarized in `BACKEND_MIGRATION.md`.
 - Confirmed `73c416b` ("start backend migration process") only added `AGENTS.md` and `SKILLS.md`, with no source changes.
 
 ## 2. Environment and identity checks
@@ -43,7 +43,7 @@ Not changed: GraphQL schema/operations, DTOs, enums, schema names, collections, 
 ## 6. Documentation
 - `docs/` created with six files: `BACKEND_MIGRATION.md`, `DECISIONS.md`, `FRONTEND_MIGRATION.md`, `COMPLETED_TASKS.md`, `NEXT_STEPS.md`, `PROMPTS.md`. No application source was changed.
 
-## 7. Layers 2 to 5: Property replaced by the Ticketzy domain
+## 7. Layers 2 to 5: the old catalog replaced by the Ticketzy domain
 
 Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner's ER diagram. Committed as `a9a3d19`.
 
@@ -51,27 +51,27 @@ Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner
 
 **Layer 2, decoupling**
 - `OrdinaryInquiry`, `PricesRange`, `PeriodsRange` moved to `libs/dto/common/common.input.ts`.
-- `LikeGroup`, `ViewGroup`, `CommentGroup`, `NotificationGroup`: `PROPERTY` became `EVENT` (`NotificationGroup` also gained `ORDER`; `NotificationType` gained `ORDER_PAID`, `EVENT_REMINDER`).
+- `LikeGroup`, `ViewGroup`, `CommentGroup`, `NotificationGroup`: the old catalog value became `EVENT` (`NotificationGroup` also gained `ORDER`; `NotificationType` gained `ORDER_PAID`, `EVENT_REMINDER`).
 - Fixed `Like.model.ts` (used `ViewGroup`); like and view unique indexes and lookups are now group-scoped; `toggleLike`, `checkLikeExistence`, `recordView` search by group.
 - `getFavoriteEvents` / `getVisitedEvents` look up `events` and no longer crash on an empty result; `CommentService` uses `EventService`; fixed the inverted `if (result!)` check in `createComment`.
 
 **Layer 3, catalog**
 - New enums `libs/enums/event.enum.ts`, `ticket.enum.ts` (values in DECISIONS #14).
-- New schemas: `Event`, `Venue`, `TicketType`, `Order` (embedded `items[]`), `Ticket`, `Payment`; `Notification` now has `eventId` / `orderId`; `Member.memberProperties` became `memberEvents` (+ DTO).
+- New schemas: `Event`, `Venue`, `TicketType`, `Order` (embedded `items[]`), `Ticket`, `Payment`; `Notification` now has `eventId` / `orderId`; the member's old catalog counter became `memberEvents` (+ DTO).
 - New modules `event`, `venue`, `ticket-type` with DTOs under `libs/dto/{event,venue,ticket-type}`. Filters: category, venue, city, price (`eventMinPrice`), date (`startAt`), text (regex now escaped). `eventMinPrice` is recomputed when ticket types change. Event date ranges are validated. The organizer's `memberEvents` counter drops once when an event first becomes CANCELLED or DELETE.
-- Removed `components/property`, `libs/dto/property`, `Property.model.ts`, `property.enum.ts`.
-- Fixed the old bug where `updateProperty` never persisted `deletedAt`.
+- Removed the old catalog module, its DTOs, schema and enum.
+- Fixed the old bug where the catalog update never persisted `deletedAt`.
 
 **Layer 4, sales**
 - Modules `order` (createOrder, payOrder, cancelOrder, getOrder, getMyOrders, getAllOrdersByAdmin; payment is a stub) and `ticket` (getMyTickets, checkInTicket).
 - `TicketTypeService.reserve` / `release`: atomic conditional `findOneAndUpdate` (see DECISIONS #17). Orders snapshot unit prices, reject mixed currencies and duplicate ticket types, and release stock on any partial failure.
 
 **Layer 5, batch**
-- Ranking now uses `events` (`batchTopEvents`) and `memberEvents` (`batchTopAgents`); rollback and ranking run hourly instead of every minute; new `batchExpireOrders` (every minute) expires PENDING orders and releases their stock.
+- Ranking now uses `events` (`batchTopEvents`) and `memberEvents` (`batchTopOrganizers`); rollback and ranking run hourly instead of every minute; new `batchExpireOrders` (every minute) expires PENDING orders and releases their stock.
 
-**Security touchpoint:** `imageUploader` / `imagesUploader` only accept `target` in `member`, `event`, `venue`, `article` and create the folder if missing.
+**Security touchpoint:** `imageUploader` / `imagesUploader` only accept `target` in `member`, `event`, `venue` (`article` was removed in section 10) and create the folder if missing.
 
-**Not changed:** `MemberType` (stays `USER / AGENT / ADMIN`), board-article, follow, socket, `.env`, the `properties` collection, `uploads/property/`.
+**Not changed:** `MemberType` (stays `USER / AGENT / ADMIN`), board-article, follow, socket, `.env`, the collection and upload folder of the old catalog.
 
 ### Validation
 
@@ -79,8 +79,8 @@ Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner
 |---|---|
 | `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
 | `npm run build` | pass |
-| `grep -rni propert apps/` | no matches |
-| GraphQL schema generated from all resolvers (no DB needed) | pass, no `propert*` in the schema |
+| grep for the old catalog's names in `apps/` | no matches |
+| GraphQL schema generated from all resolvers (no DB needed) | pass, no old catalog names in the schema |
 | `npx jest apps/ticketzy-api/src` (18 mock-based unit tests: reserve filter, order rollback, payment ticket issuing, cancel) | pass |
 | Concurrency test against a real MongoDB | **not run** (no MongoDB available here) |
 | Server start, DB connection, manual GraphQL smoke test | **not run** |
@@ -88,19 +88,19 @@ Session: Claude Code (Sonnet 5.5), branch `modification`, working from the owner
 | `eslint` | not run (`npm run lint` uses `--fix`) |
 
 ### Current operations by resolver
-- event: createEvent, getEvent, updateEvent, getEvents, getFavorites, getVisited, getAgentEvents, likeTargetEvent, getAllEventsByAdmin, updateEventByAdmin, removeEventByAdmin
+- event: createEvent, getEvent, updateEvent, getEvents, getFavorites, getVisited, getOrganizerEvents, likeTargetEvent, getAllEventsByAdmin, updateEventByAdmin, removeEventByAdmin
 - venue: createVenue, getVenue, updateVenue, getVenues
 - ticket-type: createTicketType, updateTicketType, getTicketTypes
 - order: createOrder, payOrder, cancelOrder, getOrder, getMyOrders, getAllOrdersByAdmin
 - ticket: getMyTickets, checkInTicket
-- unchanged: member, board-article, comment, follow operations
+- unchanged: member, comment, follow operations (the board was removed in section 10)
 
 ## 8. Notices and notifications wired (B10)
 
 - New modules `notice` and `notification` (resolver, service, module, DTOs under `libs/dto/{notice,notification}`). Their schemas and enums already existed; registering them is what makes the `notices` and `notifications` collections appear in MongoDB (Mongoose creates a collection on first write).
 - Notice operations: `getNotices` (public, ACTIVE only, filter by category); ADMIN: `createNotice`, `updateNotice`, `getAllNoticesByAdmin`, `removeNoticeByAdmin` (hard delete only after status DELETE).
 - Notification operations: `getMyNotifications`, `markNotificationRead` (receiver only).
-- Notifications are created by: a new event like (organizer), a comment on an event, article or member (owner), and `payOrder` (buyer receipt and organizer sale). `createNotification` never throws, skips self-notification for LIKE and COMMENT, and in `payOrder` runs outside the rollback block so it cannot undo a payment.
+- Notifications are created by: a new event like (organizer), a comment on an event (organizer), and `payOrder` (buyer receipt and organizer sale). `createNotification` never throws, skips self-notification for LIKE and COMMENT, and in `payOrder` runs outside the rollback block so it cannot undo a payment.
 - The `auths` collection is dropped from the ER (DECISIONS #21).
 
 | Check | Result |
@@ -146,4 +146,34 @@ Backend only, branch `modification`. Decisions: DECISIONS #13 (updated) and #23 
 | GraphQL schema generated offline from all resolvers | pass: `signupUser`, `signupOrganizer`, new enums, `memberEmail` once on `Member` |
 | `npm run seed` without admin env, API and batch started with a missing secret or Mongo URI | fail fast with a clear message, as intended |
 | Seed against a database, real login and signup, guards over HTTP, upload of a real file | **not run** (no database was touched) |
+
+## 10. Nestar leftovers removed (board, organizer naming, visibility)
+
+Backend only. Decisions: DECISIONS #27 to #30.
+
+**Deleted**
+- `components/board-article/` (module, resolver, service), `libs/dto/board-article/` (3 files), `libs/enums/board-article.enum.ts`, `libs/schemas/BoardArticle.model.ts`, `availableBoardArticleSorts` in `libs/config.ts`. Removed from `components.module.ts` and from `CommentModule` / `CommentService`. All 8 board operations are gone.
+- `ARTICLE` from `LikeGroup`, `ViewGroup`, `CommentGroup`, `NotificationGroup`; `articleId` from the Notification schema, DTO and `NotificationCreate`; the `article` upload target.
+
+**Comments and follow**
+- `CommentGroup` is only `EVENT`; `createComment` counts the comment on the event and notifies its organizer; `getComments` matches `commentGroup: EVENT`; `CommentService` no longer needs `MemberService`.
+- `subscribe` requires an ACTIVE ORGANIZER target (new `Message.ONLY_ORGANIZERS_CAN_BE_FOLLOWED`); `unsubscribe` no longer looks the target up; `getMemberFollowings` / `getMemberFollowers` return ACTIVE members only, filtered before pagination.
+
+**Renames (GraphQL names change)**
+- `getAgents` to `getOrganizers`, `AgentsInquiry` to `OrganizersInquiry` (its search input `AISearch` to `OISearch`), `getAgentEvents` to `getOrganizerEvents`, `AgentEventsInquiry` to `OrganizerEventsInquiry`, `availableAgentSorts` to `availableOrganizerSorts`. Batch: `batchTopAgents` to `batchTopOrganizers`, `BATCH_TOP_AGENTS` to `BATCH_TOP_ORGANIZERS`, ranking is `memberEvents * 5 + memberLikes * 2 + memberViews`.
+
+**Visibility**
+- `getMember`: ACTIVE only (own page also while PENDING). `getOrganizers` was already ACTIVE only.
+- `lookupActiveOrganizer` (`libs/config.ts`) drops events of non-ACTIVE organizers before sort and pagination in `getEvents`; `getFavorites` (`LikeService`) and `getVisited` (`ViewService`) filter the same way; `getEvent` and `likeTargetEvent` answer `NO_DATA_FOUND` for such events, and `getEvent` records no view for them.
+
+**Docs:** `BACKEND_MIGRATION.md` and `FRONTEND_MIGRATION.md` rewritten (the old sections described the previous domain), old-domain wording removed from `AGENTS.md`, both skills, `PROMPTS.md`, `DECISIONS.md`, `NEXT_STEPS.md` and this file. "Nestar" is kept only as the name of the origin codebase and in the rename history.
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` and `nest build ticketzy-batch` | pass |
+| `npx jest apps/ticketzy-api/src` (67 tests; new: follow, event visibility, comments, getMember and getOrganizers) | pass |
+| GraphQL schema generated offline | pass: no article, board, agent or old catalog names; `CommentGroup` = EVENT |
+| Reworked queries against the dev database (empty collections) | accepted by MongoDB: `getEvents`, `getOrganizers`, `getFavorites`, `getVisited`, `getMemberFollowers`, `getMemberFollowings`, `getMember`; REJECTED organizer hidden, follow of a USER refused, comment group MEMBER refused |
+| Filtering with real events, follows and a suspended organizer | **not run** (no such data; covered by mock tests of the pipelines only) |
 

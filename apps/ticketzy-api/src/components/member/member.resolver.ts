@@ -1,6 +1,6 @@
 import { Args, Context, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
 import { MemberService } from './member.service';
-import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
+import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { Member, Members } from '../../libs/dto/member/member';
 import { Logger, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -85,9 +85,9 @@ export class MemberResolver {
 
 	@UseGuards(WithoutGuard)
 	@Query(() => Members)
-	public async getAgents(@Args('input') input: AgentsInquiry, @AuthMember('_id') memberId: ObjectId): Promise<Members> {
-		this.logger.log('Query: getAgents');
-		return await this.memberService.getAgents(memberId, input);
+	public async getOrganizers(@Args('input') input: OrganizersInquiry, @AuthMember('_id') memberId: ObjectId): Promise<Members> {
+		this.logger.log('Query: getOrganizers');
+		return await this.memberService.getOrganizers(memberId, input);
 	}
 
 	@UseGuards(AuthGuard)

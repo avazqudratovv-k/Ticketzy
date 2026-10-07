@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException, Logger, 
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Member, Members } from '../../libs/dto/member/member';
-import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
+import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { MemberAuthType, MemberStatus, MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { AuthService } from '../auth/auth.service';
@@ -104,11 +104,11 @@ export class MemberService {
 	}
 
 	public async getMember(memberId: ObjectId, targetId: ObjectId): Promise<Member> {
+		// public profiles show ACTIVE members only; a member can always open their own page, even while PENDING
+		const isSelf = memberId && String(memberId) === String(targetId);
 		const search: T = {
 			_id: targetId,
-			memberStatus: {
-				$in: [MemberStatus.ACTIVE, MemberStatus.SUSPENDED],
-			},
+			memberStatus: isSelf ? { $in: [MemberStatus.ACTIVE, MemberStatus.PENDING] } : MemberStatus.ACTIVE,
 		};
 		const targetMember = await this.memberModel.findOne(search).lean().exec();
 		if (!targetMember) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
@@ -134,7 +134,7 @@ export class MemberService {
     return result ? [{ followerId: followerId, followingId: followingId, myFollowing: true }] : [];
 	}
 
-	public async getAgents(memberId: ObjectId, input: AgentsInquiry): Promise<Members> {
+	public async getOrganizers(memberId: ObjectId, input: OrganizersInquiry): Promise<Members> {
 		const { text } = input.search;
 		const match: T = { memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE };
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };

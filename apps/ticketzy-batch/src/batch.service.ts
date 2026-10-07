@@ -57,8 +57,8 @@ export class BatchService {
 		await Promise.all(promisedList);
 	}
 
-	public async batchTopAgents(): Promise<void> {
-		const agents: Member[] = await this.memberModel
+	public async batchTopOrganizers(): Promise<void> {
+		const organizers: Member[] = await this.memberModel
 			.find({
 				memberType: MemberType.ORGANIZER,
 				memberStatus: MemberStatus.ACTIVE,
@@ -66,7 +66,7 @@ export class BatchService {
 			})
 			.exec();
 
-		const promisedList = agents.map(async (ele: Member) => {
+		const promisedList = organizers.map(async (ele: Member) => {
 			const { _id, memberEvents, memberLikes, memberViews } = ele;
 			const rank = memberEvents * 5 + memberLikes * 2 + memberViews * 1;
 			return await this.memberModel.findByIdAndUpdate(_id, { memberRank: rank });

@@ -13,7 +13,6 @@ export interface NotificationCreate {
 	receiverId: ObjectId;
 	eventId?: ObjectId;
 	orderId?: ObjectId;
-	articleId?: ObjectId;
 }
 
 @InputType()

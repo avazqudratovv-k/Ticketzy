@@ -1,6 +1,6 @@
 # Ticketzy Backend Agent Instruction
 
-Ticketzy is a NestJS GraphQL monorepo migrated from Real estate platform into a ticket selling platform
+Ticketzy is a NestJS GraphQL monorepo for a ticket selling platform (it started from the Nestar codebase, see `docs/ai/BACKEND_MIGRATION.md`)
 
 ## Read First
 
@@ -18,12 +18,12 @@ Use those files as the source of truth for AI Agent related migration history, a
 - Backend apps are `ticketzy-api` and `ticketzy-batch`.
 - Keep the existing NestJS resolver/service/module pattern based on MVC and DI.
 - Keep DTOs, enums, schemas under `apps/ticketzy-api/src/libs`.
-- Keep shared modules reusable: auth, member, like, view, comment, follow, board article, socket.
+- Keep shared modules reusable: auth, member, like, view, comment (events only), follow (organizers only), socket.
 
 ## Domain Rules
 
 - Use ticketing terminology: the main catalog entity is Event, with Venue, TicketType, Order and Ticket as supporting entities (planned, see `docs/ai/BACKEND_MIGRATION.md`).
-- Do not reintroduce property, real-estate or petshop fields.
+- Do not reintroduce fields or terms from the previous catalog; the catalog entity is Event. The community board is removed.
 - `MemberType` is `USER`, `ORGANIZER` and `ADMIN` (AGENT was renamed, `docs/ai/DECISIONS.md` #13). Roles are set only by the server; admins come from `npm run seed`.
 - Event ownership uses `MemberType.ORGANIZER`; organizer-only mutations also use `ActiveOrganizerGuard` so PENDING organizers cannot write.
 - Ticket inventory changes must be atomic (conditional `findOneAndUpdate`) so tickets cannot be oversold.

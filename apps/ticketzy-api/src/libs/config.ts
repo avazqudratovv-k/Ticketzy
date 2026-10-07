@@ -1,6 +1,6 @@
 import { ObjectId } from 'bson';
 
-export const availableAgentSorts = ['createdAt', 'updatedAt', 'memberLikes', 'memberViews', 'memberRank'];
+export const availableOrganizerSorts = ['createdAt', 'updatedAt', 'memberLikes', 'memberViews', 'memberRank'];
 export const availableMemberSorts = ['createdAt', 'updatedAt', 'memberLikes', 'memberViews'];
 export const availableEventSorts = [
   'createdAt',
@@ -13,7 +13,6 @@ export const availableEventSorts = [
 ];
 export const availableOrderSorts = ['createdAt', 'updatedAt', 'totalAmount'];
 export const availableVenueSorts = ['createdAt', 'updatedAt', 'venueName', 'venueCapacity'];
-export const availableBoardArticleSorts = ['createdAt', 'updatedAt', 'articleLikes', 'articleViews'];
 export const availableCommentSorts= ['createdAt', 'updatedAt']
 
 /** IMAGE CONFIGURATION */
@@ -23,9 +22,10 @@ import { unlink } from 'fs/promises';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { Message } from './enums/common.enum';
+import { MemberStatus } from './enums/member.enum';
 import { T } from './types/common';
 
-export const validUploadTargets = ['member', 'event', 'venue', 'article'];
+export const validUploadTargets = ['member', 'event', 'venue'];
 
 /** the real file type is read from the first bytes, the client-sent filename and mimetype are never trusted */
 const imageSignatures: { ext: string; signature: number[] }[] = [
@@ -197,6 +197,13 @@ export const lookupVenue = {
     as: 'venueData',
   },
 };
+
+/** public event queries: attaches the organizer as memberData and drops events whose organizer is not ACTIVE */
+export const lookupActiveOrganizer = [
+  lookupOrganizer,
+  { $unwind: '$memberData' },
+  { $match: { 'memberData.memberStatus': MemberStatus.ACTIVE } },
+];
 
 export const lookupFavorite = {
   $lookup: {

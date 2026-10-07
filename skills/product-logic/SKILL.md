@@ -13,8 +13,8 @@ Use this skill for review-only passes or pre-edit analysis of the event API.
   - `createEvent`
   - `getEvent`
   - and where it is related
-- Confirm shared operations such as `getSavedEvents` and `getVisitedEvents` return event data.
+- Confirm shared operations such as `getFavorites`, `getVisited` and `getOrganizerEvents` return event data.
 - Confirm DTOs, schemas, and enums agree on event fields and nullability.
 - Confirm filters use event category, city or venue, date, price and etc.
-- Confirm no property, real-estate or petshop terminology remains.
+- Confirm no terminology from the previous catalog remains (listing, location enums, room or area filters, agent).
 - Report real findings with paths and behavior impact.

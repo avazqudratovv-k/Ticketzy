@@ -4,6 +4,7 @@ import { Model, ObjectId } from 'mongoose';
 import { Follower, Followers, Following, Followings } from '../../libs/dto/follow/follow';
 import { MemberService } from '../member/member.service';
 import { Direction, Message } from '../../libs/enums/common.enum';
+import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { FollowInquiry } from '../../libs/dto/follow/follow.input';
 import { T } from '../../libs/types/common';
 import { lookupAuthMemberFollowed, lookupAuthMemberLiked, lookupFollowerData, lookupFollowingData } from '../../libs/config';
@@ -22,8 +23,9 @@ export class FollowService {
         throw new InternalServerErrorException(Message.SELF_SUBSCRIPTION_DENIED);
     }
 
+    // only active organizers can be followed (getMember hides every member that is not ACTIVE)
     const targetMember = await this.memberService.getMember(null, followingId);
-    if (!targetMember) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+    if (targetMember.memberType !== MemberType.ORGANIZER) throw new BadRequestException(Message.ONLY_ORGANIZERS_CAN_BE_FOLLOWED);
 
     const result = await this.registerSubscription(followerId, followingId);
 
@@ -46,9 +48,7 @@ export class FollowService {
     }
 
     public async unsubscribe(followerId: ObjectId, followingId: ObjectId): Promise<Follower> {
-    const targetMember = await this.memberService.getMember(null, followingId);
-    if (!targetMember) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
-
+    // no lookup of the target: a follower must always be able to leave, even after the organizer was suspended
     const result = await this.followModel.findOneAndDelete({
         followingId: followingId,
         followerId: followerId,
@@ -71,6 +71,9 @@ export class FollowService {
         .aggregate([
             { $match: match },
             { $sort: { createdAt: Direction.DESC } },
+            lookupFollowingData,
+            { $unwind: '$followingData' },
+            { $match: { 'followingData.memberStatus': MemberStatus.ACTIVE } },
             {
                 $facet: {
                     list: [
@@ -81,8 +84,6 @@ export class FollowService {
                             followerId: memberId, 
                             followingId: '$followingId'
                         }),
-                        lookupFollowingData,
-                        { $unwind: '$followingData' },
                     ],
                     metaCounter: [{ $count: 'total' }],
                 },
@@ -105,6 +106,9 @@ export class FollowService {
         .aggregate([
             { $match: match },
             { $sort: { createdAt: Direction.DESC } },
+            lookupFollowerData,
+            { $unwind: '$followerData' },
+            { $match: { 'followerData.memberStatus': MemberStatus.ACTIVE } },
             {
                 $facet: {
                     list: [
@@ -115,8 +119,6 @@ export class FollowService {
                             followerId: memberId, 
                             followingId: '$followerId'
                         }),
-                        lookupFollowerData,
-                        { $unwind: '$followerData' },
                     ],
                     metaCounter: [{ $count: 'total' }],
                 },

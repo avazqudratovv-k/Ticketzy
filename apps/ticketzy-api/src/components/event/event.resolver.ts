@@ -3,7 +3,7 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { EventService } from './event.service';
 import { Event, Events } from '../../libs/dto/event/event';
-import { AgentEventsInquiry, AllEventsInquiry, EventInput, EventsInquiry } from '../../libs/dto/event/event.input';
+import { OrganizerEventsInquiry, AllEventsInquiry, EventInput, EventsInquiry } from '../../libs/dto/event/event.input';
 import { EventUpdate } from '../../libs/dto/event/event.update';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -87,12 +87,12 @@ export class EventResolver {
 	@Roles(MemberType.ORGANIZER)
 	@UseGuards(RolesGuard)
 	@Query((returns) => Events)
-	public async getAgentEvents(
-		@Args('input') input: AgentEventsInquiry,
+	public async getOrganizerEvents(
+		@Args('input') input: OrganizerEventsInquiry,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Events> {
-		this.logger.log('Query: getAgentEvents');
-		return await this.eventService.getAgentEvents(memberId, input);
+		this.logger.log('Query: getOrganizerEvents');
+		return await this.eventService.getOrganizerEvents(memberId, input);
 	}
 
 	@UseGuards(AuthGuard)

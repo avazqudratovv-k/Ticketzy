@@ -1,11 +1,9 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
-import { MemberService } from '../member/member.service';
 import { EventService } from '../event/event.service';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
-import { BoardArticleService } from '../board-article/board-article.service';
 import { CommentInput, CommentsInquiry } from '../../libs/dto/comment/comment.input';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { CommentGroup, CommentStatus } from '../../libs/enums/comment.enum';
@@ -21,9 +19,7 @@ export class CommentService {
 
     constructor(
         @InjectModel('Comment') private readonly commentModel: Model<Comment>,
-        private readonly memberService: MemberService,
         private readonly eventService: EventService,
-        private readonly boardArticleService: BoardArticleService,
         private readonly notificationService: NotificationService,
     ) {}
 
@@ -46,50 +42,19 @@ export class CommentService {
             authorId: memberId,
         };
 
-        switch (input.commentGroup) {
-            case CommentGroup.EVENT: {
-                const event = await this.eventService.eventStatsEditor({
-                    _id: input.commentRefId,
-                    targetKey: 'eventComments',
-                    modifier: 1,
-                });
-                if (event)
-                    await this.notificationService.createNotification({
-                        ...notice,
-                        notificationGroup: NotificationGroup.EVENT,
-                        receiverId: event.organizerId,
-                        eventId: input.commentRefId,
-                    });
-                break;
-            }
-            case CommentGroup.ARTICLE: {
-                const article = await this.boardArticleService.boardArticleStatsEditor({
-                    _id: input.commentRefId,
-                    targetKey: 'articleComments',
-                    modifier: 1,
-                });
-                if (article)
-                    await this.notificationService.createNotification({
-                        ...notice,
-                        notificationGroup: NotificationGroup.ARTICLE,
-                        receiverId: article.memberId,
-                        articleId: input.commentRefId,
-                    });
-                break;
-            }
-            case CommentGroup.MEMBER:
-                await this.memberService.memberStatsEditor({
-                    _id: input.commentRefId,
-                    targetKey: 'memberComments',
-                    modifier: 1,
-                });
-                await this.notificationService.createNotification({
-                    ...notice,
-                    notificationGroup: NotificationGroup.MEMBER,
-                    receiverId: input.commentRefId,
-                });
-                break;
-        }
+        // comments exist on events only (CommentGroup has a single value)
+        const event = await this.eventService.eventStatsEditor({
+            _id: input.commentRefId,
+            targetKey: 'eventComments',
+            modifier: 1,
+        });
+        if (event)
+            await this.notificationService.createNotification({
+                ...notice,
+                notificationGroup: NotificationGroup.EVENT,
+                receiverId: event.organizerId,
+                eventId: input.commentRefId,
+            });
         return result;
     }
 
@@ -112,7 +77,7 @@ export class CommentService {
 
     public async getComments(memberId: ObjectId, input: CommentsInquiry): Promise<Comments> {
     const { commentRefId } = input.search;
-    const match: T = { commentRefId: commentRefId, commentStatus: CommentStatus.ACTIVE };
+    const match: T = { commentGroup: CommentGroup.EVENT, commentRefId: commentRefId, commentStatus: CommentStatus.ACTIVE };
     const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
     const result: Comments[] = await this.commentModel.aggregate([

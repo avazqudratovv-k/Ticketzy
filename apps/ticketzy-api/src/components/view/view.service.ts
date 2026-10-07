@@ -8,6 +8,7 @@ import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { T } from '../../libs/types/common';
 import { ViewGroup } from '../../libs/enums/view.enum';
 import { lookupVisit } from '../../libs/config';
+import { MemberStatus } from '../../libs/enums/member.enum';
 
 @Injectable()
 export class ViewService {
@@ -46,13 +47,15 @@ export class ViewService {
         			},
       			},
       			{ $unwind: '$visitedEvent' },
+      			lookupVisit,
+      			{ $unwind: '$visitedEvent.memberData' },
+      			// events of an organizer that is not ACTIVE are hidden
+      			{ $match: { 'visitedEvent.memberData.memberStatus': MemberStatus.ACTIVE } },
       			{
         			$facet: {
           				list: [
             				{ $skip: (page - 1) * limit },
             				{ $limit: limit },
-            				lookupVisit,
-            				{ $unwind: '$visitedEvent.memberData' },
           				],
           		metaCounter: [{ $count: 'total' }],
         		},

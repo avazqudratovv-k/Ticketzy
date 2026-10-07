@@ -8,9 +8,8 @@ registerEnumType(CommentStatus, {
 	name: 'CommentStatus',
 });
 
+/** comments are written on events only */
 export enum CommentGroup {
-	MEMBER = 'MEMBER',
-	ARTICLE = 'ARTICLE',
 	EVENT = 'EVENT',
 }
 registerEnumType(CommentGroup, {

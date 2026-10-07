@@ -118,7 +118,7 @@ class AESearch {
 }
 
 @InputType()
-export class AgentEventsInquiry {
+export class OrganizerEventsInquiry {
 	@IsNotEmpty()
 	@Min(1)
 	@Field(() => Int)

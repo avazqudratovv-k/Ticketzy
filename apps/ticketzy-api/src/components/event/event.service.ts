@@ -4,7 +4,7 @@ import { Model, ObjectId } from 'mongoose';
 import * as moment from 'moment';
 import { Event, Events } from '../../libs/dto/event/event';
 import { Direction, Message } from '../../libs/enums/common.enum';
-import { AgentEventsInquiry, AllEventsInquiry, EventInput, EventsInquiry } from '../../libs/dto/event/event.input';
+import { OrganizerEventsInquiry, AllEventsInquiry, EventInput, EventsInquiry } from '../../libs/dto/event/event.input';
 import { EventUpdate } from '../../libs/dto/event/event.update';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { MemberService } from '../member/member.service';
@@ -18,7 +18,14 @@ import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
-import { escapeRegExp, lookupAuthMemberLiked, lookupOrganizer, lookupVenue, shapeIntoMongoObjectId } from '../../libs/config';
+import {
+	escapeRegExp,
+	lookupActiveOrganizer,
+	lookupAuthMemberLiked,
+	lookupOrganizer,
+	lookupVenue,
+	shapeIntoMongoObjectId,
+} from '../../libs/config';
 
 const closedStatuses = [EventStatus.DELETE, EventStatus.CANCELLED];
 
@@ -62,6 +69,10 @@ export class EventService {
 		const targetEvent: Event = await this.eventModel.findOne(search).lean().exec();
 		if (!targetEvent) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		// an event whose organizer is not ACTIVE is hidden: getMember throws NO_DATA_FOUND for such members,
+		// and this runs before any view is recorded
+		targetEvent.memberData = await this.memberService.getMember(null, targetEvent.organizerId);
+
 		if (memberId) {
 			const viewInput = { memberId: memberId, viewRefId: eventId, viewGroup: ViewGroup.EVENT };
 			const newView = await this.viewService.recordView(viewInput);
@@ -74,7 +85,6 @@ export class EventService {
 			targetEvent.meLiked = await this.likeService.checkLikeExistence(likeInput);
 		}
 
-		targetEvent.memberData = await this.memberService.getMember(null, targetEvent.organizerId);
 		targetEvent.venueData = await this.venueModel.findById(targetEvent.venueId).lean().exec();
 		return targetEvent;
 	}
@@ -98,6 +108,7 @@ export class EventService {
 		const result = await this.eventModel
 			.aggregate([
 				{ $match: match },
+				...lookupActiveOrganizer,
 				{ $sort: sort },
 				{
 					$facet: {
@@ -105,8 +116,6 @@ export class EventService {
 							{ $skip: (input.page - 1) * input.limit },
 							{ $limit: input.limit },
 							lookupAuthMemberLiked(memberId),
-							lookupOrganizer,
-							{ $unwind: '$memberData' },
 							lookupVenue,
 							{ $unwind: { path: '$venueData', preserveNullAndEmptyArrays: true } },
 						],
@@ -152,7 +161,7 @@ export class EventService {
 		return await this.viewService.getVisitedEvents(memberId, input);
 	}
 
-	public async getAgentEvents(memberId: ObjectId, input: AgentEventsInquiry): Promise<Events> {
+	public async getOrganizerEvents(memberId: ObjectId, input: OrganizerEventsInquiry): Promise<Events> {
 		const { eventStatus } = input.search;
 		if (eventStatus === EventStatus.DELETE) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 
@@ -192,6 +201,7 @@ export class EventService {
 			.findOne({ _id: likeRefId, eventStatus: { $in: viewableEventStatuses } })
 			.exec();
 		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		await this.memberService.getMember(null, target.organizerId); // hidden when the organizer is not ACTIVE
 
 		const input: LikeInput = {
 			memberId: memberId,

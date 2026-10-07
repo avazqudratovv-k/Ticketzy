@@ -2,7 +2,7 @@ import { Field, InputType, Int } from '@nestjs/graphql';
 import { Transform } from 'class-transformer';
 import { IsEmail, IsIn, IsNotEmpty, IsOptional, Length, Min, MinLength } from 'class-validator';
 import { MemberStatus, MemberType } from '../../enums/member.enum';
-import { availableAgentSorts, availableMemberSorts } from '../../config';
+import { availableOrganizerSorts, availableMemberSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 
 const normalizeEmail = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim().toLowerCase() : value);
@@ -50,14 +50,14 @@ export class LoginInput {
 }
 
 @InputType()
-class AISearch {
+class OISearch {
 	@IsOptional()
 	@Field(() => String, { nullable: true })
 	text?: string;
 }
 
 @InputType()
-export class AgentsInquiry {
+export class OrganizersInquiry {
 	@IsNotEmpty()
 	@Min(1)
 	@Field(() => Int)
@@ -69,7 +69,7 @@ export class AgentsInquiry {
 	limit: number;
 
 	@IsOptional()
-	@IsIn(availableAgentSorts)
+	@IsIn(availableOrganizerSorts)
 	@Field(() => String, { nullable: true })
 	sort?: string;
 
@@ -78,8 +78,8 @@ export class AgentsInquiry {
 	direction?: Direction;
 
 	@IsNotEmpty()
-	@Field(() => AISearch)
-	search: AISearch;
+	@Field(() => OISearch)
+	search: OISearch;
 }
 
 @InputType()

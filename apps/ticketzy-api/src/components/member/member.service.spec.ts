@@ -111,3 +111,36 @@ describe('signup input validation (global ValidationPipe)', () => {
 		await expect(run({ memberEmail: 'not-an-email', memberPassword: 'longenough1' })).rejects.toBeDefined();
 	});
 });
+
+describe('MemberService public listings', () => {
+	let memberModel: any;
+	let service: MemberService;
+
+	beforeEach(() => {
+		memberModel = {
+			findOne: jest.fn().mockReturnValue({ lean: () => ({ exec: jest.fn().mockResolvedValue({ _id: 'm1', memberViews: 0 }) }) }),
+			aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }),
+		};
+		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+	});
+
+	it('getMember shows ACTIVE members only to everyone else', async () => {
+		await service.getMember(null, 'm1' as any);
+		await service.getMember('someone-else' as any, 'm1' as any).catch(() => undefined);
+
+		for (const [search] of memberModel.findOne.mock.calls) expect(search.memberStatus).toBe(MemberStatus.ACTIVE);
+	});
+
+	it('getMember lets a member open their own page while PENDING', async () => {
+		await service.getMember('m1' as any, 'm1' as any).catch(() => undefined);
+
+		expect(memberModel.findOne.mock.calls[0][0].memberStatus).toEqual({ $in: [MemberStatus.ACTIVE, MemberStatus.PENDING] });
+	});
+
+	it('getOrganizers lists ACTIVE organizers only', async () => {
+		await service.getOrganizers(null as any, { page: 1, limit: 10, search: {} } as any);
+
+		const [{ $match }] = memberModel.aggregate.mock.calls[0][0];
+		expect($match).toEqual({ memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE });
+	});
+});

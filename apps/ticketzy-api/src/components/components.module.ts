@@ -12,7 +12,6 @@ import { CommentModule } from './comment/comment.module';
 import { LikeModule } from './like/like.module';
 import { ViewModule } from './view/view.module';
 import { FollowModule } from './follow/follow.module';
-import { BoardArticleModule } from './board-article/board-article.module';
 
 @Module({
 	imports: [
@@ -25,7 +24,6 @@ import { BoardArticleModule } from './board-article/board-article.module';
 		TicketModule,
 		NoticeModule,
 		NotificationModule,
-		BoardArticleModule,
 		LikeModule,
 		ViewModule,
 		CommentModule,

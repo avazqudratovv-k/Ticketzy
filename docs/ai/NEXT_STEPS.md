@@ -8,13 +8,13 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 |---|---|---|
 | ~~B1~~ (done) | `rm -rf dist`, then rebuild both apps | remove stale `nestar-*` output |
 | ~~B2~~ (done) | Run `npm install --package-lock-only` and check the lockfile diff | the lockfile name was edited by hand |
-| ~~B3~~ (done) | Decouple `LikeService`/`ViewService`/`CommentService` from Property DTOs and `PropertyService` | prerequisite for replacing Property |
+| ~~B3~~ (done) | Decouple `LikeService`/`ViewService`/`CommentService` from the old catalog's DTOs and service | prerequisite for replacing it |
 | ~~B4~~ (done) | Fix `Like.model.ts` (uses `ViewGroup` as its enum) and make `*Group` enums entity-agnostic | correctness plus decoupling |
-| ~~B5~~ (done) | Replace Property with Event, Venue, TicketType (schemas, DTOs, resolver, service) | core domain |
+| ~~B5~~ (done) | Replace the old catalog with Event, Venue, TicketType (schemas, DTOs, resolver, service) | core domain |
 | ~~B6~~ (done) | Add Order and Ticket with atomic inventory (conditional `findOneAndUpdate`); issue ticket codes | selling tickets |
 | ~~B7~~ (done) | `MemberType.AGENT` renamed to `ORGANIZER`, statuses PENDING / ACTIVE / REJECTED / SUSPENDED / DELETE (DECISIONS #13, #23 to #25) | role change |
 | ~~B8~~ (done) | Rewrite batch ranking jobs for events and organizers; set a sane cron cadence (currently every minute) | batch app |
-| B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`, `article`); ~~null-check `authMember` in `RolesGuard`~~, ~~`ValidationPipe({ whitelist: true })`~~, ~~playground off and CORS restricted in production~~ (all done, COMPLETED_TASKS section 9); still open: refresh tokens, rate limiting, the admin approve and reject flow for organizers (today `updateMemberByAdmin` sets `memberStatus`) | issues found during exploration |
+| B9 | Security: ~~validate the upload `target` (path traversal)~~ (done, whitelist `member`, `event`, `venue`); ~~null-check `authMember` in `RolesGuard`~~, ~~`ValidationPipe({ whitelist: true })`~~, ~~playground off and CORS restricted in production~~ (all done, COMPLETED_TASKS section 9); still open: refresh tokens, rate limiting, the admin approve and reject flow for organizers (today `updateMemberByAdmin` sets `memberStatus`) | issues found during exploration |
 | ~~B10~~ (done) | Wire `Notice` and `Notification` modules | done, see COMPLETED_TASKS section 8 |
 
 ## New backend follow-ups
@@ -23,13 +23,15 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N1 | Replace the manual `payOrder` stub with a provider flow (webhook sets PAID) | anyone can currently pay their own order for free |
 | N2 | Run the concurrency test for `TicketTypeService.reserve` against a real MongoDB (two parallel orders for the last ticket) | the unit tests use mocks and cannot prove atomicity |
 | N3 | Smoke-test the new operations against a dev DB and drop the old `likes` / `views` unique indexes (`memberId_1_likeRefId_1`, `memberId_1_viewRefId_1`) | schema change is not applied to existing indexes |
-| N4 | Decide whether to drop the orphaned `properties` collection and `uploads/property/` | left untouched on purpose |
+| N4 | Decide whether to drop the orphaned collection and upload folders of the old catalog (everything under `uploads/` except `member`, `event`, `venue`) | left untouched on purpose |
 | N5 | Refund / cancel for PAID orders (`REFUNDED` status exists, no flow) | not built |
 | N6 | Admin-side listing of venues and ticket types, delete flows for both | only create, update and public reads exist |
 
 | N7 | Data update before the next deploy: give existing members a `memberEmail`, change `memberType: 'AGENT'` to `ORGANIZER` and `memberStatus: 'BLOCK'` to `SUSPENDED`, then let the unique `memberEmail` index build; run `npm run seed` | the enums and the schema changed |
-| N8 | Rename the remaining AGENT-named operations and internals (`getAgents`, `getAgentEvents`, `AgentsInquiry`, `availableAgentSorts`, `batchTopAgents`) once the frontend is ready | frontend-visible, deliberately not done |
+| ~~N8~~ (done) | Agent-named operations renamed to organizer names (DECISIONS #27) | frontend-visible |
 | N9 | Frontend: new signup and login inputs, JWT no longer holds the profile, new enum values | breaking API change |
+| N10 | Clean leftovers of the removed board in the database: the board collection, `likes` / `views` with group ARTICLE, `comments` with group MEMBER or ARTICLE, `notifications` with group ARTICLE, `uploads/article/` | the code no longer reads them |
+| N11 | Apply the organizer-must-be-ACTIVE rule to `getTicketTypes` and `createOrder` (events of a suspended organizer can still be bought today) | DECISIONS #30 gap |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)
@@ -38,7 +40,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 |---|---|
 | F1 | Locate the Next.js repo and inventory pages and GraphQL documents |
 | F2 | Rebrand strings, then add the terminology constants |
-| F3 | Migrate property pages to Event operations once the backend ships aliases |
+| F3 | Migrate the old catalog pages to the Event operations (no aliases exist) |
 | F4 | Build ticket selection, checkout, my tickets |
 
 ## Testing
@@ -46,7 +48,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | # | Task |
 |---|---|
 | T1 | Start the API and compare schema introspection with the pre-rename schema (expect no diff) |
-| T2 | Smoke-test login, `getProperties` and image upload against a dev DB |
+| T2 | Smoke-test login, `getEvents` and image upload against a dev DB |
 | T3 | Add unit tests for the auth guards and the inventory decrement (concurrency) |
 | T4 | Replace the boilerplate e2e specs with real ones; the batch spec needs Mongo |
 | T5 | Run the prettier formatting pass as one isolated commit, then keep `npm run lint` clean |

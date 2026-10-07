@@ -9,6 +9,7 @@ import { LikeGroup } from '../../libs/enums/like.enum';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { Events } from '../../libs/dto/event/event';
 import { lookupFavorite } from '../../libs/config';
+import { MemberStatus } from '../../libs/enums/member.enum';
 
 @Injectable()
 export class LikeService {
@@ -62,13 +63,15 @@ export class LikeService {
                 },
             },
             { $unwind: '$favoriteEvent' },
+            lookupFavorite,
+            { $unwind: '$favoriteEvent.memberData' },
+            // events of an organizer that is not ACTIVE are hidden
+            { $match: { 'favoriteEvent.memberData.memberStatus': MemberStatus.ACTIVE } },
             {
               $facet: {
                     list: [
                         { $skip: (page - 1) * limit }, 
                         { $limit: limit }, 
-                        lookupFavorite,
-                        { $unwind: '$favoriteEvent.memberData' },
                     ],
                     metaCounter: [{ $count: 'total' }]
                 },
