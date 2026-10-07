@@ -1,10 +1,28 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
-import { IsIn, IsNotEmpty, IsOptional, Length, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsIn, IsNotEmpty, IsOptional, IsString, Length, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ObjectId } from 'mongoose';
-import { EventCategory, EventStatus } from '../../enums/event.enum';
+import { EventCategory, EventLocale, EventStatus, SeatingType } from '../../enums/event.enum';
 import { availableEventSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 import { PeriodsRange, PricesRange } from '../common/common.input';
+
+@InputType()
+export class EventTranslationInput {
+	@IsNotEmpty()
+	@Field(() => EventLocale)
+	locale: EventLocale;
+
+	@IsNotEmpty()
+	@Length(3, 100)
+	@Field(() => String)
+	title: string;
+
+	@IsOptional()
+	@Length(5, 2000)
+	@Field(() => String, { nullable: true })
+	description?: string;
+}
 
 @InputType()
 export class EventInput {
@@ -13,8 +31,8 @@ export class EventInput {
 	eventCategory: EventCategory;
 
 	@IsOptional()
-	@Field(() => EventStatus, { nullable: true })
-	eventStatus?: EventStatus;
+	@Field(() => SeatingType, { nullable: true })
+	seatingType?: SeatingType;
 
 	@IsNotEmpty()
 	@Length(3, 100)
@@ -25,6 +43,12 @@ export class EventInput {
 	@Length(5, 2000)
 	@Field(() => String, { nullable: true })
 	eventDesc?: string;
+
+	@IsOptional()
+	@ValidateNested({ each: true })
+	@Type(() => EventTranslationInput)
+	@Field(() => [EventTranslationInput], { nullable: true })
+	eventTranslations?: EventTranslationInput[];
 
 	@IsNotEmpty()
 	@Field(() => [String])
@@ -144,7 +168,7 @@ export class OrganizerEventsInquiry {
 }
 
 @InputType()
-class ALESearch {
+class EBASearch {
 	@IsOptional()
 	@Field(() => EventStatus, { nullable: true })
 	eventStatus?: EventStatus;
@@ -152,10 +176,18 @@ class ALESearch {
 	@IsOptional()
 	@Field(() => [EventCategory], { nullable: true })
 	eventCategoryList?: EventCategory[];
+
+	@IsOptional()
+	@Field(() => String, { nullable: true })
+	organizerId?: ObjectId;
+
+	@IsOptional()
+	@Field(() => String, { nullable: true })
+	text?: string;
 }
 
 @InputType()
-export class AllEventsInquiry {
+export class EventsByAdminInquiry {
 	@IsNotEmpty()
 	@Min(1)
 	@Field(() => Int)
@@ -176,6 +208,20 @@ export class AllEventsInquiry {
 	direction?: Direction;
 
 	@IsNotEmpty()
-	@Field(() => ALESearch)
-	search: ALESearch;
+	@Field(() => EBASearch)
+	search: EBASearch;
+}
+
+/** reject and cancel: the reason may not be blank (checked in the service, with its own Message) */
+@InputType()
+export class EventReasonInput {
+	@IsNotEmpty()
+	@Field(() => String)
+	eventId: ObjectId;
+
+	@IsString()
+	@MaxLength(500)
+	@Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+	@Field(() => String)
+	reason: string;
 }

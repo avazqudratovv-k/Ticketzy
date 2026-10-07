@@ -5,7 +5,7 @@ import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
 import { TicketTypeInput, TicketTypeUpdate } from '../../libs/dto/ticket-type/ticket-type.input';
 import { Event } from '../../libs/dto/event/event';
 import { Message } from '../../libs/enums/common.enum';
-import { EventStatus } from '../../libs/enums/event.enum';
+import { closedEventStatuses } from '../../libs/enums/event.enum';
 import { TicketTypeStatus } from '../../libs/enums/ticket.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { Member } from '../../libs/dto/member/member';
@@ -104,7 +104,6 @@ export class TicketTypeService {
 					{ ticketTypeStatus: TicketTypeStatus.SOLD_OUT },
 				)
 				.exec();
-			await this.markEventSoldOutIfExhausted(result.eventId);
 		}
 		return result;
 	}
@@ -130,20 +129,6 @@ export class TicketTypeService {
 				{ ticketTypeStatus: TicketTypeStatus.ACTIVE },
 			)
 			.exec();
-		await this.eventModel
-			.updateOne({ _id: result.eventId, eventStatus: EventStatus.SOLD_OUT }, { eventStatus: EventStatus.ON_SALE })
-			.exec();
-	}
-
-	private async markEventSoldOutIfExhausted(eventId: ObjectId): Promise<void> {
-		const available = await this.ticketTypeModel
-			.countDocuments({ eventId: eventId, ticketTypeStatus: { $ne: TicketTypeStatus.SOLD_OUT } })
-			.exec();
-		if (available === 0) {
-			await this.eventModel
-				.updateOne({ _id: eventId, eventStatus: EventStatus.ON_SALE }, { eventStatus: EventStatus.SOLD_OUT })
-				.exec();
-		}
 	}
 
 	/** keeps events.eventMinPrice in step with the cheapest sellable ticket type */
@@ -158,7 +143,7 @@ export class TicketTypeService {
 	}
 
 	private async assertCanManageEvent(eventId: ObjectId, memberId: ObjectId, memberType: MemberType): Promise<void> {
-		const search: T = { _id: eventId, eventStatus: { $ne: EventStatus.DELETE } };
+		const search: T = { _id: eventId, eventStatus: { $nin: closedEventStatuses } };
 		if (memberType !== MemberType.ADMIN) search.organizerId = memberId;
 
 		const event = await this.eventModel.findOne(search).lean().exec();

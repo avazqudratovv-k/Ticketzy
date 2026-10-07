@@ -10,7 +10,7 @@ import { Event } from '../../libs/dto/event/event';
 import { Member } from '../../libs/dto/member/member';
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
-import { EventStatus } from '../../libs/enums/event.enum';
+import { publicEventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentProvider, PaymentStatus, TicketStatus } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
 import { lookupEvent, shapeIntoMongoObjectId } from '../../libs/config';
@@ -39,7 +39,7 @@ export class OrderService {
 		const eventId = shapeIntoMongoObjectId(input.eventId);
 		const now = new Date();
 
-		const event = await this.eventModel.findOne({ _id: eventId, eventStatus: EventStatus.ON_SALE }).lean().exec();
+		const event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
 		if (!event) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		// tickets of an event whose organizer is not ACTIVE cannot be bought
 		const organizerActive = await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE });

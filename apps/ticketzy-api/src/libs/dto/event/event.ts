@@ -1,9 +1,51 @@
-import { Field, Int, ObjectType } from '@nestjs/graphql';
+import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
-import { EventCategory, EventStatus } from '../../enums/event.enum';
+import { EventCategory, EventLocale, EventStatus, SeatingType } from '../../enums/event.enum';
 import { Member, TotalCounter } from '../member/member';
 import { MeLiked } from '../like/like';
 import { Venue } from '../venue/venue';
+
+@ObjectType()
+export class EventTranslation {
+	@Field(() => EventLocale)
+	locale: EventLocale;
+
+	@Field(() => String)
+	title: string;
+
+	@Field(() => String, { nullable: true })
+	description?: string;
+}
+
+@ObjectType()
+export class EventModerationFlag {
+	@Field(() => String)
+	type: string;
+
+	@Field(() => String, { nullable: true })
+	reason?: string;
+
+	@Field(() => Float, { nullable: true })
+	confidence?: number;
+}
+
+@ObjectType()
+export class EventModeration {
+	@Field(() => [EventModerationFlag])
+	flags: EventModerationFlag[];
+
+	@Field(() => String, { nullable: true })
+	reason?: string;
+
+	@Field(() => Float, { nullable: true })
+	confidence?: number;
+
+	@Field(() => String, { nullable: true })
+	model?: string;
+
+	@Field(() => Date, { nullable: true })
+	checkedAt?: Date;
+}
 
 @ObjectType()
 export class Event {
@@ -16,6 +58,9 @@ export class Event {
 	@Field(() => EventStatus)
 	eventStatus: EventStatus;
 
+	@Field(() => SeatingType)
+	seatingType: SeatingType;
+
 	@Field(() => String)
 	eventTitle: string;
 
@@ -24,6 +69,9 @@ export class Event {
 
 	@Field(() => [String])
 	eventImages: string[];
+
+	@Field(() => [EventTranslation])
+	eventTranslations: EventTranslation[];
 
 	@Field(() => Number)
 	eventMinPrice: number;
@@ -57,6 +105,16 @@ export class Event {
 
 	@Field(() => Date, { nullable: true })
 	saleEndAt?: Date;
+
+	/** rejectReason, cancelReason and eventModeration are returned only to the owner and to admins */
+	@Field(() => String, { nullable: true })
+	rejectReason?: string;
+
+	@Field(() => String, { nullable: true })
+	cancelReason?: string;
+
+	@Field(() => EventModeration, { nullable: true })
+	eventModeration?: EventModeration;
 
 	@Field(() => Date, { nullable: true })
 	deletedAt?: Date;

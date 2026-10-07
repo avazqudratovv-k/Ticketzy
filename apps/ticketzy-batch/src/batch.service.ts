@@ -5,7 +5,7 @@ import { Event } from 'apps/ticketzy-api/src/libs/dto/event/event';
 import { Order } from 'apps/ticketzy-api/src/libs/dto/order/order';
 import { TicketType } from 'apps/ticketzy-api/src/libs/dto/ticket-type/ticket-type';
 import { MemberStatus, MemberType } from 'apps/ticketzy-api/src/libs/enums/member.enum';
-import { EventStatus, listedEventStatuses } from 'apps/ticketzy-api/src/libs/enums/event.enum';
+import { eventTransitions, publicEventStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
 import { OrderStatus, TicketTypeStatus } from 'apps/ticketzy-api/src/libs/enums/ticket.enum';
 import { Model } from 'mongoose';
 
@@ -24,7 +24,7 @@ export class BatchService {
 		await this.eventModel
 			.updateMany(
 				{
-					eventStatus: { $in: listedEventStatuses },
+					eventStatus: publicEventStatus,
 				},
 				{ eventRank: 0 },
 			)
@@ -44,7 +44,7 @@ export class BatchService {
 	public async batchTopEvents(): Promise<void> {
 		const events: Event[] = await this.eventModel
 			.find({
-				eventStatus: { $in: listedEventStatuses },
+				eventStatus: publicEventStatus,
 				eventRank: 0,
 			})
 			.exec();
@@ -116,12 +116,43 @@ export class BatchService {
 						{ ticketTypeStatus: TicketTypeStatus.ACTIVE },
 					)
 					.exec();
-				await this.eventModel
-					.updateOne({ _id: ticketType.eventId, eventStatus: EventStatus.SOLD_OUT }, { eventStatus: EventStatus.ON_SALE })
-					.exec();
 			}
 		}
 		if (expired.length) this.logger.debug(`Checked ${expired.length} expired order(s)`);
+	}
+
+	/**
+	 * APPROVED events whose endAt has passed become ENDED, and the organizer's completedEvents goes up by one.
+	 * The status flip is a conditional update, so an event is only counted once even if two batch runs overlap.
+	 */
+	public async batchEndEvents(): Promise<void> {
+		const { from, to } = eventTransitions.end;
+		const due = await this.eventModel
+			.find({ eventStatus: { $in: from }, endAt: { $lte: new Date() } })
+			.select('_id')
+			.limit(500)
+			.lean()
+			.exec();
+
+		let ended = 0;
+		for (const candidate of due) {
+			const event = await this.eventModel
+				.findOneAndUpdate(
+					{ _id: candidate._id, eventStatus: { $in: from }, endAt: { $lte: new Date() } },
+					{ eventStatus: to },
+					{ new: true },
+				)
+				.exec();
+			if (!event) continue;
+			ended++;
+
+			try {
+				await this.memberModel.updateOne({ _id: event.organizerId }, { $inc: { completedEvents: 1 } }).exec();
+			} catch (err) {
+				this.logger.error(`completedEvents NOT INCREMENTED for organizer ${event.organizerId} (event ${event._id}): ${err.message}`);
+			}
+		}
+		if (ended) this.logger.debug(`Ended ${ended} event(s)`);
 	}
 
 	public getHello(): string {

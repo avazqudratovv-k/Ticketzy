@@ -46,11 +46,10 @@ describe('TicketTypeService.reserve', () => {
 		expect(eventModel.updateOne).not.toHaveBeenCalled();
 	});
 
-	it('flags the ticket type SOLD_OUT, and the event once nothing is left, when the last ticket is taken', async () => {
+	it('flags the ticket type SOLD_OUT when the last ticket is taken, and leaves the event alone', async () => {
 		ticketTypeModel.findOneAndUpdate.mockReturnValue(
 			query({ _id: 't1', eventId: 'e1', soldQuantity: 10, totalQuantity: 10 }),
 		);
-		ticketTypeModel.countDocuments.mockReturnValue(query(0));
 
 		await service.reserve('t1' as any, 2);
 
@@ -58,17 +57,6 @@ describe('TicketTypeService.reserve', () => {
 			expect.objectContaining({ _id: 't1', ticketTypeStatus: TicketTypeStatus.ACTIVE }),
 			{ ticketTypeStatus: TicketTypeStatus.SOLD_OUT },
 		);
-		expect(eventModel.updateOne).toHaveBeenCalled();
-	});
-
-	it('does not mark the event sold out while another ticket type still has stock', async () => {
-		ticketTypeModel.findOneAndUpdate.mockReturnValue(
-			query({ _id: 't1', eventId: 'e1', soldQuantity: 10, totalQuantity: 10 }),
-		);
-		ticketTypeModel.countDocuments.mockReturnValue(query(1));
-
-		await service.reserve('t1' as any, 2);
-
 		expect(eventModel.updateOne).not.toHaveBeenCalled();
 	});
 

@@ -1,7 +1,7 @@
 import { Controller, Get, Logger } from '@nestjs/common';
 import { BatchService } from './batch.service';
 import { Cron, Interval, Timeout } from '@nestjs/schedule';
-import { BATCH_EXPIRE_ORDERS, BATCH_ROLLBACK, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS } from './lib/config';
+import { BATCH_END_EVENTS, BATCH_EXPIRE_ORDERS, BATCH_ROLLBACK, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS } from './lib/config';
 
 @Controller()
 export class BatchController {
@@ -54,6 +54,17 @@ export class BatchController {
     try {
       this.logger['context'] = BATCH_EXPIRE_ORDERS;
       await this.batchService.batchExpireOrders();
+    } catch (err) {
+      this.logger.error(err);
+    }
+  }
+
+  // approved events past their endAt become ENDED, hourly at minute 30
+  @Cron('00 30 * * * *', { name: BATCH_END_EVENTS })
+  public async batchEndEvents() {
+    try {
+      this.logger['context'] = BATCH_END_EVENTS;
+      await this.batchService.batchEndEvents();
     } catch (err) {
       this.logger.error(err);
     }

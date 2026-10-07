@@ -1,9 +1,15 @@
-import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Context, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
 import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { EventService } from './event.service';
-import { Event, Events } from '../../libs/dto/event/event';
-import { OrganizerEventsInquiry, AllEventsInquiry, EventInput, EventsInquiry } from '../../libs/dto/event/event.input';
+import { Event, EventModeration, Events } from '../../libs/dto/event/event';
+import {
+	EventInput,
+	EventReasonInput,
+	EventsByAdminInquiry,
+	EventsInquiry,
+	OrganizerEventsInquiry,
+} from '../../libs/dto/event/event.input';
 import { EventUpdate } from '../../libs/dto/event/event.update';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -13,13 +19,36 @@ import { ActiveOrganizerGuard } from '../auth/guards/organizer.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { WithoutGuard } from '../auth/guards/without.guard';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { Member } from '../../libs/dto/member/member';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
-@Resolver()
+@Resolver(() => Event)
 export class EventResolver {
 	private readonly logger = new Logger(EventResolver.name);
 
 	constructor(private readonly eventService: EventService) {}
+
+	/** private fields: only the organizer who owns the event and admins see them, everyone else gets null */
+	private isOwnerOrAdmin(event: Event, context: any): boolean {
+		const authMember = context?.req?.body?.authMember;
+		if (!authMember) return false;
+		return String(authMember._id) === String(event.organizerId) || authMember.memberType === MemberType.ADMIN;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public rejectReason(@Parent() event: Event, @Context() context: any): string | null {
+		return event.rejectReason && this.isOwnerOrAdmin(event, context) ? event.rejectReason : null;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public cancelReason(@Parent() event: Event, @Context() context: any): string | null {
+		return event.cancelReason && this.isOwnerOrAdmin(event, context) ? event.cancelReason : null;
+	}
+
+	@ResolveField(() => EventModeration, { nullable: true })
+	public eventModeration(@Parent() event: Event, @Context() context: any): EventModeration | null {
+		return event.eventModeration && this.isOwnerOrAdmin(event, context) ? event.eventModeration : null;
+	}
 
 	@Roles(MemberType.ORGANIZER)
 	@UseGuards(RolesGuard, ActiveOrganizerGuard)
@@ -36,10 +65,10 @@ export class EventResolver {
 
 	@UseGuards(WithoutGuard)
 	@Query((returns) => Event)
-	public async getEvent(@Args('eventId') input: string, @AuthMember('_id') memberId: ObjectId): Promise<Event> {
+	public async getEvent(@Args('eventId') input: string, @AuthMember() authMember: Member | null): Promise<Event> {
 		this.logger.log('Query: getEvent');
 		const eventId = shapeIntoMongoObjectId(input);
-		return await this.eventService.getEvent(memberId, eventId);
+		return await this.eventService.getEvent(authMember, eventId);
 	}
 
 	@Roles(MemberType.ORGANIZER)
@@ -87,12 +116,23 @@ export class EventResolver {
 	@Roles(MemberType.ORGANIZER)
 	@UseGuards(RolesGuard)
 	@Query((returns) => Events)
-	public async getOrganizerEvents(
+	public async getMyEvents(
 		@Args('input') input: OrganizerEventsInquiry,
 		@AuthMember('_id') memberId: ObjectId,
 	): Promise<Events> {
-		this.logger.log('Query: getOrganizerEvents');
-		return await this.eventService.getOrganizerEvents(memberId, input);
+		this.logger.log('Query: getMyEvents');
+		return await this.eventService.getMyEvents(memberId, input);
+	}
+
+	@Roles(MemberType.ORGANIZER)
+	@UseGuards(RolesGuard, ActiveOrganizerGuard)
+	@Mutation(() => Event)
+	public async submitEventForApproval(
+		@Args('eventId') input: string,
+		@AuthMember('_id') memberId: ObjectId,
+	): Promise<Event> {
+		this.logger.log('Mutation: submitEventForApproval');
+		return await this.eventService.submitEventForApproval(memberId, shapeIntoMongoObjectId(input));
 	}
 
 	@UseGuards(AuthGuard)
@@ -111,9 +151,44 @@ export class EventResolver {
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Query((returns) => Events)
-	public async getAllEventsByAdmin(@Args('input') input: AllEventsInquiry): Promise<Events> {
-		this.logger.log('Query: getAllEventsByAdmin');
-		return await this.eventService.getAllEventsByAdmin(input);
+	public async getEventsByAdmin(@Args('input') input: EventsByAdminInquiry): Promise<Events> {
+		this.logger.log('Query: getEventsByAdmin');
+		return await this.eventService.getEventsByAdmin(input);
+	}
+
+	@Roles(MemberType.ADMIN)
+	@UseGuards(RolesGuard)
+	@Mutation(() => Event)
+	public async approveEventByAdmin(
+		@Args('eventId') input: string,
+		@AuthMember('_id') adminId: ObjectId,
+	): Promise<Event> {
+		this.logger.log('Mutation: approveEventByAdmin');
+		return await this.eventService.approveEventByAdmin(adminId, shapeIntoMongoObjectId(input));
+	}
+
+	@Roles(MemberType.ADMIN)
+	@UseGuards(RolesGuard)
+	@Mutation(() => Event)
+	public async rejectEventByAdmin(
+		@Args('input') input: EventReasonInput,
+		@AuthMember('_id') adminId: ObjectId,
+	): Promise<Event> {
+		this.logger.log('Mutation: rejectEventByAdmin');
+		input.eventId = shapeIntoMongoObjectId(input.eventId);
+		return await this.eventService.rejectEventByAdmin(adminId, input);
+	}
+
+	@Roles(MemberType.ADMIN)
+	@UseGuards(RolesGuard)
+	@Mutation(() => Event)
+	public async cancelEventByAdmin(
+		@Args('input') input: EventReasonInput,
+		@AuthMember('_id') adminId: ObjectId,
+	): Promise<Event> {
+		this.logger.log('Mutation: cancelEventByAdmin');
+		input.eventId = shapeIntoMongoObjectId(input.eventId);
+		return await this.eventService.cancelEventByAdmin(adminId, input);
 	}
 
 	@Roles(MemberType.ADMIN)

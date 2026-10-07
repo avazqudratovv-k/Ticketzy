@@ -1,5 +1,35 @@
 import { Schema } from 'mongoose';
-import { EventCategory, EventStatus } from '../enums/event.enum';
+import { EventCategory, EventLocale, EventStatus, SeatingType } from '../enums/event.enum';
+
+const EventTranslationSchema = new Schema(
+	{
+		locale: { type: String, enum: EventLocale, required: true },
+		title: { type: String, required: true },
+		description: { type: String },
+	},
+	{ _id: false },
+);
+
+/** stored only for now: nothing fills it yet */
+const EventModerationSchema = new Schema(
+	{
+		flags: [
+			new Schema(
+				{
+					type: { type: String, required: true },
+					reason: { type: String },
+					confidence: { type: Number, min: 0, max: 1 },
+				},
+				{ _id: false },
+			),
+		],
+		reason: { type: String },
+		confidence: { type: Number, min: 0, max: 1 },
+		model: { type: String },
+		checkedAt: { type: Date },
+	},
+	{ _id: false },
+);
 
 const EventSchema = new Schema(
 	{
@@ -15,6 +45,12 @@ const EventSchema = new Schema(
 			default: EventStatus.DRAFT,
 		},
 
+		seatingType: {
+			type: String,
+			enum: SeatingType,
+			default: SeatingType.GENERAL,
+		},
+
 		eventTitle: {
 			type: String,
 			required: true,
@@ -27,6 +63,11 @@ const EventSchema = new Schema(
 		eventImages: {
 			type: [String],
 			required: true,
+		},
+
+		eventTranslations: {
+			type: [EventTranslationSchema],
+			default: [],
 		},
 
 		eventMinPrice: {
@@ -82,6 +123,18 @@ const EventSchema = new Schema(
 
 		saleEndAt: {
 			type: Date,
+		},
+
+		rejectReason: {
+			type: String,
+		},
+
+		cancelReason: {
+			type: String,
+		},
+
+		eventModeration: {
+			type: EventModerationSchema,
 		},
 
 		deletedAt: {

@@ -58,6 +58,9 @@ export class Member {
 	memberEvents: number;
 
 	@Field(() => Int)
+	completedEvents: number;
+
+	@Field(() => Int)
 	memberFollowers: number;
 
 	@Field(() => Int)

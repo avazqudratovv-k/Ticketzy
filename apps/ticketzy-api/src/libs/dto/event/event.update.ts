@@ -1,7 +1,9 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsNotEmpty, IsOptional, Length } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNotEmpty, IsOptional, Length, ValidateNested } from 'class-validator';
 import { ObjectId } from 'mongoose';
-import { EventCategory, EventStatus } from '../../enums/event.enum';
+import { EventCategory, SeatingType } from '../../enums/event.enum';
+import { EventTranslationInput } from './event.input';
 
 @InputType()
 export class EventUpdate {
@@ -14,8 +16,8 @@ export class EventUpdate {
 	eventCategory?: EventCategory;
 
 	@IsOptional()
-	@Field(() => EventStatus, { nullable: true })
-	eventStatus?: EventStatus;
+	@Field(() => SeatingType, { nullable: true })
+	seatingType?: SeatingType;
 
 	@IsOptional()
 	@Length(3, 100)
@@ -26,6 +28,12 @@ export class EventUpdate {
 	@Length(5, 2000)
 	@Field(() => String, { nullable: true })
 	eventDesc?: string;
+
+	@IsOptional()
+	@ValidateNested({ each: true })
+	@Type(() => EventTranslationInput)
+	@Field(() => [EventTranslationInput], { nullable: true })
+	eventTranslations?: EventTranslationInput[];
 
 	@IsOptional()
 	@Field(() => [String], { nullable: true })
@@ -50,6 +58,4 @@ export class EventUpdate {
 	@IsOptional()
 	@Field(() => Date, { nullable: true })
 	saleEndAt?: Date;
-
-	deletedAt?: Date;
 }

@@ -24,7 +24,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N2 | Run the concurrency test for `TicketTypeService.reserve` against a real MongoDB (two parallel orders for the last ticket) | the unit tests use mocks and cannot prove atomicity |
 | N3 | Smoke-test the new operations against a dev DB and drop the old `likes` / `views` unique indexes (`memberId_1_likeRefId_1`, `memberId_1_viewRefId_1`) | schema change is not applied to existing indexes |
 | N4 | Decide whether to drop the orphaned collection and upload folders of the old catalog (everything under `uploads/` except `member`, `event`, `venue`) | left untouched on purpose |
-| N5 | Refund / cancel for PAID orders (`REFUNDED` status exists, no flow) | not built |
+| N5 | Refund / cancel for PAID orders (`REFUNDED` status exists, no flow); fill `EventService.refundOrdersForCancelledEvent`, which `cancelEventByAdmin` already calls | not built |
 | N6 | Admin-side listing of venues and ticket types, delete flows for both | only create, update and public reads exist |
 
 | N7 | Data update before the next deploy: give existing members a `memberEmail`, change `memberType: 'AGENT'` to `ORGANIZER` and `memberStatus: 'BLOCK'` to `SUSPENDED`, then let the unique `memberEmail` index build; run `npm run seed` | the enums and the schema changed |
@@ -35,6 +35,9 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N12 | Use `commissionOverride` when orders are priced (and define the default rate); add an operation to clear an override; audit USER status changes too | the override is stored only, nothing reads it |
 | N13 | `shapeIntoMongoObjectId` throws the raw BSON error for a malformed id (visible in every operation that takes an id); answer a clean `BAD_REQUEST` instead | leaks library text |
 | N14 | Existing orders of events whose organizer was suspended before this change are not cancelled or refunded | not built |
+| N15 | Data update before the next deploy: set `eventStatus` of existing events to `APPROVED` (was PUBLISHED, ON_SALE or SOLD_OUT), `ENDED` (was FINISHED) or `CANCELLED`; remove events with status DELETE; existing members get `completedEvents` 0 by default | the status enum changed (DECISIONS #35) |
+| N16 | Fill `eventModeration` (AI moderation) and decide whether it should block submit or only flag; tell admins when an organizer submits an event (no notification exists for that yet) | stored only |
+| N17 | Editing ticket types of an APPROVED event does not send it back to review | known gap in #36 |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)

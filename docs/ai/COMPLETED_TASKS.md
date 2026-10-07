@@ -208,3 +208,31 @@ Backend only. Decisions: DECISIONS #31 to #34.
 | Live check against the dev database (30 checks over HTTP: all six operations and the invalid transitions, blank reasons, privacy of the new fields, admin-only access, audit entries and pagination, notifications received) | pass |
 | `getTicketTypes` / `createOrder` against real data with a suspended organizer | **not run** (no events exist in the dev database; covered by mock tests) |
 
+## 12. Events with admin approval
+
+Backend only. Decisions: DECISIONS #35 to #40.
+
+**Operations**
+- Organizer (`RolesGuard` + `ActiveOrganizerGuard`, owner only): `createEvent` (always a DRAFT), `updateEvent` (DRAFT and REJECTED keep their status, APPROVED goes back to PENDING, PENDING, CANCELLED and ENDED refused), `submitEventForApproval(eventId)`. `getMyEvents(input: OrganizerEventsInquiry!)` replaces `getOrganizerEvents` (paged, optional `eventStatus`)
+- Admin (`RolesGuard` ADMIN): `getEventsByAdmin(input: EventsByAdminInquiry!)` replaces `getAllEventsByAdmin` (status, categories, organizer, text); `approveEventByAdmin(eventId)`, `rejectEventByAdmin(input: { eventId, reason })`, `cancelEventByAdmin(input: { eventId, reason })`. `updateEventByAdmin` no longer changes status, `removeEventByAdmin` deletes DRAFTs only
+- Public queries (`getEvents`, `getEvent`, `getFavorites`, `getVisited`, `likeTargetEvent`, `createOrder`) see APPROVED events only; the owner and admins open any event by id
+
+**Schema and DTO**
+- `Event`: `seatingType` (GENERAL default, RESERVED), `eventTranslations [{ locale en|ko|ru|uz, title, description }]`, `rejectReason`, `cancelReason`, `eventModeration { flags[{ type, reason, confidence }], reason, confidence, model, checkedAt }` (stored only). `rejectReason`, `cancelReason`, `eventModeration` are returned only to the owner and admins. `eventStatus` removed from `EventInput` and `EventUpdate`; `seatingType` and `eventTranslations` added to both
+- `Member.completedEvents` (Int, default 0)
+- `AuditAction` and `NotificationType` gained EVENT_APPROVED, EVENT_REJECTED, EVENT_CANCELLED; `AuditTargetType` gained EVENT; `AuditLogMeta` gained `fromEventStatus`, `toEventStatus`
+- Message constants: `INVALID_EVENT_TRANSITION`, `EVENT_NOT_EDITABLE`, `EVENT_REJECT_REASON_REQUIRED`, `EVENT_CANCEL_REASON_REQUIRED`, `CANNOT_APPROVE_OWN_EVENT`, `EVENT_SUBMIT_TITLE_REQUIRED`, `EVENT_SUBMIT_IMAGE_REQUIRED`, `EVENT_SUBMIT_DATES_IN_PAST`, `EVENT_SUBMIT_VENUE_REQUIRED`, `EVENT_SUBMIT_TICKET_TYPE_REQUIRED`
+
+**Batch**: `batchEndEvents`, hourly at minute 30 (`BATCH_END_EVENTS`): APPROVED events past `endAt` become ENDED and the organizer's `completedEvents` goes up by one. Ranking jobs now use `publicEventStatus`
+
+**Files added**: `apps/ticketzy-batch/src/batch.service.spec.ts`
+**Files edited**: `event.enum.ts` (new statuses, `SeatingType`, `EventLocale`, `eventTransitions`, `publicEventStatus`, `editableEventStatuses`, `closedEventStatuses`; old `listedEventStatuses` and `viewableEventStatuses` removed), `Event.model.ts`, `Member.model.ts`, `dto/event/*`, `dto/member/member.ts`, `dto/audit-log/audit-log.ts`, `event.service.ts`, `event.resolver.ts`, `event.module.ts`, `like.service.ts`, `view.service.ts`, `order.service.ts`, `ticket-type.service.ts` (event-level SOLD_OUT handling removed; ticket types still flip to SOLD_OUT), `batch.service.ts`, `batch.controller.ts`, `batch/lib/config.ts`, the specs of event, order and ticket-type, and `package.json` (jest `modulePaths: ["<rootDir>"]`, so the batch app's `apps/...` imports resolve in tests)
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` and `nest build ticketzy-batch` | pass |
+| `npx jest apps` (177 tests; new: transition table, submit validation rules, edit rules per status, admin transitions, required reasons, audit and notification content, double approval, self approval, refund hook, visibility for guests, strangers, owner and admin, favorites and visited pipelines, resolver roles and guards, `batchEndEvents`) | pass |
+| GraphQL schema generated offline | pass: new operations and fields present, `getOrganizerEvents` and `getAllEventsByAdmin` gone |
+| Live check against a dev database | **not run** (mock tests only) |
+

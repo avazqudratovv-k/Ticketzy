@@ -14,16 +14,52 @@ registerEnumType(EventCategory, {
 
 export enum EventStatus {
 	DRAFT = 'DRAFT',
-	PUBLISHED = 'PUBLISHED',
-	ON_SALE = 'ON_SALE',
-	SOLD_OUT = 'SOLD_OUT',
+	PENDING = 'PENDING',
+	APPROVED = 'APPROVED',
+	REJECTED = 'REJECTED',
 	CANCELLED = 'CANCELLED',
-	FINISHED = 'FINISHED',
-	DELETE = 'DELETE',
+	ENDED = 'ENDED',
 }
 registerEnumType(EventStatus, {
 	name: 'EventStatus',
 });
+
+export enum SeatingType {
+	GENERAL = 'GENERAL',
+	RESERVED = 'RESERVED',
+}
+registerEnumType(SeatingType, {
+	name: 'SeatingType',
+});
+
+export enum EventLocale {
+	EN = 'en',
+	KO = 'ko',
+	RU = 'ru',
+	UZ = 'uz',
+}
+registerEnumType(EventLocale, {
+	name: 'EventLocale',
+});
+
+/** the only status that public queries (list, detail, favorites, visited, likes, orders) can see */
+export const publicEventStatus = EventStatus.APPROVED;
+
+/** statuses in which the organizer may edit; editing an APPROVED event sends it back to PENDING */
+export const editableEventStatuses = [EventStatus.DRAFT, EventStatus.REJECTED, EventStatus.APPROVED];
+
+/** statuses that can no longer change (ticket types are frozen too) */
+export const closedEventStatuses = [EventStatus.CANCELLED, EventStatus.ENDED];
+
+/** actions on an event and the statuses they may start from */
+export const eventTransitions = {
+	submit: { from: [EventStatus.DRAFT, EventStatus.REJECTED], to: EventStatus.PENDING },
+	approve: { from: [EventStatus.PENDING], to: EventStatus.APPROVED },
+	reject: { from: [EventStatus.PENDING], to: EventStatus.REJECTED },
+	cancel: { from: [EventStatus.APPROVED], to: EventStatus.CANCELLED },
+	end: { from: [EventStatus.APPROVED], to: EventStatus.ENDED },
+};
+export type EventAction = keyof typeof eventTransitions;
 
 export enum VenueType {
 	STADIUM = 'STADIUM',
@@ -45,7 +81,3 @@ export enum VenueStatus {
 registerEnumType(VenueStatus, {
 	name: 'VenueStatus',
 });
-
-/** Statuses shown in public listings / detail pages */
-export const listedEventStatuses = [EventStatus.PUBLISHED, EventStatus.ON_SALE, EventStatus.SOLD_OUT];
-export const viewableEventStatuses = [...listedEventStatuses, EventStatus.FINISHED];

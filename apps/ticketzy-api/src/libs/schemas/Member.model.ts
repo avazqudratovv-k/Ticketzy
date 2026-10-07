@@ -77,6 +77,11 @@ const MemberSchema = new Schema(
 			default: 0,
 		},
 
+		completedEvents: {
+			type: Number,
+			default: 0,
+		},
+
 		memberFollowers: {
 			type: Number,
 			default: 0,

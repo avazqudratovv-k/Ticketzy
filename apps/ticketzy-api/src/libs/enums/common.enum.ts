@@ -28,6 +28,17 @@ export enum Message {
 	COMMISSION_REASON_REQUIRED = 'A reason is required to set a commission override!',
 	INVALID_COMMISSION_RATE = 'The commission rate must be between 0 and 100!',
 	INVALID_COMMISSION_END_DATE = 'The commission override end date must be in the future!',
+
+	INVALID_EVENT_TRANSITION = 'This event status change is not allowed from the current status!',
+	EVENT_NOT_EDITABLE = 'This event cannot be edited in its current status!',
+	EVENT_REJECT_REASON_REQUIRED = 'A reason is required to reject an event!',
+	EVENT_CANCEL_REASON_REQUIRED = 'A reason is required to cancel an event!',
+	CANNOT_APPROVE_OWN_EVENT = 'Organizers cannot approve their own events!',
+	EVENT_SUBMIT_TITLE_REQUIRED = 'The event needs a title before it can be submitted!',
+	EVENT_SUBMIT_IMAGE_REQUIRED = 'The event needs at least one image before it can be submitted!',
+	EVENT_SUBMIT_DATES_IN_PAST = 'The event start and end dates must be in the future to submit it!',
+	EVENT_SUBMIT_VENUE_REQUIRED = 'The event needs an active venue before it can be submitted!',
+	EVENT_SUBMIT_TICKET_TYPE_REQUIRED = 'The event needs at least one ticket type before it can be submitted!',
 }
 
 export enum Direction {

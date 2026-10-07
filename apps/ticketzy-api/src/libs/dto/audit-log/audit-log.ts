@@ -1,6 +1,7 @@
 import { Field, Float, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { AuditAction, AuditTargetType } from '../../enums/audit-log.enum';
+import { EventStatus } from '../../enums/event.enum';
 import { MemberStatus } from '../../enums/member.enum';
 import { Member, TotalCounter } from '../member/member';
 
@@ -14,6 +15,12 @@ export class AuditLogMeta {
 
 	@Field(() => MemberStatus, { nullable: true })
 	toStatus?: MemberStatus;
+
+	@Field(() => EventStatus, { nullable: true })
+	fromEventStatus?: EventStatus;
+
+	@Field(() => EventStatus, { nullable: true })
+	toEventStatus?: EventStatus;
 
 	@Field(() => Float, { nullable: true })
 	rate?: number;

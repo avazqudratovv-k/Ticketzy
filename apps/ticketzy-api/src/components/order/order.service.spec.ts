@@ -14,7 +14,7 @@ const query = (value: any) => ({ exec: jest.fn().mockResolvedValue(value), lean:
 
 const futureEvent = () => ({
 	_id: E,
-	eventStatus: EventStatus.ON_SALE,
+	eventStatus: EventStatus.APPROVED,
 	endAt: new Date(Date.now() + 86400000),
 });
 
