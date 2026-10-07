@@ -211,6 +211,11 @@ export class MemberService {
 	}
 
 	public async updateMemberByAdmin(input: MemberUpdate): Promise<Member> {
+		// organizer status changes must go through verify / reject / suspend / reinstate so they are audited and notified
+		if (input.memberStatus || input.memberType) {
+			const target = await this.memberModel.findOne({ _id: input._id, memberType: MemberType.ORGANIZER }).lean().exec();
+			if (target) throw new BadRequestException(Message.USE_ORGANIZER_OPERATIONS);
+		}
 		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);

@@ -7,6 +7,8 @@ import { Order, Orders } from '../../libs/dto/order/order';
 import { OrderInput, OrdersInquiry } from '../../libs/dto/order/order.input';
 import { Ticket } from '../../libs/dto/ticket/ticket';
 import { Event } from '../../libs/dto/event/event';
+import { Member } from '../../libs/dto/member/member';
+import { MemberStatus } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { EventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentProvider, PaymentStatus, TicketStatus } from '../../libs/enums/ticket.enum';
@@ -28,6 +30,7 @@ export class OrderService {
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
 		@InjectModel('Ticket') private readonly ticketModel: Model<Ticket>,
 		@InjectModel('Payment') private readonly paymentModel: Model<any>,
+		@InjectModel('Member') private readonly memberModel: Model<Member>,
 		private readonly ticketTypeService: TicketTypeService,
 		private readonly notificationService: NotificationService,
 	) {}
@@ -38,6 +41,9 @@ export class OrderService {
 
 		const event = await this.eventModel.findOne({ _id: eventId, eventStatus: EventStatus.ON_SALE }).lean().exec();
 		if (!event) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		// tickets of an event whose organizer is not ACTIVE cannot be bought
+		const organizerActive = await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE });
+		if (!organizerActive) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		if (moment(event.endAt).isBefore(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		if (event.saleStartAt && moment(event.saleStartAt).isAfter(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		if (event.saleEndAt && moment(event.saleEndAt).isBefore(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);

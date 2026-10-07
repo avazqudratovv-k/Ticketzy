@@ -16,6 +16,7 @@ Ticketzy started as a copy of the Nestar backend: a NestJS 10 GraphQL monorepo (
 | 5. Organizer role, batch ranking rewrite | **Done** (DECISIONS #13) |
 | 6. Security and auth hardening | **Done** (DECISIONS #23 to #26) |
 | 7. Leftover cleanup: board removed, organizer naming, visibility rules | **Done** (DECISIONS #27 to #30) |
+| 8. Organizer approval, audit log, commission override | **Done** (DECISIONS #31 to #34) |
 
 ## 3. Current shape
 Code lives in `apps/ticketzy-api/src` (`components/`, `libs/{dto,enums,schemas,interceptor}`, `socket/`, `database/`) and `apps/ticketzy-batch/src`.
@@ -24,6 +25,8 @@ Code lives in `apps/ticketzy-api/src` (`components/`, `libs/{dto,enums,schemas,i
 |---|---|
 | auth | JWT (`{ _id, memberType }`, 1 day), `AuthGuard`, `RolesGuard`, `WithoutGuard`, `ActiveOrganizerGuard` |
 | member | signupUser, signupOrganizer, login by email, profile, organizer listing, admin member management, image upload |
+| organizer | ADMIN operations: list, verify, reject, suspend, reinstate, commission override |
+| audit-log | `audit_logs` writer used by the organizer module, and `getAuditLogsByAdmin` |
 | event, venue, ticket-type | the catalog |
 | order, ticket | sales, atomic stock, tickets with codes, check-in |
 | like, view | favorites and counters (groups MEMBER and EVENT) |
@@ -33,7 +36,7 @@ Code lives in `apps/ticketzy-api/src` (`components/`, `libs/{dto,enums,schemas,i
 | socket | `ws` chat gateway, in memory |
 | batch app | hourly event and organizer ranking, per-minute order expiry |
 
-Collections: `members`, `events`, `venues`, `ticketTypes`, `orders`, `tickets`, `payments`, `likes`, `views`, `comments`, `follows`, `notices`, `notifications`. The current GraphQL operations are listed in `COMPLETED_TASKS.md` (sections 7 and 10).
+Collections: `members`, `events`, `venues`, `ticketTypes`, `orders`, `tickets`, `payments`, `likes`, `views`, `comments`, `follows`, `notices`, `notifications`, `audit_logs`. The current GraphQL operations are listed in `COMPLETED_TASKS.md` (sections 7 and 10).
 
 ## 4. Compatibility notes
 - Absolute imports (`apps/ticketzy-api/src/...`) rely on `baseUrl: ./`; the batch app imports schemas and enums from the API app this way.

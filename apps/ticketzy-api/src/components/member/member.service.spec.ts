@@ -144,3 +144,29 @@ describe('MemberService public listings', () => {
 		expect($match).toEqual({ memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE });
 	});
 });
+
+describe('MemberService.updateMemberByAdmin keeps organizer status changes audited', () => {
+	const lean = (value: any) => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
+
+	it('refuses to change status or role of an organizer, and points to the organizer operations', async () => {
+		const memberModel: any = { findOne: jest.fn().mockReturnValue(lean({ _id: 'o1' })), findOneAndUpdate: jest.fn() };
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+
+		await expect(service.updateMemberByAdmin({ _id: 'o1' as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow(
+			Message.USE_ORGANIZER_OPERATIONS,
+		);
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
+	it('still lets an admin change the status of a USER', async () => {
+		const memberModel: any = {
+			findOne: jest.fn().mockReturnValue(lean(null)),
+			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: 'u1', memberStatus: MemberStatus.SUSPENDED }) }),
+		};
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+
+		const result = await service.updateMemberByAdmin({ _id: 'u1' as any, memberStatus: MemberStatus.SUSPENDED });
+
+		expect(result.memberStatus).toBe(MemberStatus.SUSPENDED);
+	});
+});

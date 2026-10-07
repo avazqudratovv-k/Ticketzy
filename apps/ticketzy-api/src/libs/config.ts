@@ -14,6 +14,7 @@ export const availableEventSorts = [
 export const availableOrderSorts = ['createdAt', 'updatedAt', 'totalAmount'];
 export const availableVenueSorts = ['createdAt', 'updatedAt', 'venueName', 'venueCapacity'];
 export const availableCommentSorts= ['createdAt', 'updatedAt']
+export const availableAuditLogSorts = ['createdAt']
 
 /** IMAGE CONFIGURATION */
 import { v4 as uuidv4 } from 'uuid';
@@ -160,6 +161,15 @@ export const lookupMember = {
     foreignField: '_id',
     as: 'memberData',
   }
+};
+
+export const lookupActor = {
+  $lookup: {
+    from: 'members',
+    localField: 'actorId',
+    foreignField: '_id',
+    as: 'actorData',
+  },
 };
 
 export const lookupFollowingData = {

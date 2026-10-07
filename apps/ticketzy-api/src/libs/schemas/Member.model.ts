@@ -1,6 +1,15 @@
 import { Schema } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../enums/member.enum';
 
+const CommissionOverrideSchema = new Schema(
+	{
+		rate: { type: Number, min: 0, max: 100, required: true },
+		endsAt: { type: Date },
+		reason: { type: String, required: true },
+	},
+	{ _id: false },
+);
+
 const MemberSchema = new Schema(
 	{
 		memberType: {
@@ -96,6 +105,15 @@ const MemberSchema = new Schema(
 		memberRank: {
 			type: Number,
 			default: 0,
+		},
+
+		rejectReason: {
+			type: String,
+		},
+
+		/** commission percentage (0 to 100) that replaces the platform default for this organizer, optionally until endsAt */
+		commissionOverride: {
+			type: CommissionOverrideSchema,
 		},
 
 		memberWarnings: {

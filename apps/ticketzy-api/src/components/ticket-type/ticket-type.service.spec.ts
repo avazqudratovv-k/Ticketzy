@@ -1,11 +1,14 @@
 import { TicketTypeService } from './ticket-type.service';
 import { TicketTypeStatus } from '../../libs/enums/ticket.enum';
+import { Message } from '../../libs/enums/common.enum';
+import { MemberStatus } from '../../libs/enums/member.enum';
 
 const query = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
 
 describe('TicketTypeService.reserve', () => {
 	let ticketTypeModel: any;
 	let eventModel: any;
+	let memberModel: any;
 	let service: TicketTypeService;
 
 	beforeEach(() => {
@@ -15,7 +18,8 @@ describe('TicketTypeService.reserve', () => {
 			countDocuments: jest.fn().mockReturnValue(query(1)),
 		};
 		eventModel = { updateOne: jest.fn().mockReturnValue(query({})) };
-		service = new TicketTypeService(ticketTypeModel, eventModel);
+		memberModel = { exists: jest.fn() };
+		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel);
 	});
 
 	it('reserves with ONE conditional update that checks stock, status and maxPerOrder', async () => {
@@ -78,3 +82,40 @@ describe('TicketTypeService.reserve', () => {
 		expect(update).toEqual({ $inc: { soldQuantity: -2 } });
 	});
 });
+
+describe('TicketTypeService.getTicketTypes hides ticket types of organizers that are not ACTIVE', () => {
+	const lean = (value: any) => ({ select: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) }) });
+	let ticketTypeModel: any;
+	let eventModel: any;
+	let memberModel: any;
+	let service: TicketTypeService;
+
+	beforeEach(() => {
+		ticketTypeModel = { find: jest.fn().mockReturnValue({ sort: () => ({ exec: jest.fn().mockResolvedValue([{ _id: 't1' }]) }) }) };
+		eventModel = { findById: jest.fn().mockReturnValue(lean({ organizerId: 'o1' })) };
+		memberModel = { exists: jest.fn() };
+		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel);
+	});
+
+	it('returns the ticket types when the organizer is ACTIVE', async () => {
+		memberModel.exists.mockResolvedValue({ _id: 'o1' });
+
+		expect(await service.getTicketTypes('e1' as any)).toEqual([{ _id: 't1' }]);
+		expect(memberModel.exists).toHaveBeenCalledWith({ _id: 'o1', memberStatus: MemberStatus.ACTIVE });
+	});
+
+	it('answers NO_DATA_FOUND when the organizer is not ACTIVE', async () => {
+		memberModel.exists.mockResolvedValue(null);
+
+		await expect(service.getTicketTypes('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+		expect(ticketTypeModel.find).not.toHaveBeenCalled();
+	});
+
+	it('answers NO_DATA_FOUND for an unknown event', async () => {
+		eventModel.findById.mockReturnValue(lean(null));
+
+		await expect(service.getTicketTypes('missing' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+		expect(memberModel.exists).not.toHaveBeenCalled();
+	});
+});
+

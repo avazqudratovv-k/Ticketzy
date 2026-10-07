@@ -20,6 +20,14 @@ export enum Message {
 	PROVIDE_ALLOWED_FORMAT = 'Please provide jpg, jpeg or png images!',
 	SELF_SUBSCRIPTION_DENIED = 'Self subscription is denied!',
 	ONLY_ORGANIZERS_CAN_BE_FOLLOWED = 'Only organizers can be followed!',
+	NO_ORGANIZER_FOUND = 'No organizer found!',
+	USE_ORGANIZER_OPERATIONS = 'Organizer status and role are changed with the organizer operations, not with updateMemberByAdmin!',
+	INVALID_STATUS_TRANSITION = 'This organizer status change is not allowed from the current status!',
+	REJECT_REASON_REQUIRED = 'A reason is required to reject an organizer!',
+	SUSPEND_REASON_REQUIRED = 'A reason is required to suspend an organizer!',
+	COMMISSION_REASON_REQUIRED = 'A reason is required to set a commission override!',
+	INVALID_COMMISSION_RATE = 'The commission rate must be between 0 and 100!',
+	INVALID_COMMISSION_END_DATE = 'The commission override end date must be in the future!',
 }
 
 export enum Direction {

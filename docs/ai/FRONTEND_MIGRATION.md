@@ -12,9 +12,10 @@
 | Venues and tickets | `getVenue`, `getVenues`, `createVenue`, `updateVenue`, `getTicketTypes`, `createTicketType`, `updateTicketType` |
 | Orders and tickets | `createOrder`, `payOrder`, `cancelOrder`, `getOrder`, `getMyOrders`, `getAllOrdersByAdmin`, `getMyTickets`, `checkInTicket` |
 | Social | `createComment`, `updateComment`, `getComments` (events only), `subscribe`, `unsubscribe` (organizers only), `getMemberFollowings`, `getMemberFollowers` |
+| Admin: organizer approval | `getOrganizersByAdmin`, `verifyOrganizerByAdmin`, `rejectOrganizerByAdmin`, `suspendOrganizerByAdmin`, `reinstateOrganizerByAdmin`, `setCommissionOverrideByAdmin`, `getAuditLogsByAdmin` |
 | Content | `getNotices`, `getMyNotifications`, `markNotificationRead` |
 
-Enums changed: `MemberType` = USER, ORGANIZER, ADMIN; `MemberStatus` = PENDING, ACTIVE, REJECTED, SUSPENDED, DELETE; `CommentGroup` = EVENT; `LikeGroup` = MEMBER, EVENT. Public member and organizer data and public events are only returned for ACTIVE members (DECISIONS #30).
+Enums changed: `MemberType` = USER, ORGANIZER, ADMIN; `MemberStatus` = PENDING, ACTIVE, REJECTED, SUSPENDED, DELETE; `CommentGroup` = EVENT; `LikeGroup` = MEMBER, EVENT. Public member and organizer data and public events are only returned for ACTIVE members (DECISIONS #30, #34). `memberEmail`, `rejectReason` and `commissionOverride` are returned only to the member themselves and to admins. Organizer status changes use the admin operations above, not `updateMemberByAdmin`.
 
 ## Step-by-step plan
 

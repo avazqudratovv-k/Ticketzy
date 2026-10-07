@@ -7,7 +7,8 @@ import { Event } from '../../libs/dto/event/event';
 import { Message } from '../../libs/enums/common.enum';
 import { EventStatus } from '../../libs/enums/event.enum';
 import { TicketTypeStatus } from '../../libs/enums/ticket.enum';
-import { MemberType } from '../../libs/enums/member.enum';
+import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
+import { Member } from '../../libs/dto/member/member';
 import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
@@ -18,6 +19,7 @@ export class TicketTypeService {
 	constructor(
 		@InjectModel('TicketType') private readonly ticketTypeModel: Model<TicketType>,
 		@InjectModel('Event') private readonly eventModel: Model<Event>,
+		@InjectModel('Member') private readonly memberModel: Model<Member>,
 	) {}
 
 	public async createTicketType(memberId: ObjectId, memberType: MemberType, input: TicketTypeInput): Promise<TicketType> {
@@ -51,6 +53,12 @@ export class TicketTypeService {
 	}
 
 	public async getTicketTypes(eventId: ObjectId): Promise<TicketType[]> {
+		// the ticket types of an event whose organizer is not ACTIVE are hidden, like the event itself
+		const event = await this.eventModel.findById(eventId).select('organizerId').lean().exec();
+		const organizerActive =
+			event && (await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE }));
+		if (!organizerActive) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+
 		return await this.ticketTypeModel.find({ eventId: eventId }).sort({ ticketPrice: 1 }).exec();
 	}
 

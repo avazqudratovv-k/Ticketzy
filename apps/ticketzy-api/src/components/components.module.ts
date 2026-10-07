@@ -7,6 +7,8 @@ import { OrderModule } from './order/order.module';
 import { TicketModule } from './ticket/ticket.module';
 import { NoticeModule } from './notice/notice.module';
 import { NotificationModule } from './notification/notification.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { OrganizerModule } from './organizer/organizer.module';
 import { AuthModule } from './auth/auth.module';
 import { CommentModule } from './comment/comment.module';
 import { LikeModule } from './like/like.module';
@@ -24,6 +26,8 @@ import { FollowModule } from './follow/follow.module';
 		TicketModule,
 		NoticeModule,
 		NotificationModule,
+		AuditLogModule,
+		OrganizerModule,
 		LikeModule,
 		ViewModule,
 		CommentModule,

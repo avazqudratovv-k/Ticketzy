@@ -1,7 +1,7 @@
 import { Args, Context, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
-import { Member, Members } from '../../libs/dto/member/member';
+import { CommissionOverride, Member, Members } from '../../libs/dto/member/member';
 import { Logger, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
@@ -21,14 +21,26 @@ export class MemberResolver {
 
 	constructor(private readonly memberService: MemberService) {}
 
-	/** the email is private: only the member themselves and admins see it, everyone else gets null */
+	/** private fields: only the member themselves and admins see them, everyone else gets null */
+	private isSelfOrAdmin(member: Member, context: any): boolean {
+		const authMember = context?.req?.body?.authMember;
+		if (!authMember) return false;
+		return String(authMember._id) === String(member._id) || authMember.memberType === MemberType.ADMIN;
+	}
+
 	@ResolveField(() => String, { nullable: true })
 	public memberEmail(@Parent() member: Member, @Context() context: any): string | null {
-		const authMember = context?.req?.body?.authMember;
-		if (!authMember || !member.memberEmail) return null;
+		return member.memberEmail && this.isSelfOrAdmin(member, context) ? member.memberEmail : null;
+	}
 
-		const isSelf = String(authMember._id) === String(member._id);
-		return isSelf || authMember.memberType === MemberType.ADMIN ? member.memberEmail : null;
+	@ResolveField(() => String, { nullable: true })
+	public rejectReason(@Parent() member: Member, @Context() context: any): string | null {
+		return member.rejectReason && this.isSelfOrAdmin(member, context) ? member.rejectReason : null;
+	}
+
+	@ResolveField(() => CommissionOverride, { nullable: true })
+	public commissionOverride(@Parent() member: Member, @Context() context: any): CommissionOverride | null {
+		return member.commissionOverride && this.isSelfOrAdmin(member, context) ? member.commissionOverride : null;
 	}
 
 	@Mutation(() => Member)

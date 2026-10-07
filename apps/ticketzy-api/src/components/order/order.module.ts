@@ -4,6 +4,7 @@ import { OrderResolver } from './order.resolver';
 import { OrderService } from './order.service';
 import OrderSchema from '../../libs/schemas/Order.model';
 import EventSchema from '../../libs/schemas/Event.model';
+import MemberSchema from '../../libs/schemas/Member.model';
 import TicketSchema from '../../libs/schemas/Ticket.model';
 import PaymentSchema from '../../libs/schemas/Payment.model';
 import { AuthModule } from '../auth/auth.module';
@@ -17,6 +18,7 @@ import { NotificationModule } from '../notification/notification.module';
 			{ name: 'Event', schema: EventSchema },
 			{ name: 'Ticket', schema: TicketSchema },
 			{ name: 'Payment', schema: PaymentSchema },
+			{ name: 'Member', schema: MemberSchema },
 		]),
 		AuthModule,
 		TicketTypeModule,

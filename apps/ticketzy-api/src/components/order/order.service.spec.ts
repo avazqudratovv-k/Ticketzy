@@ -3,6 +3,7 @@ import { ObjectId } from 'bson';
 import { OrderService } from './order.service';
 import { EventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus } from '../../libs/enums/ticket.enum';
+import { MemberStatus } from '../../libs/enums/member.enum';
 
 const E = '64b7f0000000000000000001';
 const A = '64b7f0000000000000000002';
@@ -22,6 +23,7 @@ describe('OrderService', () => {
 	let eventModel: any;
 	let ticketModel: any;
 	let paymentModel: any;
+	let memberModel: any;
 	let ticketTypeService: any;
 	let notificationService: any;
 	let service: OrderService;
@@ -31,9 +33,10 @@ describe('OrderService', () => {
 		eventModel = { findOne: jest.fn().mockReturnValue(query(futureEvent())) };
 		ticketModel = { insertMany: jest.fn(), deleteMany: jest.fn().mockReturnValue(query({})) };
 		paymentModel = { create: jest.fn(), deleteMany: jest.fn().mockReturnValue(query({})) };
+		memberModel = { exists: jest.fn().mockResolvedValue({ _id: 'organizer' }) };
 		ticketTypeService = { reserve: jest.fn(), release: jest.fn().mockResolvedValue(undefined) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
-		service = new OrderService(orderModel, eventModel, ticketModel, paymentModel, ticketTypeService, notificationService);
+		service = new OrderService(orderModel, eventModel, ticketModel, paymentModel, memberModel, ticketTypeService, notificationService);
 	});
 
 	const input = (items: { ticketTypeId: string; quantity: number }[]) => ({ eventId: E, items }) as any;
@@ -53,6 +56,18 @@ describe('OrderService', () => {
 			expect(order.items.map((i) => i.unitPrice)).toEqual([50, 120]);
 			expect(order.expiresAt.getTime()).toBeGreaterThan(Date.now());
 			expect(ticketTypeService.release).not.toHaveBeenCalled();
+		});
+
+		it('refuses an event whose organizer is not ACTIVE, before anything is reserved', async () => {
+			memberModel.exists.mockResolvedValue(null);
+
+			await expect(service.createOrder('m1' as any, input([{ ticketTypeId: A, quantity: 1 }]))).rejects.toBeInstanceOf(
+				BadRequestException,
+			);
+
+			expect(memberModel.exists).toHaveBeenCalledWith(expect.objectContaining({ memberStatus: MemberStatus.ACTIVE }));
+			expect(ticketTypeService.reserve).not.toHaveBeenCalled();
+			expect(orderModel.create).not.toHaveBeenCalled();
 		});
 
 		it('releases earlier reservations when a later item cannot be reserved', async () => {

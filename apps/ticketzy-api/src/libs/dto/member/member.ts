@@ -1,8 +1,20 @@
-import { Field, Int, ObjectType } from '@nestjs/graphql';
+import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../../enums/member.enum';
 import { MeLiked } from '../like/like';
 import { MeFollowed } from '../follow/follow';
+
+@ObjectType()
+export class CommissionOverride {
+	@Field(() => Float)
+	rate: number;
+
+	@Field(() => Date, { nullable: true })
+	endsAt?: Date;
+
+	@Field(() => String)
+	reason: string;
+}
 
 @ObjectType()
 export class Member {
@@ -62,6 +74,14 @@ export class Member {
 
 	@Field(() => Int)
 	memberRank: number;
+
+	/** only returned to the member themselves and to admins, see MemberResolver */
+	@Field(() => String, { nullable: true })
+	rejectReason?: string;
+
+	/** only returned to the member themselves and to admins, see MemberResolver */
+	@Field(() => CommissionOverride, { nullable: true })
+	commissionOverride?: CommissionOverride;
 
 	@Field(() => Int)
 	memberWarnings: number;

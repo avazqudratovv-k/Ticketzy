@@ -177,3 +177,34 @@ Backend only. Decisions: DECISIONS #27 to #30.
 | Reworked queries against the dev database (empty collections) | accepted by MongoDB: `getEvents`, `getOrganizers`, `getFavorites`, `getVisited`, `getMemberFollowers`, `getMemberFollowings`, `getMember`; REJECTED organizer hidden, follow of a USER refused, comment group MEMBER refused |
 | Filtering with real events, follows and a suspended organizer | **not run** (no such data; covered by mock tests of the pipelines only) |
 
+## 11. Organizer approval and audit log
+
+Backend only. Decisions: DECISIONS #31 to #34.
+
+**Operations added (all ADMIN, `RolesGuard`)**
+- `getOrganizersByAdmin(input: OrganizersByAdminInquiry!): Members!` (page, limit, sort from the organizer sort whitelist, filter `memberStatus`, `text` searches full name, nick and email with escaped regex)
+- `verifyOrganizerByAdmin(memberId)`, `rejectOrganizerByAdmin(input: { memberId, reason })`, `suspendOrganizerByAdmin(input: { memberId, reason })`, `reinstateOrganizerByAdmin(memberId)`: all return `Member`
+- `setCommissionOverrideByAdmin(input: { memberId, rate, endsAt?, reason })`: returns `Member`
+- `getAuditLogsByAdmin(input: AuditLogsInquiry!): AuditLogs!` (page, limit, sort `createdAt`, filter action, targetType, targetId, actorId; each entry includes `actorData`)
+
+**Files added**
+- `components/organizer/` (module, resolver, service) and `components/audit-log/` (module, resolver, service), both registered in `components.module.ts`
+- `libs/schemas/AuditLog.model.ts` (collection `audit_logs`, index on `createdAt`), `libs/enums/audit-log.enum.ts` (`AuditAction`, `AuditTargetType`)
+- `libs/dto/organizer/organizer.input.ts`, `libs/dto/audit-log/audit-log.ts`, `libs/dto/audit-log/audit-log.input.ts`
+- specs: `organizer.service.spec.ts`, `audit-log.service.spec.ts`
+
+**Files edited**
+- `Member.model.ts` and `libs/dto/member/member.ts`: `rejectReason`, `commissionOverride { rate, endsAt, reason }` (embedded schema, rate 0 to 100); `MemberResolver` returns `memberEmail`, `rejectReason` and `commissionOverride` only to the member and to admins
+- `member.enum.ts`: `organizerTransitions` rule table; `notification.enum.ts`: 5 new types; `common.enum.ts`: Message constants `NO_ORGANIZER_FOUND`, `INVALID_STATUS_TRANSITION`, `REJECT_REASON_REQUIRED`, `SUSPEND_REASON_REQUIRED`, `COMMISSION_REASON_REQUIRED`, `INVALID_COMMISSION_RATE`, `INVALID_COMMISSION_END_DATE`, `USE_ORGANIZER_OPERATIONS`; `libs/config.ts`: `availableAuditLogSorts`, `lookupActor`
+- `member.service.ts`: `updateMemberByAdmin` refuses status and role changes on organizers
+- N11: `ticket-type.service.ts` (`getTicketTypes`) and `order.service.ts` (`createOrder`) check the organizer is ACTIVE; both services and modules now use the `Member` model; `order.service.spec.ts` and `ticket-type.service.spec.ts` updated for the new constructor argument and extended
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` and `nest build ticketzy-batch` | pass |
+| `npx jest apps/ticketzy-api/src` (117 tests; new: every action from every status, required reasons, rejectReason saved and cleared, audit and notification content, a broken notification or audit write does not block, commission rules, list filters, N11, the `updateMemberByAdmin` guard) | pass |
+| GraphQL schema generated offline | pass: the 7 new operations are present |
+| Live check against the dev database (30 checks over HTTP: all six operations and the invalid transitions, blank reasons, privacy of the new fields, admin-only access, audit entries and pagination, notifications received) | pass |
+| `getTicketTypes` / `createOrder` against real data with a suspended organizer | **not run** (no events exist in the dev database; covered by mock tests) |
+

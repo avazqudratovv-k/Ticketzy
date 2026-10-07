@@ -31,7 +31,10 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | ~~N8~~ (done) | Agent-named operations renamed to organizer names (DECISIONS #27) | frontend-visible |
 | N9 | Frontend: new signup and login inputs, JWT no longer holds the profile, new enum values | breaking API change |
 | N10 | Clean leftovers of the removed board in the database: the board collection, `likes` / `views` with group ARTICLE, `comments` with group MEMBER or ARTICLE, `notifications` with group ARTICLE, `uploads/article/` | the code no longer reads them |
-| N11 | Apply the organizer-must-be-ACTIVE rule to `getTicketTypes` and `createOrder` (events of a suspended organizer can still be bought today) | DECISIONS #30 gap |
+| ~~N11~~ (done) | The organizer-must-be-ACTIVE rule now covers `getTicketTypes` and `createOrder` (DECISIONS #34) | closed the DECISIONS #30 gap |
+| N12 | Use `commissionOverride` when orders are priced (and define the default rate); add an operation to clear an override; audit USER status changes too | the override is stored only, nothing reads it |
+| N13 | `shapeIntoMongoObjectId` throws the raw BSON error for a malformed id (visible in every operation that takes an id); answer a clean `BAD_REQUEST` instead | leaks library text |
+| N14 | Existing orders of events whose organizer was suspended before this change are not cancelled or refunded | not built |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)
