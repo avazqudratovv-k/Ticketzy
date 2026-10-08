@@ -359,3 +359,23 @@ Backend only. Decision: DECISIONS #59.
 | `npm run build` | pass |
 | `npx jest` (420 tests, 23 suites) | pass |
 | Live check: built API on port 4777 against the dev database, real WebSocket and GraphQL clients, test admin and organizers inserted directly (48 checks): socket auth (header-less auth message, 10 s timeout 4408, bad token 4401, URL token ignored), start own and support conversation, admin sees both, other organizer refused, room-only delivery, unread counters and mark read, `adminId` on first admin reply, notifications for the other party only, rate limit (11th refused, not saved), PENDING and REJECTED support-only and notifications readable, 2001 character body refused, live reject and suspend cut sockets off event rooms | pass; test data deleted by id, no leftovers. Reject is only allowed from PENDING, so the rejected organizer was moved to PENDING in the database after its socket had joined. Real-database races (N19, N23) still not run |
+
+## 18. AI features with the Claude API
+
+Backend only. Decision: DECISIONS #60. New `components/ai` (`AiModule`), SDK `@anthropic-ai/sdk`.
+
+- `AiClientService` is the only caller of the API: env `AI_ENABLED` (off unless `true`), `ANTHROPIC_API_KEY` (optional), `ANTHROPIC_MODEL` (default `claude-haiku-4-5`), `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` (`getAiConfig`, checked at startup by `validateEnv`); `begin(key)` checks availability and an in-memory per-member (or per-IP) limit, `complete()` makes one call and turns every failure into a `Message.AI_*` text; key and prompts are never logged
+- Moderation (`AiModerationService`): `moderateEvent(eventId)` stores `eventModeration` (`checked`, flags, reason, confidence, model, checkedAt) and never throws, a failure is stored as `checked: false`; started in the background by `submitEventForApproval`, never blocks, approves or rejects; `runEventModerationByAdmin(eventId)` (admin, audited as `EVENT_MODERATION_RUN`); admins read it in `getEventsByAdmin` (field `eventModeration`)
+- `translateEvent(input: { eventId, targetLocales })` (active organizer, own event): suggestions only, nothing saved
+- `askAssistant(input: { message, history, locale })` (visitors too): tools `search_events`, `get_event`, `get_refund_policy` (`getRefundPolicyText`, `libs/refund-policy.ts`), `get_my_tickets`; max 4 tool rounds, 10 history turns, 1000 characters per message, 700 output tokens; returns `{ answer, events }`
+- Event schema and DTO: `eventModeration.checked`, flag `type` is now the `ModerationFlagType` enum; `.env.example` updated
+
+**Tests added** (`components/ai/ai.service.spec.ts`, `env.validation.spec.ts`, `event.service.spec.ts`, mocked Anthropic client): disabled AI and missing key, rate limit, API error without leaks, strict parsing, moderation stored / invalid JSON / API failure / disabled / rate limited, prompt injection leaves the stored schema unchanged, translation (owner only, nothing saved, bad answers), tool visibility, `get_my_tickets` login and caller-only, max tool rounds, history and answer limits, submit still works when moderation rejects
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (460 tests, 24 suites) | pass |
+| Live call to the real API, GraphQL smoke test | not run: no key available, the Nest app was not booted |
+

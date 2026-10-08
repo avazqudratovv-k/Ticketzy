@@ -31,6 +31,9 @@ export class EventModerationFlag {
 
 @ObjectType()
 export class EventModeration {
+	@Field(() => Boolean, { nullable: true, description: 'false: the AI check did not run or failed' })
+	checked?: boolean;
+
 	@Field(() => [EventModerationFlag])
 	flags: EventModerationFlag[];
 

@@ -1,5 +1,5 @@
 import { Schema } from 'mongoose';
-import { EventCategory, EventLocale, EventStatus, SeatingType } from '../enums/event.enum';
+import { EventCategory, EventLocale, EventStatus, ModerationFlagType, SeatingType } from '../enums/event.enum';
 
 const EventTranslationSchema = new Schema(
 	{
@@ -10,13 +10,14 @@ const EventTranslationSchema = new Schema(
 	{ _id: false },
 );
 
-/** stored only for now: nothing fills it yet */
+/** filled by the AI moderation on submit; `checked: false` means the check did not run or failed */
 const EventModerationSchema = new Schema(
 	{
+		checked: { type: Boolean },
 		flags: [
 			new Schema(
 				{
-					type: { type: String, required: true },
+					type: { type: String, enum: ModerationFlagType, required: true },
 					reason: { type: String },
 					confidence: { type: Number, min: 0, max: 1 },
 				},

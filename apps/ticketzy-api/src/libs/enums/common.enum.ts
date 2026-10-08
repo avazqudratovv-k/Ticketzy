@@ -88,6 +88,17 @@ export enum Message {
 	MESSAGE_BODY_REQUIRED = 'The message cannot be empty!',
 	MESSAGE_BODY_TOO_LONG = 'A message can have at most 2000 characters!',
 	TOO_MANY_MESSAGES = 'You are sending messages too fast, please slow down!',
+
+	AI_DISABLED = 'AI features are turned off on this server.',
+	AI_NOT_CONFIGURED = 'AI features are enabled but not configured on this server.',
+	AI_RATE_LIMITED = 'You are using the AI features too fast, please try again in a minute!',
+	AI_REQUEST_FAILED = 'The AI service could not answer right now, please try again later!',
+	AI_TIMEOUT = 'The AI service took too long to answer, please try again later!',
+	AI_INVALID_RESPONSE = 'The AI service returned an answer that could not be used!',
+	AI_ASSISTANT_NO_ANSWER = 'Sorry, I could not find an answer. Please try rephrasing your question.',
+	AI_LOGIN_REQUIRED = 'Please log in to see your tickets.',
+	AI_TRANSLATE_LOCALES_REQUIRED = 'Choose at least one target language (en, ko, ru, uz)!',
+	AI_MODERATION_NOT_CHECKED = 'The AI check did not run for this event.',
 }
 
 export enum Direction {

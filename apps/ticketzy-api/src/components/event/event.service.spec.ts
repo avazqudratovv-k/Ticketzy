@@ -139,6 +139,7 @@ describe('EventService', () => {
 	let auditLogService: any;
 	let eventSeatModel: any;
 	let refundService: any;
+	let aiModerationService: any;
 	let service: EventService;
 
 	beforeEach(() => {
@@ -160,6 +161,7 @@ describe('EventService', () => {
 		refundService = {
 			refundOrdersForCancelledEvent: jest.fn().mockResolvedValue({ refundedCount: 2, failedCount: 0, totalCount: 2, failedOrderIds: [] }),
 		};
+		aiModerationService = { moderateEvent: jest.fn().mockResolvedValue({ checked: true, flags: [] }) };
 		service = new EventService(
 			eventModel,
 			venueModel,
@@ -172,6 +174,7 @@ describe('EventService', () => {
 			auditLogService,
 			eventSeatModel,
 			refundService,
+			aiModerationService,
 		);
 	});
 
@@ -196,6 +199,18 @@ describe('EventService', () => {
 				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
 			},
 		);
+
+		it('starts the AI check once and still submits when it rejects', async () => {
+			eventModel.findOne.mockReturnValue(lean(draft()));
+			ticketTypeModel.countDocuments.mockReturnValue(exec(1));
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.PENDING })));
+			aiModerationService.moderateEvent.mockRejectedValue(new Error('boom'));
+
+			const result = await service.submitEventForApproval('org1' as any, 'e1' as any);
+
+			expect(result.eventStatus).toBe(EventStatus.PENDING);
+			expect(aiModerationService.moderateEvent).toHaveBeenCalledTimes(1);
+		});
 
 		it("answers NO_DATA_FOUND for another organizer's event", async () => {
 			eventModel.findOne.mockReturnValue(lean(null));

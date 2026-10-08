@@ -42,3 +42,14 @@ export const getRefundDeadline = (startAt: Date | string, venueTimezone: string)
 
 export const isBeforeRefundDeadline = (startAt: Date | string, venueTimezone: string, now: Date = new Date()): boolean =>
 	now.getTime() <= getRefundDeadline(startAt, venueTimezone).getTime();
+
+/** the refund rules in plain words, for the AI assistant; keep it in line with RefundService.assess and getRefundDeadline */
+export const getRefundPolicyText = (): string =>
+	[
+		'Refunds are per order: the whole order is refunded, never a single ticket.',
+		'Only a paid order can be refunded, and only while every ticket in it is unused (not checked in at the gate).',
+		'A buyer can refund until 23:59 on the day before the event starts, on the clock of the venue timezone. After that the buyer can no longer refund, and only the support team can decide.',
+		'If the event is cancelled, every paid order of that event is refunded automatically, including tickets that were already used.',
+		'A refunded order cannot be paid or used again; its tickets stop working.',
+		'The money goes back through the original payment method. Refunding an order that is already refunded changes nothing.',
+	].join('\n');

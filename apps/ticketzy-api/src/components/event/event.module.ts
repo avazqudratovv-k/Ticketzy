@@ -14,6 +14,7 @@ import { LikeModule } from '../like/like.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { RefundModule } from '../refund/refund.module';
 import { NotificationModule } from '../notification/notification.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
 	imports: [
@@ -31,6 +32,7 @@ import { NotificationModule } from '../notification/notification.module';
 		NotificationModule,
 		AuditLogModule,
 		RefundModule,
+		AiModule,
 	],
 	providers: [EventResolver, EventService],
 	exports: [EventService],

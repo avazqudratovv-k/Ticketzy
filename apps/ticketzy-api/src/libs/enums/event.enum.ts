@@ -42,6 +42,17 @@ registerEnumType(EventLocale, {
 	name: 'EventLocale',
 });
 
+/** what the AI moderation can flag on a submitted event; a flag is a hint for the admin, never a decision */
+export enum ModerationFlagType {
+	DUPLICATE = 'DUPLICATE',
+	SUSPICIOUS = 'SUSPICIOUS',
+	INAPPROPRIATE = 'INAPPROPRIATE',
+	MISLEADING_PRICE = 'MISLEADING_PRICE',
+}
+registerEnumType(ModerationFlagType, {
+	name: 'ModerationFlagType',
+});
+
 /** the only status that public queries (list, detail, favorites, visited, likes, orders) can see */
 export const publicEventStatus = EventStatus.APPROVED;
 

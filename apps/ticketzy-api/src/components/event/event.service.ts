@@ -40,6 +40,7 @@ import {
 } from '../../libs/venue-layout';
 import { NotificationService } from '../notification/notification.service';
 import { RefundService } from '../refund/refund.service';
+import { AiModerationService } from '../ai/ai-moderation.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import {
 	escapeRegExp,
@@ -102,6 +103,7 @@ export class EventService {
 		private auditLogService: AuditLogService,
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 		private refundService: RefundService,
+		private aiModerationService: AiModerationService,
 	) {}
 
 	public async createEvent(input: EventInput): Promise<Event> {
@@ -293,6 +295,9 @@ export class EventService {
 			)
 			.exec();
 		if (!result) throw new BadRequestException(Message.INVALID_EVENT_TRANSITION);
+
+		// the AI check runs once in the background: it never blocks, approves or rejects (moderateEvent never throws)
+		void this.aiModerationService.moderateEvent(result._id).catch((err) => this.logger.error(`Moderation not started: ${err.message}`));
 		return result;
 	}
 
