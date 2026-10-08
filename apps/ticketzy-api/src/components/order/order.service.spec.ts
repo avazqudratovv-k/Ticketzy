@@ -116,11 +116,21 @@ describe('OrderService.createCheckout (general admission)', () => {
 
 		events.docs[0].eventStatus = EventStatus.APPROVED;
 		events.docs[0].endAt = new Date(Date.now() - 1000);
-		await expect(attempt()).rejects.toBeInstanceOf(BadRequestException);
+		await expect(attempt()).rejects.toThrow(Message.EVENT_ENDED_NO_SALES);
 
-		events.docs[0].endAt = new Date(Date.now() + day);
+		// an ended event is refused even when its sales window is still open
+		events.docs[0].saleStartAt = new Date(Date.now() - 2 * day);
+		events.docs[0].saleEndAt = new Date(Date.now() + day);
+		await expect(attempt()).rejects.toThrow(Message.EVENT_ENDED_NO_SALES);
+
+		events.docs[0].endAt = new Date(Date.now() + 2 * day);
 		events.docs[0].saleStartAt = new Date(Date.now() + day);
-		await expect(attempt()).rejects.toBeInstanceOf(BadRequestException);
+		events.docs[0].saleEndAt = undefined;
+		await expect(attempt()).rejects.toThrow(Message.SALES_NOT_STARTED);
+
+		events.docs[0].saleStartAt = new Date(Date.now() - 2 * day);
+		events.docs[0].saleEndAt = new Date(Date.now() - day);
+		await expect(attempt()).rejects.toThrow(Message.SALES_CLOSED);
 		expect(ticketTypeService.reserve).not.toHaveBeenCalled();
 	});
 });

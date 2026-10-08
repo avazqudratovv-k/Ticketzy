@@ -9,6 +9,7 @@ import { SeatStatus, SeatingType, publicEventStatus } from '../../libs/enums/eve
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
 import { shapeIntoMongoObjectId } from '../../libs/config';
+import { getPurchaseWindowError } from '../../libs/sales-window';
 
 export const MAX_SEATS_PER_HOLD = 8;
 
@@ -254,5 +255,7 @@ export class SeatService {
 		const organizerActive =
 			event && (await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE }));
 		if (!organizerActive) throw new BadRequestException(Message.SEATS_NOT_AVAILABLE_FOR_EVENT);
+		const windowError = getPurchaseWindowError(event);
+		if (windowError) throw new BadRequestException(windowError);
 	}
 }

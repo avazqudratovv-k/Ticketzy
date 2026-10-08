@@ -30,6 +30,8 @@ interface OrderLine {
 	unitPrice: number;
 }
 
+import { getPurchaseWindowError } from '../../libs/sales-window';
+
 @Injectable()
 export class OrderService {
 	private readonly logger = new Logger(OrderService.name);
@@ -66,9 +68,8 @@ export class OrderService {
 			.lean()
 			.exec();
 		if (!organizer) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		if (moment(event.endAt).isBefore(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		if (event.saleStartAt && moment(event.saleStartAt).isAfter(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		if (event.saleEndAt && moment(event.saleEndAt).isBefore(now)) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		const windowError = getPurchaseWindowError(event, now);
+		if (windowError) throw new BadRequestException(windowError);
 
 		const commissionRate = getCommissionRate(organizer, now);
 		return event.seatingType === SeatingType.RESERVED

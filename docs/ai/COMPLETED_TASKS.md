@@ -482,3 +482,8 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Cause: two tests assumed an event one hour away is always past the buyer deadline; it is not between 23:00 and 23:59 Seoul time. Production logic (`getRefundDeadline`, `RefundService.assess`) is correct and unchanged.
 - `refund.service.spec.ts` runs on a fixed fake clock plus a nine-clock regression sweep; `refund-policy.spec.ts` has the boundary, timezone and DST cases.
 - Verified with `TZ` set to Asia/Seoul, UTC, America/Los_Angeles, Pacific/Kiritimati and Australia/Lord_Howe: 62 refund tests pass each time. `tsc` (api and batch), `npm run build` and `npx jest` (587 tests, 29 suites) pass.
+
+## Sales window validation (decision #71)
+- New `libs/sales-window.ts`: `getSalesWindowError` (create, update, admin update, submit) and `getPurchaseWindowError` (checkout, seat hold). Six new messages in `Message`.
+- `holdSeats` now refuses outside the event sales window (it only checked status and start before). `createCheckout` answers specific messages instead of `NOT_ALLOWED_REQUEST` for an ended event or a closed / not yet open window. Demo and base seeds set no event sales window, so they are unaffected.
+- Tests: `libs/sales-window.spec.ts`, event create / update / admin update / submit rules, hold outside the window, checkout of an ended event or outside the window (reserved and general). `tsc` (api and batch), `npm run build` and `npx jest` (610 tests) pass.

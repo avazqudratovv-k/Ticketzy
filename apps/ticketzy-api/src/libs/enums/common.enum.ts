@@ -41,6 +41,13 @@ export enum Message {
 	EVENT_SUBMIT_VENUE_REQUIRED = 'The event needs an active venue before it can be submitted!',
 	EVENT_SUBMIT_TICKET_TYPE_REQUIRED = 'The event needs at least one ticket type before it can be submitted!',
 
+	SALES_START_NOT_BEFORE_SALES_END = 'The ticket sales start must be before the ticket sales end!',
+	SALES_END_AFTER_EVENT_END = 'The ticket sales must end no later than the event end!',
+	SALES_START_NOT_BEFORE_EVENT_END = 'The ticket sales must start before the event ends!',
+	EVENT_ENDED_NO_SALES = 'This event has ended, so tickets can no longer be bought!',
+	SALES_NOT_STARTED = 'Ticket sales for this event have not started yet!',
+	SALES_CLOSED = 'Ticket sales for this event are closed!',
+
 	INVALID_VENUE_LAYOUT = 'The venue layout is not valid!',
 	VENUE_LAYOUT_NO_SECTIONS = 'The venue layout needs at least one section!',
 	VENUE_LAYOUT_DUPLICATE_SECTION_KEY = 'Section keys in a venue layout must be unique!',

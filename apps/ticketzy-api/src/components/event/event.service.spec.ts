@@ -178,6 +178,86 @@ describe('EventService', () => {
 		);
 	});
 
+	describe('sales window rules', () => {
+		const h = (hours: number) => new Date(Date.now() + hours * 3600000);
+		const input = (over: any = {}) => ({ organizerId: 'org1', venueId: 'a'.repeat(24), startAt: h(24), endAt: h(27), ...over });
+
+		describe('createEvent', () => {
+			it.each([
+				['sales start not before sales end', { saleStartAt: h(10), saleEndAt: h(5) }, Message.SALES_START_NOT_BEFORE_SALES_END],
+				['sales end after the event end', { saleStartAt: h(1), saleEndAt: h(28) }, Message.SALES_END_AFTER_EVENT_END],
+				['sales start at or after the event end', { saleStartAt: h(28) }, Message.SALES_START_NOT_BEFORE_EVENT_END],
+			])('refuses %s', async (_name, over, message) => {
+				eventModel.create = jest.fn();
+				await expect(service.createEvent(input(over) as any)).rejects.toThrow(message);
+				expect(eventModel.create).not.toHaveBeenCalled();
+			});
+
+			it('accepts a valid window, sales ending exactly at the event end', async () => {
+				eventModel.create = jest.fn().mockResolvedValue({ _id: 'e1', organizerId: 'org1' });
+				await service.createEvent(input({ saleStartAt: h(1), saleEndAt: h(27) }) as any);
+				expect(eventModel.create).toHaveBeenCalled();
+			});
+		});
+
+		describe('updateEvent', () => {
+			const update = (stored: any, patch: any) => {
+				eventModel.findOne.mockReturnValue(lean(draft(stored)));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(draft()));
+				return service.updateEvent('org1' as any, { _id: 'e1', ...patch } as any);
+			};
+
+			it('re-checks the stored window when the event end moves earlier', async () => {
+				await expect(update({ startAt: h(24), endAt: h(30), saleStartAt: h(1), saleEndAt: h(29) }, { endAt: h(26) })).rejects.toThrow(
+					Message.SALES_END_AFTER_EVENT_END,
+				);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('re-checks the stored sales start when the event end moves earlier', async () => {
+				await expect(update({ startAt: h(24), endAt: h(30), saleStartAt: h(28) }, { endAt: h(26) })).rejects.toThrow(
+					Message.SALES_START_NOT_BEFORE_EVENT_END,
+				);
+			});
+
+			it('re-checks against the stored event end when only the sales window changes', async () => {
+				await expect(update({ startAt: h(24), endAt: h(27) }, { saleEndAt: h(40) })).rejects.toThrow(Message.SALES_END_AFTER_EVENT_END);
+				await expect(update({ startAt: h(24), endAt: h(27), saleStartAt: h(5) }, { saleEndAt: h(2) })).rejects.toThrow(
+					Message.SALES_START_NOT_BEFORE_SALES_END,
+				);
+			});
+
+			it('accepts moving the event later together with the window', async () => {
+				await update({ startAt: h(24), endAt: h(27), saleStartAt: h(1), saleEndAt: h(27) }, { startAt: h(48), endAt: h(51), saleEndAt: h(51) });
+				expect(eventModel.findOneAndUpdate).toHaveBeenCalled();
+			});
+
+			it('also applies to the admin edit', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ startAt: h(24), endAt: h(27), saleEndAt: h(40) })));
+				await expect(service.updateEventByAdmin({ _id: 'e1', eventTitle: 'x' } as any)).rejects.toThrow(Message.SALES_END_AFTER_EVENT_END);
+			});
+		});
+
+		describe('submitEventForApproval', () => {
+			it.each([
+				['sales start not before sales end', { saleStartAt: future(5), saleEndAt: future(2) }, Message.SALES_START_NOT_BEFORE_SALES_END],
+				['sales end after the event end', { saleStartAt: future(1), saleEndAt: future(9) }, Message.SALES_END_AFTER_EVENT_END],
+				['sales start after the event end', { saleStartAt: future(9) }, Message.SALES_START_NOT_BEFORE_EVENT_END],
+			])('refuses a stored event with %s', async (_name, over, message) => {
+				eventModel.findOne.mockReturnValue(lean(draft(over)));
+				await expect(service.submitEventForApproval('org1' as any, 'e1' as any)).rejects.toThrow(message);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('accepts a valid window', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ saleStartAt: future(1), saleEndAt: future(8) })));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.PENDING })));
+				await service.submitEventForApproval('org1' as any, 'e1' as any);
+				expect(eventModel.findOneAndUpdate).toHaveBeenCalled();
+			});
+		});
+	});
+
 	describe('submitEventForApproval', () => {
 		it.each([EventStatus.DRAFT, EventStatus.REJECTED])('moves %s to PENDING with one conditional update', async (status) => {
 			eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: status })));

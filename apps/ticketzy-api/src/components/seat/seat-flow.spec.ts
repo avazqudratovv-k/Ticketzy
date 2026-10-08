@@ -183,6 +183,57 @@ describe('seat holds', () => {
 		await seatService.holdSeats(M1 as any, EVENT as any, ids.slice(0, 8)); // 8 is fine
 	});
 
+	it('refuses to hold seats outside the event sales window or after the event ended', async () => {
+		const { seatService, seatOf, events, seats } = build();
+		const hold = () => seatService.holdSeats(M1 as any, EVENT as any, [seatOf(1)._id]);
+
+		events.docs[0].saleStartAt = inHours(2);
+		await expect(hold()).rejects.toThrow(Message.SALES_NOT_STARTED);
+		events.docs[0].saleStartAt = inHours(-5);
+		events.docs[0].saleEndAt = inHours(-1);
+		await expect(hold()).rejects.toThrow(Message.SALES_CLOSED);
+		expect(seats.docs.every((seat) => seat.seatStatus === SeatStatus.AVAILABLE)).toBe(true);
+
+		events.docs[0].saleEndAt = inHours(5);
+		await expect(hold()).resolves.toBeDefined();
+
+		// the event is over: refused whatever the sales window says
+		events.docs[0].startAt = inHours(-5);
+		events.docs[0].endAt = inHours(-1);
+		await expect(hold()).rejects.toThrow(Message.SEATS_NOT_AVAILABLE_FOR_EVENT);
+	});
+
+	it('refuses a checkout of an ended event or outside the sales window (reserved and general)', async () => {
+		const ctx = build();
+		const reserved = () => ctx.orderService.createCheckout(M1 as any, { eventId: EVENT, seatIds: [ctx.seatOf(1)._id] } as any);
+		const general = () =>
+			ctx.orderService.createCheckout(M1 as any, { eventId: GENERAL_EVENT, items: [{ ticketTypeId: GENERAL_TT, quantity: 1 }] } as any);
+
+		for (const doc of ctx.events.docs) {
+			doc.startAt = inHours(-5);
+			doc.endAt = inHours(-1);
+		}
+		await expect(reserved()).rejects.toThrow(Message.EVENT_ENDED_NO_SALES);
+		await expect(general()).rejects.toThrow(Message.EVENT_ENDED_NO_SALES);
+
+		for (const doc of ctx.events.docs) {
+			doc.startAt = inHours(24);
+			doc.endAt = inHours(27);
+			doc.saleStartAt = inHours(2);
+		}
+		await expect(reserved()).rejects.toThrow(Message.SALES_NOT_STARTED);
+		await expect(general()).rejects.toThrow(Message.SALES_NOT_STARTED);
+
+		for (const doc of ctx.events.docs) {
+			doc.saleStartAt = inHours(-5);
+			doc.saleEndAt = inHours(-1);
+		}
+		await expect(reserved()).rejects.toThrow(Message.SALES_CLOSED);
+		await expect(general()).rejects.toThrow(Message.SALES_CLOSED);
+		expect(ctx.ticketTypeService.reserve).not.toHaveBeenCalled();
+		expect(ctx.orders.docs).toHaveLength(0);
+	});
+
 	it('refuses members who are not ACTIVE and events that are not open for seats', async () => {
 		const { seatService, seatOf, members, events } = build();
 		members.docs.find((m) => String(m._id) === String(M2)).memberStatus = MemberStatus.SUSPENDED;

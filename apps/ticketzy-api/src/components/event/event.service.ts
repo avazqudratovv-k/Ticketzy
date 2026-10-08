@@ -52,6 +52,8 @@ import {
 	shapeIntoMongoObjectId,
 } from '../../libs/config';
 
+import { getSalesWindowError } from '../../libs/sales-window';
+
 const SEAT_BULK_SIZE = 5000;
 
 /** audit action, notification and wording of each admin transition */
@@ -69,7 +71,7 @@ const adminTransitionRecords: Record<
  * Pure on purpose: the service passes in what it looked up.
  */
 export const getEventSubmitError = (
-	event: Pick<Event, 'eventTitle' | 'eventImages' | 'startAt' | 'endAt'> & { seatingType?: SeatingType },
+	event: Pick<Event, 'eventTitle' | 'eventImages' | 'startAt' | 'endAt' | 'saleStartAt' | 'saleEndAt'> & { seatingType?: SeatingType },
 	venueUsable: boolean,
 	ticketTypeCount: number,
 	now: Date = new Date(),
@@ -78,6 +80,8 @@ export const getEventSubmitError = (
 	if (!event.eventTitle?.trim()) return Message.EVENT_SUBMIT_TITLE_REQUIRED;
 	if (!event.eventImages?.length) return Message.EVENT_SUBMIT_IMAGE_REQUIRED;
 	if (!(moment(event.startAt).isAfter(now) && moment(event.endAt).isAfter(now))) return Message.EVENT_SUBMIT_DATES_IN_PAST;
+	const salesError = getSalesWindowError(event.endAt, event.saleStartAt, event.saleEndAt);
+	if (salesError) return salesError;
 	if (!venueUsable) return Message.EVENT_SUBMIT_VENUE_REQUIRED;
 	if (ticketTypeCount < 1) return Message.EVENT_SUBMIT_TICKET_TYPE_REQUIRED;
 	// the layout is optional for GENERAL events; a RESERVED event needs every SEATED section covered by a ticket type
@@ -667,8 +671,8 @@ export class EventService {
 
 	private assertValidDates(startAt: Date, endAt: Date, saleStartAt?: Date, saleEndAt?: Date): void {
 		if (moment(endAt).isBefore(startAt)) throw new BadRequestException(Message.BAD_REQUEST);
-		if (saleStartAt && saleEndAt && moment(saleEndAt).isBefore(saleStartAt))
-			throw new BadRequestException(Message.BAD_REQUEST);
+		const salesError = getSalesWindowError(endAt, saleStartAt, saleEndAt);
+		if (salesError) throw new BadRequestException(salesError);
 	}
 
 	private async assertVenueUsable(venueId: ObjectId): Promise<void> {
