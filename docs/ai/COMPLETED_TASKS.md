@@ -452,3 +452,11 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - `MemberService.login`: a REJECTED, SUSPENDED or DELETE account now fails with code `ACCOUNT_NOT_VERIFIED` (a `GraphQLError`, same message as before); wrong email or password stays `UNAUTHENTICATED` with the same message.
 - Tests (`member.service.spec.ts`): the not-verified case checks `extensions.code` and the message; the wrong-credentials case checks it is still an `UnauthorizedException`.
 - `tsc` (api and batch), `npm run build` and `npx jest` (505 tests, 27 suites) pass.
+
+## Small fixes: search, comment counter, organizer count, error logs (decision #65)
+- `getEvents` text search now covers title, translated titles, category, venue name/city and organizer name/nick (case-insensitive, regex-escaped, no new index).
+- Deleting a comment (`removeCommentByAdmin`, or `updateComment` with status DELETE) decrements `eventComments`; other counters checked, nothing else missing.
+- `getMember` and `getOrganizers` show the number of APPROVED events as `memberEvents` for organizers.
+- ACCOUNT_NOT_VERIFIED and wrong password are logged as one `warn` line in `formatError`; other errors unchanged.
+- Tests: event search (title, translations, category, venue, organizer, escaping, no text), comment counter (admin remove, soft delete, edit, failing counter), organizer count (profile, list, USER untouched), `isExpectedDomainError`.
+- `tsc` (api and batch), `npm run build` and `npx jest` (521 tests, 28 suites) pass.

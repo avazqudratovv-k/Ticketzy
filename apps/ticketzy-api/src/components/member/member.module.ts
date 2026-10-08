@@ -6,12 +6,14 @@ import MemberSchema from '../../libs/schemas/Member.model';
 import { AuthModule } from '../auth/auth.module';
 import { ViewModule } from '../view/view.module';
 import { LikeModule } from '../like/like.module';
+import EventSchema from '../../libs/schemas/Event.model';
 import FollowSchema from '../../libs/schemas/Follow.model';
 
 @Module({
 	imports: [
 		MongooseModule.forFeature([{ name: 'Member', schema: MemberSchema }]),
 		MongooseModule.forFeature([{name: 'Follow',schema: FollowSchema,}]), 
+		MongooseModule.forFeature([{ name: 'Event', schema: EventSchema }]),
 		AuthModule, 
 		ViewModule,
 		LikeModule,

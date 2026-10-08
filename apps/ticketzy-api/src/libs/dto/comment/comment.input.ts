@@ -12,7 +12,7 @@ export class CommentInput {
 	commentGroup: CommentGroup;
 
 	@IsNotEmpty()
-	@Length(1, 100)
+	@Length(1, 500)
 	@Field(() => String)
 	commentContent: string;
 

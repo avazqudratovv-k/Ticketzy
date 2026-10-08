@@ -11,6 +11,8 @@ import { T } from './libs/types/common';
 import { SocketModule } from './socket/socket.module';
 import { validateEnv } from './libs/env.validation';
 
+import { isExpectedDomainError } from './libs/expected-errors';
+
 const logger = new Logger('GraphQL');
 
 @Module({
@@ -32,7 +34,11 @@ const logger = new Logger('GraphQL');
 							message:
 								error?.extensions?.exception?.response?.message || error?.extensions?.response?.message || error?.message,
 						};
-						logger.error(`GRAPHQL GLOBAL ERR: ${JSON.stringify(graphQLFormattedError)}`);
+						if (isExpectedDomainError(graphQLFormattedError)) {
+							logger.warn(`${graphQLFormattedError.code}: ${graphQLFormattedError.message}`);
+						} else {
+							logger.error(`GRAPHQL GLOBAL ERR: ${JSON.stringify(graphQLFormattedError)}`);
+						}
 						return graphQLFormattedError;
 					},
 				};

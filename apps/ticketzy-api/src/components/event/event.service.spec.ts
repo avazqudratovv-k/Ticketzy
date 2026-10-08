@@ -150,10 +150,10 @@ describe('EventService', () => {
 			findOneAndDelete: jest.fn(),
 			aggregate: jest.fn().mockReturnValue(exec([{ list: [], metaCounter: [] }])),
 		};
-		venueModel = { exists: jest.fn().mockResolvedValue({ _id: 'v1' }), findById: jest.fn().mockReturnValue(lean(null)), findOne: jest.fn().mockReturnValue(lean({ _id: 'v1' })) };
+		venueModel = { distinct: jest.fn().mockResolvedValue(['v9']), exists: jest.fn().mockResolvedValue({ _id: 'v1' }), findById: jest.fn().mockReturnValue(lean(null)), findOne: jest.fn().mockReturnValue(lean({ _id: 'v1' })) };
 		eventSeatModel = { bulkWrite: jest.fn().mockResolvedValue({}), find: jest.fn() };
 		ticketTypeModel = { find: jest.fn(), bulkWrite: jest.fn().mockResolvedValue({}), countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
-		memberModel = { findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
+		memberModel = { distinct: jest.fn().mockResolvedValue(['o9']), findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
 		memberService = { getMember: jest.fn().mockResolvedValue({ _id: 'org1' }), memberStatsEditor: jest.fn().mockResolvedValue({}) };
 		viewService = { recordView: jest.fn().mockResolvedValue(null) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
@@ -614,6 +614,58 @@ describe('EventService', () => {
 				expect(JSON.stringify(result)).not.toContain('secret');
 				expect(seatQuery.select.mock.calls[0][0]).not.toContain('heldBy');
 			});
+		});
+	});
+
+	describe('public text search', () => {
+		const search = async (text: string) => {
+			await service.getEvents(null as any, { page: 1, limit: 10, search: { text } } as any);
+			return eventModel.aggregate.mock.calls[0][0][0].$match;
+		};
+
+		it('matches title, translated titles, category, venue and organizer', async () => {
+			const match = await search('Comedy');
+
+			expect(match.eventStatus).toBe(EventStatus.APPROVED);
+			const [title, translated, category, venue, organizer] = match.$or;
+			expect(title.eventTitle.test('big COMEDY night')).toBe(true);
+			expect(translated['eventTranslations.title'].test('comedy')).toBe(true);
+			expect(category).toEqual({ eventCategory: { $in: ['COMEDY'] } });
+			expect(venue).toEqual({ venueId: { $in: ['v9'] } });
+			expect(organizer).toEqual({ organizerId: { $in: ['o9'] } });
+		});
+
+		it.each([['concert', 'CONCERT'], ['football', 'FOOTBALL'], ['SPORT', 'SPORT']])('"%s" finds the %s category', async (text, category) => {
+			const match = await search(text);
+			expect(match.$or[2].eventCategory.$in).toContain(category);
+		});
+
+		it('looks venues up by name or city and organizers by nick or full name', async () => {
+			await search('seoul');
+
+			const [venueFilter] = venueModel.distinct.mock.calls[0].slice(1);
+			expect(venueFilter.$or.map((f: any) => Object.keys(f)[0])).toEqual(['venueName', 'venueCity']);
+			const [, memberFilter] = memberModel.distinct.mock.calls[0];
+			expect(memberFilter.memberType).toBe(MemberType.ORGANIZER);
+			expect(memberFilter.$or.map((f: any) => Object.keys(f)[0])).toEqual(['memberNick', 'memberFullName']);
+		});
+
+		it('escapes the text in every regex and leaves other filters alone', async () => {
+			const match = await service
+				.getEvents(null as any, { page: 1, limit: 10, search: { text: 'a.*(b', venueId: 'a'.repeat(24) } } as any)
+				.then(() => eventModel.aggregate.mock.calls[0][0][0].$match);
+
+			expect(match.$or[0].eventTitle.source).toBe('a\\.\\*\\(b');
+			expect(match.$or[1]['eventTranslations.title'].source).toBe('a\\.\\*\\(b');
+			expect(venueModel.distinct.mock.calls[0][1].$or[0].venueName.source).toBe('a\\.\\*\\(b');
+			expect(String(match.venueId)).toBe('a'.repeat(24));
+			expect(match.eventTitle).toBeUndefined();
+		});
+
+		it('adds no text conditions when there is no text', async () => {
+			await service.getEvents(null as any, { page: 1, limit: 10, search: {} } as any);
+			expect(eventModel.aggregate.mock.calls[0][0][0].$match.$or).toBeUndefined();
+			expect(venueModel.distinct).not.toHaveBeenCalled();
 		});
 	});
 

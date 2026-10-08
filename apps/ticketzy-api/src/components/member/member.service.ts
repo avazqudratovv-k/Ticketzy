@@ -15,6 +15,8 @@ import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { LikeService } from '../like/like.service';
 import { Follower, Following, MeFollowed } from '../../libs/dto/follow/follow';
+import { Event } from '../../libs/dto/event/event';
+import { publicEventStatus } from '../../libs/enums/event.enum';
 import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
 
 @Injectable()
@@ -26,6 +28,8 @@ export class MemberService {
 		private readonly memberModel: Model<Member>,
 		@InjectModel('Follow')
 		private readonly followModel: Model<Follower | Following>,
+		@InjectModel('Event')
+		private readonly eventModel: Model<Event>,
 		private authService: AuthService,
 		private viewService: ViewService,
 		private likeService: LikeService,
@@ -128,7 +132,26 @@ export class MemberService {
 			
 			targetMember.meFollowed = await this.checkSubscription(memberId, targetId);
 		}
+		await this.useVisibleEventCount([targetMember]);
 		return targetMember;
+	}
+
+	/**
+	 * memberEvents counts every event the organizer created (drafts included); public pages show only
+	 * what the public event list shows, so the number is counted from the events themselves
+	 */
+	private async useVisibleEventCount(members: Member[]): Promise<void> {
+		const organizers = members.filter((member) => member?.memberType === MemberType.ORGANIZER);
+		if (!organizers.length) return;
+
+		const counts: { _id: ObjectId; total: number }[] = await this.eventModel
+			.aggregate([
+				{ $match: { organizerId: { $in: organizers.map((member) => member._id) }, eventStatus: publicEventStatus } },
+				{ $group: { _id: '$organizerId', total: { $sum: 1 } } },
+			])
+			.exec();
+		const totals = new Map(counts.map((row) => [String(row._id), row.total]));
+		for (const member of organizers) member.memberEvents = totals.get(String(member._id)) ?? 0;
 	}
 
 	public async checkSubscription(followerId: ObjectId, followingId: ObjectId): Promise<MeFollowed[]> {
@@ -161,6 +184,7 @@ export class MemberService {
 			])
 			.exec();
 		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		await this.useVisibleEventCount(result[0].list);
 		return result[0];
 	}
 

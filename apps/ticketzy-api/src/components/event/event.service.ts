@@ -10,6 +10,7 @@ import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { MemberService } from '../member/member.service';
 import { StatisticModifier, T } from '../../libs/types/common';
 import {
+	EventCategory,
 	EventStatus,
 	SeatStatus,
 	SeatingType,
@@ -221,7 +222,24 @@ export class EventService {
 		if (pricesRange) match.eventMinPrice = { $gte: pricesRange.start, $lte: pricesRange.end };
 		if (periodsRange) match.startAt = { $gte: periodsRange.start, $lte: periodsRange.end };
 
-		if (text) match.eventTitle = { $regex: new RegExp(escapeRegExp(text), 'i') };
+		if (text) {
+			const regex = new RegExp(escapeRegExp(text), 'i');
+			const [venueIds, organizerIds] = await Promise.all([
+				this.venueModel.distinct('_id', { $or: [{ venueName: regex }, { venueCity: regex }] }),
+				this.memberModel.distinct('_id', {
+					memberType: MemberType.ORGANIZER,
+					$or: [{ memberNick: regex }, { memberFullName: regex }],
+				}),
+			]);
+			// $or keeps the separate venueId / cityList filters above intact
+			match.$or = [
+				{ eventTitle: regex },
+				{ 'eventTranslations.title': regex },
+				{ eventCategory: { $in: Object.values(EventCategory).filter((category) => regex.test(category)) } },
+				{ venueId: { $in: venueIds } },
+				{ organizerId: { $in: organizerIds } },
+			];
+		}
 	}
 
 	public async getFavorites(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {

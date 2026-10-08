@@ -2,6 +2,7 @@ import { UnauthorizedException, ValidationPipe } from '@nestjs/common';
 import { MemberService } from './member.service';
 import { AuthService } from '../auth/auth.service';
 import { Message } from '../../libs/enums/common.enum';
+import { EventStatus } from '../../libs/enums/event.enum';
 import { MemberAuthType, MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { LoginInput, MemberInput } from '../../libs/dto/member/member.input';
 
@@ -17,7 +18,7 @@ describe('MemberService signup and login', () => {
 	beforeEach(() => {
 		memberModel = { create: jest.fn(async (doc) => ({ _id: 'm1', ...doc })), findOne: jest.fn() };
 		authService = new AuthService({ signAsync: jest.fn().mockResolvedValue('token') } as any, {} as any);
-		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any);
 	});
 
 	it('signupUser creates an ACTIVE USER with a hashed password', async () => {
@@ -115,6 +116,7 @@ describe('signup input validation (global ValidationPipe)', () => {
 
 describe('MemberService public listings', () => {
 	let memberModel: any;
+	let eventModel: any;
 	let service: MemberService;
 
 	beforeEach(() => {
@@ -122,7 +124,48 @@ describe('MemberService public listings', () => {
 			findOne: jest.fn().mockReturnValue({ lean: () => ({ exec: jest.fn().mockResolvedValue({ _id: 'm1', memberViews: 0 }) }) }),
 			aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }),
 		};
-		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+		eventModel = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }) };
+		service = new MemberService(memberModel, {} as any, eventModel, {} as any, {} as any, {} as any);
+	});
+
+	it('an organizer profile counts APPROVED events only, not the memberEvents counter', async () => {
+		memberModel.findOne.mockReturnValue({
+			lean: () => ({ exec: jest.fn().mockResolvedValue({ _id: 'm1', memberType: MemberType.ORGANIZER, memberEvents: 9 }) }),
+		});
+		eventModel.aggregate.mockReturnValue({ exec: jest.fn().mockResolvedValue([{ _id: 'm1', total: 3 }]) });
+
+		const result = await service.getMember(null, 'm1' as any);
+
+		expect(eventModel.aggregate.mock.calls[0][0][0].$match).toMatchObject({ eventStatus: EventStatus.APPROVED });
+		expect(result.memberEvents).toBe(3);
+	});
+
+	it('an organizer without APPROVED events shows 0, and a USER profile is not touched', async () => {
+		memberModel.findOne.mockReturnValue({
+			lean: () => ({ exec: jest.fn().mockResolvedValue({ _id: 'm1', memberType: MemberType.ORGANIZER, memberEvents: 4 }) }),
+		});
+		expect((await service.getMember(null, 'm1' as any)).memberEvents).toBe(0);
+
+		memberModel.findOne.mockReturnValue({
+			lean: () => ({ exec: jest.fn().mockResolvedValue({ _id: 'u1', memberType: MemberType.USER, memberEvents: 0 }) }),
+		});
+		eventModel.aggregate.mockClear();
+		await service.getMember(null, 'u1' as any);
+		expect(eventModel.aggregate).not.toHaveBeenCalled();
+	});
+
+	it('getOrganizers fixes the count of every listed organizer with one query', async () => {
+		memberModel.aggregate.mockReturnValue({
+			exec: jest.fn().mockResolvedValue([
+				{ list: [{ _id: 'o1', memberType: MemberType.ORGANIZER, memberEvents: 5 }, { _id: 'o2', memberType: MemberType.ORGANIZER, memberEvents: 2 }], metaCounter: [] },
+			]),
+		});
+		eventModel.aggregate.mockReturnValue({ exec: jest.fn().mockResolvedValue([{ _id: 'o1', total: 1 }]) });
+
+		const result = await service.getOrganizers(null as any, { page: 1, limit: 10, search: {} } as any);
+
+		expect(eventModel.aggregate).toHaveBeenCalledTimes(1);
+		expect(result.list.map((m: any) => m.memberEvents)).toEqual([1, 0]);
 	});
 
 	it('getMember shows ACTIVE members only to everyone else', async () => {
@@ -151,7 +194,7 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 
 	it('refuses to change status or role of an organizer, and points to the organizer operations', async () => {
 		const memberModel: any = { findOne: jest.fn().mockReturnValue(lean({ _id: 'o1' })), findOneAndUpdate: jest.fn() };
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
 
 		await expect(service.updateMemberByAdmin({ _id: 'o1' as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow(
 			Message.USE_ORGANIZER_OPERATIONS,
@@ -164,7 +207,7 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 			findOne: jest.fn().mockReturnValue(lean(null)),
 			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: 'u1', memberStatus: MemberStatus.SUSPENDED }) }),
 		};
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any);
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
 
 		const result = await service.updateMemberByAdmin({ _id: 'u1' as any, memberStatus: MemberStatus.SUSPENDED });
 

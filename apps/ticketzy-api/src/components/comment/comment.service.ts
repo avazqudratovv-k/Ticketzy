@@ -72,6 +72,9 @@ export class CommentService {
         },
     );
         if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+
+        // the filter above only matches ACTIVE comments, so a soft delete is counted down exactly once
+        if (input.commentStatus === CommentStatus.DELETE) await this.decrementEventComments(result);
         return result;
     }
 
@@ -106,6 +109,18 @@ export class CommentService {
     public async removeCommentByAdmin(input: ObjectId): Promise<Comment> {
     const result = await this.commentModel.findByIdAndDelete(input).exec();
     if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
+
+    // a soft-deleted comment was already counted down by updateComment
+    if (result.commentStatus !== CommentStatus.DELETE) await this.decrementEventComments(result);
     return result;
+    }
+
+    /** createComment counted the comment on the event; a failure here must not undo the delete */
+    private async decrementEventComments(comment: Comment): Promise<void> {
+        try {
+            await this.eventService.eventStatsEditor({ _id: comment.commentRefId, targetKey: 'eventComments', modifier: -1 });
+        } catch (err) {
+            this.logger.error(`eventComments NOT DECREMENTED for comment ${comment._id}: ${err.message}`);
+        }
     }
 }
