@@ -96,9 +96,12 @@ export class EventResolver {
 
 	@UseGuards(WithoutGuard)
 	@Query(() => EventSeatMap)
-	public async getEventSeatMap(@Args('eventId') input: string): Promise<EventSeatMap> {
+	public async getEventSeatMap(
+		@Args('eventId') input: string,
+		@AuthMember('_id') memberId: ObjectId,
+	): Promise<EventSeatMap> {
 		this.logger.log('Query: getEventSeatMap');
-		return await this.eventService.getEventSeatMap(shapeIntoMongoObjectId(input));
+		return await this.eventService.getEventSeatMap(shapeIntoMongoObjectId(input), memberId);
 	}
 
 	@UseGuards(AuthGuard)

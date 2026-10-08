@@ -59,6 +59,9 @@ export enum Message {
 
 	SEAT_HOLD_LIMIT = 'You can hold at most 8 seats at a time!',
 	SEAT_JUST_TAKEN = 'Seat just taken!',
+	SEAT_REF_INVALID = 'Each seat needs either an _id or a sectionKey, row and number, never both and never a mix!',
+	SEAT_INPUT_INVALID = 'Send either seatIds or seats, not both!',
+	SEAT_NOT_FOUND = 'Seat not found!',
 	SEATS_NOT_AVAILABLE_FOR_EVENT = 'Seats can only be held for an approved reserved-seating event that has not started!',
 	HOLD_EXPIRED = 'Hold expired!',
 	CHECKOUT_RESERVED_NEEDS_SEATS = 'A reserved-seating checkout needs seat ids and no ticket quantities!',

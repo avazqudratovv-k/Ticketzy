@@ -1,4 +1,4 @@
-import { Field, Int, ObjectType } from '@nestjs/graphql';
+import { Field, InputType, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { SeatStatus } from '../../enums/event.enum';
 import { VenueLayout } from '../venue/venue';
@@ -31,6 +31,12 @@ export class TakenSeat {
 
 	@Field(() => SeatStatus)
 	seatStatus: SeatStatus;
+
+	@Field(() => Boolean, { nullable: true, description: 'true only for the caller\'s own active hold; otherwise absent' })
+	mine?: boolean;
+
+	@Field(() => Date, { nullable: true, description: 'when the caller\'s own hold runs out; only set together with mine' })
+	holdExpiresAt?: Date;
 }
 
 @ObjectType()
@@ -78,6 +84,34 @@ export class SeatHold {
 	@Field(() => Date)
 	heldUntil: Date;
 
+	@Field(() => Int, { description: 'length of a hold in seconds' })
+	holdSeconds: number;
+
 	@Field(() => Date, { description: 'server clock, so the client can count down without trusting its own' })
 	serverTime: Date;
+}
+
+/** a seat given either by _id or by its place in the event; exactly one form */
+@InputType()
+export class SeatRefInput {
+	@Field(() => String, { nullable: true })
+	_id?: string;
+
+	@Field(() => String, { nullable: true })
+	sectionKey?: string;
+
+	@Field(() => Int, { nullable: true })
+	row?: number;
+
+	@Field(() => Int, { nullable: true })
+	number?: number;
+}
+
+@ObjectType()
+export class SeatConfig {
+	@Field(() => Int, { description: 'how long a seat hold lasts' })
+	seatHoldSeconds: number;
+
+	@Field(() => Int, { description: 'most seats one hold, and so one order, can contain' })
+	maxSeatsPerOrder: number;
 }

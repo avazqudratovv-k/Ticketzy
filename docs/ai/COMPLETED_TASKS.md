@@ -460,3 +460,10 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - ACCOUNT_NOT_VERIFIED and wrong password are logged as one `warn` line in `formatError`; other errors unchanged.
 - Tests: event search (title, translations, category, venue, organizer, escaping, no text), comment counter (admin remove, soft delete, edit, failing counter), organizer count (profile, list, USER untouched), `isExpectedDomainError`.
 - `tsc` (api and batch), `npm run build` and `npx jest` (521 tests, 28 suites) pass.
+
+## Seat picker backend (decision #67)
+- `holdSeats` accepts `seats: [{_id} | {sectionKey, row, number}]` besides `seatIds`; strict one-form validation; atomic hold, conflict, limit and expiry unchanged.
+- `getEventSeatMap(eventId)` now reads the optional login: the caller's own active holds get `mine` and `holdExpiresAt`; expired holds stay out of the list (available).
+- `SeatHold.holdSeconds` and public `getSeatConfig { seatHoldSeconds, maxSeatsPerOrder }`.
+- Not done: STANDING remaining capacity (no stock exists for standing sections).
+- Tests: seat references (resolve, both forms, mixed/partial rejection, not found, limit, duplicates, config) and seat map `mine`. `tsc` (api and batch), `npm run build` and `npx jest` (532 tests, 28 suites) pass.

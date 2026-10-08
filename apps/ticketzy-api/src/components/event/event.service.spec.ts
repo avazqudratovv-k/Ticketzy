@@ -602,6 +602,26 @@ describe('EventService', () => {
 				expect(JSON.stringify(filter)).not.toContain(SeatStatus.AVAILABLE);
 			});
 
+			it('marks the caller\'s own active holds with mine and holdExpiresAt, and nobody else\'s', async () => {
+				const until = future(1);
+				seatQuery.exec.mockResolvedValue([
+					{ sectionKey: 'A', row: 1, number: 1, seatStatus: SeatStatus.HELD, heldBy: 'm1', heldUntil: until },
+					{ sectionKey: 'A', row: 1, number: 2, seatStatus: SeatStatus.HELD, heldBy: 'other', heldUntil: future(1) },
+					{ sectionKey: 'A', row: 1, number: 3, seatStatus: SeatStatus.SOLD, heldBy: 'm1' },
+				]);
+
+				const result = await service.getEventSeatMap('e1' as any, 'm1' as any);
+				expect(result.seats).toEqual([
+					{ sectionKey: 'A', row: 1, number: 1, seatStatus: SeatStatus.HELD, mine: true, holdExpiresAt: until },
+					{ sectionKey: 'A', row: 1, number: 2, seatStatus: SeatStatus.HELD },
+					{ sectionKey: 'A', row: 1, number: 3, seatStatus: SeatStatus.SOLD },
+				]);
+				expect(JSON.stringify(result)).not.toContain('heldBy');
+
+				const guest = await service.getEventSeatMap('e1' as any, null);
+				expect(guest.seats.some((seat: any) => seat.mine)).toBe(false);
+			});
+
 			it('returns the layout, the timezone and a compact seat list without heldBy', async () => {
 				const result = await service.getEventSeatMap('e1' as any);
 
@@ -612,8 +632,7 @@ describe('EventService', () => {
 					{ sectionKey: 'A', row: 1, number: 3, seatStatus: SeatStatus.HELD },
 				]);
 				expect(JSON.stringify(result)).not.toContain('secret');
-				expect(seatQuery.select.mock.calls[0][0]).not.toContain('heldBy');
-			});
+							});
 		});
 	});
 

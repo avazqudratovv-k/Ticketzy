@@ -31,7 +31,7 @@ import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
-import { EventSeat, EventSeatMap } from '../../libs/dto/event/event-seat';
+import { EventSeat, EventSeatMap, TakenSeat } from '../../libs/dto/event/event-seat';
 import {
 	VenueLayout,
 	countTierSeats,
@@ -468,8 +468,11 @@ export class EventService {
 		}
 	}
 
-	/** public: APPROVED events of ACTIVE organizers; only seats that are not free are listed, and never who holds them */
-	public async getEventSeatMap(eventId: ObjectId): Promise<EventSeatMap> {
+	/**
+	 * public: APPROVED events of ACTIVE organizers; only seats that are not free are listed, and never who holds them.
+	 * A hold that has run out counts as free. A logged-in caller's own active holds carry mine and holdExpiresAt.
+	 */
+	public async getEventSeatMap(eventId: ObjectId, memberId: ObjectId | null = null): Promise<EventSeatMap> {
 		const event: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
 		if (!event || event.seatingType !== SeatingType.RESERVED) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 		await this.memberService.getMember(null, event.organizerId); // hidden when the organizer is not ACTIVE
@@ -477,15 +480,16 @@ export class EventService {
 		const venue = await this.venueModel.findById(event.venueId).lean().exec();
 		if (!venue?.venueLayout) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		const now = new Date();
 		const seats = await this.eventSeatModel
 			.find({
 				eventId: event._id,
 				$or: [
 					{ seatStatus: SeatStatus.SOLD },
-					{ seatStatus: SeatStatus.HELD, heldUntil: { $gt: new Date() } }, // an expired hold is a free seat
+					{ seatStatus: SeatStatus.HELD, heldUntil: { $gt: now } }, // an expired hold is a free seat
 				],
 			})
-			.select('sectionKey row number seatStatus -_id')
+			.select('sectionKey row number seatStatus heldBy heldUntil -_id')
 			.lean()
 			.exec();
 
@@ -493,7 +497,14 @@ export class EventService {
 			eventId: event._id,
 			venueTimezone: venue.venueTimezone,
 			venueLayout: venue.venueLayout as VenueLayout,
-			seats: seats.map(({ sectionKey, row, number, seatStatus }) => ({ sectionKey, row, number, seatStatus })),
+			seats: seats.map(({ sectionKey, row, number, seatStatus, heldBy, heldUntil }) => {
+				const taken: TakenSeat = { sectionKey, row, number, seatStatus };
+				if (memberId && seatStatus === SeatStatus.HELD && heldBy && String(heldBy) === String(memberId)) {
+					taken.mine = true;
+					taken.holdExpiresAt = heldUntil;
+				}
+				return taken;
+			}),
 		};
 	}
 

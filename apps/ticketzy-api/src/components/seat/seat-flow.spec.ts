@@ -216,6 +216,64 @@ describe('seat holds', () => {
 		await expect(seatService.holdSeats(M1 as any, EVENT as any, [seatOf(1)._id])).rejects.toThrow(Message.SEAT_JUST_TAKEN);
 	});
 
+	describe('seat references', () => {
+		const at = (n: number) => ({ sectionKey: 'A', row: 1, number: n });
+
+		it('holds seats given as { sectionKey, row, number }, resolved inside the event, with the same atomic conflict', async () => {
+			const { seatService, seatOf } = build();
+			const ids = await seatService.resolveSeatInput(EVENT as any, null, [at(2), at(1)]);
+			expect(ids.map(String)).toEqual([String(seatOf(2)._id), String(seatOf(1)._id)]);
+
+			const hold = await seatService.holdSeats(M1 as any, EVENT as any, ids);
+			expect(hold.seats.map((s) => s.number)).toEqual([2, 1]);
+			expect(hold.holdSeconds).toBe(30);
+
+			const again = await seatService.resolveSeatInput(EVENT as any, null, [at(1)]);
+			await expect(seatService.holdSeats(M2 as any, EVENT as any, again)).rejects.toThrow(Message.SEAT_JUST_TAKEN);
+		});
+
+		it('accepts the { _id } form and plain seatIds', async () => {
+			const { seatService, seatOf } = build();
+			const byRef = await seatService.resolveSeatInput(EVENT as any, null, [{ _id: String(seatOf(1)._id) }]);
+			expect(String(byRef[0])).toBe(String(seatOf(1)._id));
+			const byIds = await seatService.resolveSeatInput(EVENT as any, [String(seatOf(2)._id)], null);
+			expect(String(byIds[0])).toBe(String(seatOf(2)._id));
+		});
+
+		it('rejects mixed, incomplete and malformed seats with a validation error', async () => {
+			const { seatService, seatOf } = build();
+			const id = String(seatOf(1)._id);
+			const bad = (seats: any[]) => expect(seatService.resolveSeatInput(EVENT as any, null, seats)).rejects.toThrow(Message.SEAT_REF_INVALID);
+			await bad([{ _id: id, sectionKey: 'A', row: 1, number: 1 }]);
+			await bad([{ _id: id, row: 1 }]);
+			await bad([{ sectionKey: 'A', row: 1 }]);
+			await bad([{}]);
+			await bad([{ sectionKey: 'A', row: 0, number: 1 }]);
+			await bad([{ sectionKey: ' ', row: 1, number: 1 }]);
+			await expect(seatService.resolveSeatInput(EVENT as any, [id], [at(1)])).rejects.toThrow(Message.SEAT_INPUT_INVALID);
+			await expect(seatService.resolveSeatInput(EVENT as any, null, null)).rejects.toThrow(Message.BAD_REQUEST);
+			await expect(seatService.resolveSeatInput(EVENT as any, null, [])).rejects.toThrow(Message.BAD_REQUEST);
+		});
+
+		it('reports unknown places and other events\' seats as not found, enforces the limit and refuses duplicates', async () => {
+			const { seatService, seatOf } = build(10);
+			await expect(seatService.resolveSeatInput(EVENT as any, null, [{ sectionKey: 'Z', row: 1, number: 1 }])).rejects.toThrow(Message.SEAT_NOT_FOUND);
+			seatOf(1).eventId = oid();
+			await expect(seatService.resolveSeatInput(EVENT as any, null, [at(1)])).rejects.toThrow(Message.SEAT_NOT_FOUND);
+
+			const nine = Array.from({ length: 9 }, (_, i) => at(i + 1));
+			await expect(seatService.resolveSeatInput(EVENT as any, null, nine)).rejects.toThrow(Message.SEAT_HOLD_LIMIT);
+
+			const dup = await seatService.resolveSeatInput(EVENT as any, null, [at(2), at(2)]);
+			await expect(seatService.holdSeats(M1 as any, EVENT as any, dup)).rejects.toThrow(Message.BAD_REQUEST);
+		});
+
+		it('exposes the hold duration and the seat limit', () => {
+			process.env.SEAT_HOLD_SECONDS = '45';
+			expect(build().seatService.getSeatConfig()).toEqual({ seatHoldSeconds: 45, maxSeatsPerOrder: 8 });
+		});
+	});
+
 	it('releaseSeats frees only the caller\'s own holds', async () => {
 		const { seatService, seatOf } = build();
 		await seatService.holdSeats(M1 as any, EVENT as any, [seatOf(1)._id, seatOf(2)._id]);

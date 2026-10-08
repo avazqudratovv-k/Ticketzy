@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Event } from '../../libs/dto/event/event';
-import { EventSeat, HeldSeat, SeatHold } from '../../libs/dto/event/event-seat';
+import { EventSeat, HeldSeat, SeatConfig, SeatHold, SeatRefInput } from '../../libs/dto/event/event-seat';
 import { Member } from '../../libs/dto/member/member';
 import { Message } from '../../libs/enums/common.enum';
 import { SeatStatus, SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
@@ -33,6 +33,51 @@ export class SeatService {
 		const ids = seatIds.map((id) => shapeIntoMongoObjectId(id));
 		if (new Set(ids.map(String)).size !== ids.length) throw new BadRequestException(Message.BAD_REQUEST);
 		return ids;
+	}
+
+	public getSeatConfig(): SeatConfig {
+		return { seatHoldSeconds: getSeatHoldSeconds(), maxSeatsPerOrder: MAX_SEATS_PER_HOLD };
+	}
+
+	/**
+	 * Turns the holdSeats input into seat ids. Exactly one of seatIds / seats is sent, and each entry of seats is either
+	 * { _id } or { sectionKey, row, number }. Coordinates are resolved inside the given event with one query.
+	 */
+	public async resolveSeatInput(eventId: ObjectId, seatIds?: string[] | null, seats?: SeatRefInput[] | null): Promise<ObjectId[]> {
+		if (seatIds && seats) throw new BadRequestException(Message.SEAT_INPUT_INVALID);
+		if (!seatIds && !seats) throw new BadRequestException(Message.BAD_REQUEST);
+		if (seatIds) return seatIds as any;
+		if (seats.length < 1) throw new BadRequestException(Message.BAD_REQUEST);
+		if (seats.length > MAX_SEATS_PER_HOLD) throw new BadRequestException(Message.SEAT_HOLD_LIMIT);
+
+		type Place = { sectionKey: string; row: number; number: number };
+		const refs = seats.map((ref) => {
+			const hasId = ref._id !== undefined && ref._id !== null;
+			const given = [ref.sectionKey, ref.row, ref.number].filter((v) => v !== undefined && v !== null).length;
+			if (hasId && given === 0 && String(ref._id).trim()) return { id: ref._id as string };
+			const complete =
+				!hasId && given === 3 && typeof ref.sectionKey === 'string' && ref.sectionKey.trim() && ref.row >= 1 && ref.number >= 1;
+			if (!complete) throw new BadRequestException(Message.SEAT_REF_INVALID);
+			return { place: { sectionKey: ref.sectionKey.trim(), row: ref.row, number: ref.number } as Place };
+		});
+
+		const places = refs.filter((ref) => ref.place).map((ref) => ref.place);
+		const keyOf = (p: Place) => `${p.sectionKey}|${p.row}|${p.number}`;
+		const idByPlace = new Map<string, ObjectId>();
+		if (places.length) {
+			const found = await this.eventSeatModel
+				.find({ eventId: eventId, $or: places })
+				.select('sectionKey row number')
+				.lean()
+				.exec();
+			found.forEach((seat) => idByPlace.set(keyOf(seat), seat._id));
+		}
+		return refs.map((ref) => {
+			if (ref.id) return ref.id as any;
+			const id = idByPlace.get(keyOf(ref.place));
+			if (!id) throw new BadRequestException(Message.SEAT_NOT_FOUND);
+			return id;
+		});
 	}
 
 	/**
@@ -98,6 +143,7 @@ export class SeatService {
 				number: seat.number,
 			})),
 			heldUntil: heldUntil,
+			holdSeconds: getSeatHoldSeconds(),
 			serverTime: new Date(),
 		};
 	}
