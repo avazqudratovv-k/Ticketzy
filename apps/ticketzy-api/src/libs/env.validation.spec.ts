@@ -27,12 +27,40 @@ describe('SEAT_HOLD_SECONDS', () => {
 
 describe('AI settings', () => {
 	it('is off by default, the key is optional and the model is a small one', () => {
-		expect(getAiConfig({})).toEqual({ enabled: false, apiKey: '', model: 'claude-haiku-4-5', timeoutMs: 20000, rateLimitPerMinute: 10 });
+		expect(getAiConfig({})).toEqual({ enabled: false, provider: 'anthropic', apiKey: '', model: 'claude-haiku-4-5', timeoutMs: 20000, rateLimitPerMinute: 10 });
 		expect(getAiConfig({ AI_ENABLED: 'true', ANTHROPIC_API_KEY: ' k ', ANTHROPIC_MODEL: 'm' })).toMatchObject({ enabled: true, apiKey: 'k', model: 'm' });
 	});
 
-	it.each([{ AI_ENABLED: 'maybe' }, { AI_TIMEOUT_MS: '5' }, { AI_RATE_LIMIT_PER_MINUTE: '0' }])('rejects %p at startup', (bad) => {
-		const base = { MONGO_DEV: 'mongodb://x', SECRET_TOKEN: 's', QR_SECRET: 'q' };
-		expect(() => validateEnv(['SECRET_TOKEN', 'QR_SECRET'])({ ...base, ...bad })).toThrow();
+	it('picks the key and model of the selected provider only, with a free-tier flash default for gemini', () => {
+		const env = { AI_ENABLED: 'true', ANTHROPIC_API_KEY: 'a-key', ANTHROPIC_MODEL: 'claude-x', GEMINI_API_KEY: 'g-key' };
+		expect(getAiConfig({ ...env, AI_PROVIDER: 'gemini' })).toMatchObject({ provider: 'gemini', apiKey: 'g-key', model: 'gemini-2.5-flash' });
+		expect(getAiConfig({ ...env, AI_PROVIDER: ' Gemini ', GEMINI_MODEL: 'gemini-x' })).toMatchObject({ provider: 'gemini', model: 'gemini-x' });
+		expect(getAiConfig({ ...env, AI_PROVIDER: 'anthropic' })).toMatchObject({ provider: 'anthropic', apiKey: 'a-key', model: 'claude-x' });
+		expect(getAiConfig({ AI_PROVIDER: 'gemini' }).apiKey).toBe(''); // another provider's key is never used
+	});
+
+	it('validates only the selected provider: a bad model of the other one is ignored', () => {
+		expect(getAiConfig({ AI_PROVIDER: 'gemini', ANTHROPIC_MODEL: 'bad model!' }).model).toBe('gemini-2.5-flash');
+		expect(() => getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_MODEL: 'bad model!' })).toThrow('GEMINI_MODEL');
+		expect(() => getAiConfig({ ANTHROPIC_MODEL: 'bad model!' })).toThrow('ANTHROPIC_MODEL');
+	});
+
+	it.each([{ AI_ENABLED: 'maybe' }, { AI_TIMEOUT_MS: '5' }, { AI_RATE_LIMIT_PER_MINUTE: '0' }, { AI_PROVIDER: 'openai' }, { AI_PROVIDER: 'gemini', GEMINI_MODEL: 'x y' }])(
+		'rejects %p at startup',
+		(bad) => {
+			const base = { MONGO_DEV: 'mongodb://x', SECRET_TOKEN: 's', QR_SECRET: 'q' };
+			expect(() => validateEnv(['SECRET_TOKEN', 'QR_SECRET'])({ ...base, ...bad })).toThrow();
+		},
+	);
+
+	it('never puts a key in an error message', () => {
+		const error = (() => {
+			try {
+				getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'SECRET-KEY', GEMINI_MODEL: 'bad model' });
+			} catch (err) {
+				return err as Error;
+			}
+		})();
+		expect(error?.message).not.toContain('SECRET-KEY');
 	});
 });

@@ -379,3 +379,21 @@ Backend only. Decision: DECISIONS #60. New `components/ai` (`AiModule`), SDK `@a
 | `npx jest` (460 tests, 24 suites) | pass |
 | Live call to the real API, GraphQL smoke test | not run: no key available, the Nest app was not booted |
 
+
+## 19. Swappable AI provider (Anthropic or Gemini)
+
+Backend only. Decision: DECISIONS #61. New dependency `@google/genai`. Behavior of the AI features is unchanged.
+
+- `components/ai/providers/ai-provider.ts`: the `AiProvider` interface (`generateText`, `generateJson`, `chat` with tools), provider neutral message/tool types and `AiProviderError` (`timeout | failed | invalid_response`, carries only kind, status and error class name)
+- `anthropic.provider.ts` (the old Messages API code moved here) and `gemini.provider.ts` (`@google/genai`, function calling through `functionDeclarations` + `parametersJsonSchema`, `toolConfig` mode `NONE` for the last round, JSON mode for `generateJson`, `AbortSignal.timeout` + `httpOptions.timeout`); `create-ai-provider.ts` builds the provider of `AI_PROVIDER` and is injected as `AI_PROVIDER_FACTORY`
+- `AiClientService` keeps availability, rate limit and error mapping; `complete()`/`getText()` became `generateText`/`generateJson`/`chat`. Moderation and translation call `generateJson` and still run the strict `parseModerationResult` / `parseTranslationResult`; the assistant calls `chat` and keeps the 4 round, 4 calls per round, answer and history limits. `ASSISTANT_TOOLS` are neutral JSON schema definitions
+- Env: `AI_PROVIDER=anthropic|gemini` (default `anthropic`), `GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-2.5-flash`); `getAiConfig` reads and validates only the selected provider's key and model; `.env.example` updated
+
+**Tests** (`ai.service.spec.ts` now uses a mocked `AiProvider`; new `anthropic.provider.spec.ts` and `gemini.provider.spec.ts` with mocked SDK clients; `env.validation.spec.ts` for provider selection): all earlier cases kept, plus provider selection/rebuild, timeout vs failure mapping, no key or prompt in errors, JSON of the wrong shape, tool message mapping for both vendors, thought signature replay.
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (478 tests, 26 suites) | pass |
+| Live call to Gemini or Anthropic, GraphQL smoke test | not run: no keys available, the Nest app was not booted |

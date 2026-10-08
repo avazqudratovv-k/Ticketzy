@@ -12,6 +12,7 @@ import { AiTranslationService } from './ai-translation.service';
 import { AiToolsService } from './ai-tools.service';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiResolver } from './ai.resolver';
+import { AI_PROVIDER_FACTORY, createAiProvider } from './providers/create-ai-provider';
 
 @Module({
 	imports: [
@@ -24,7 +25,7 @@ import { AiResolver } from './ai.resolver';
 		AuthModule,
 		AuditLogModule,
 	],
-	providers: [AiClientService, AiModerationService, AiTranslationService, AiToolsService, AiAssistantService, AiResolver],
+	providers: [{ provide: AI_PROVIDER_FACTORY, useValue: createAiProvider }, AiClientService, AiModerationService, AiTranslationService, AiToolsService, AiAssistantService, AiResolver],
 	exports: [AiClientService, AiModerationService],
 })
 export class AiModule {}

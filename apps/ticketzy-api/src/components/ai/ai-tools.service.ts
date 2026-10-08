@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import Anthropic from '@anthropic-ai/sdk';
 import { Event } from '../../libs/dto/event/event';
 import { Member } from '../../libs/dto/member/member';
 import { Ticket } from '../../libs/dto/ticket/ticket';
@@ -14,6 +13,7 @@ import { escapeRegExp, lookupActiveOrganizer, lookupEvent, lookupSeat, lookupTic
 import { getRefundPolicyText } from '../../libs/refund-policy';
 import { clip } from '../../libs/ai';
 import { T } from '../../libs/types/common';
+import { AiToolDefinition } from './providers/ai-provider';
 
 export const MAX_SEARCH_RESULTS = 5;
 export const MAX_MY_TICKETS = 10;
@@ -26,12 +26,12 @@ export interface ToolOutcome {
 	events?: Event[];
 }
 
-export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
+export const ASSISTANT_TOOLS: AiToolDefinition[] = [
 	{
 		name: 'search_events',
 		description:
 			'Search upcoming public events. Every filter is optional. Returns at most 5 events. Use it to find events by category, city, date range, price or words in the title.',
-		input_schema: {
+		parameters: {
 			type: 'object',
 			properties: {
 				category: { type: 'string', enum: Object.values(EventCategory) },
@@ -47,7 +47,7 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
 	{
 		name: 'get_event',
 		description: 'Details of one public event: description, venue, dates and ticket types with prices and availability.',
-		input_schema: {
+		parameters: {
 			type: 'object',
 			properties: { eventId: { type: 'string', description: 'the id returned by search_events' } },
 			required: ['eventId'],
@@ -57,12 +57,12 @@ export const ASSISTANT_TOOLS: Anthropic.Tool[] = [
 	{
 		name: 'get_refund_policy',
 		description: 'The refund rules of the platform.',
-		input_schema: { type: 'object', properties: {}, additionalProperties: false },
+		parameters: { type: 'object', properties: {}, additionalProperties: false },
 	},
 	{
 		name: 'get_my_tickets',
 		description: 'The tickets of the person who is chatting (needs a logged in user). Takes no input: it always means the current user.',
-		input_schema: { type: 'object', properties: {}, additionalProperties: false },
+		parameters: { type: 'object', properties: {}, additionalProperties: false },
 	},
 ];
 

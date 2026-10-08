@@ -8,7 +8,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AiClientService } from './ai-client.service';
-import { clip, extractJson, parseModerationResult } from '../../libs/ai';
+import { clip, parseModerationResult } from '../../libs/ai';
 
 const MODERATION_MAX_TOKENS = 800;
 const OTHER_TITLES_LIMIT = 30;
@@ -66,16 +66,16 @@ export class AiModerationService {
 
 			this.aiClient.begin(rateKey ?? `member:${event.organizerId}`);
 			const payload = await this.buildPayload(event);
-			const response = await this.aiClient.complete({
+			const response = await this.aiClient.generateJson({
 				system: MODERATION_SYSTEM_PROMPT,
-				messages: [{ role: 'user', content: JSON.stringify(payload) }],
+				messages: [{ role: 'user', text: JSON.stringify(payload) }],
 				maxTokens: MODERATION_MAX_TOKENS,
 			});
 			model = response.model ?? model;
 
 			let parsed;
 			try {
-				parsed = parseModerationResult(extractJson(this.aiClient.getText(response)));
+				parsed = parseModerationResult(response.data);
 			} catch {
 				throw new BadRequestException(Message.AI_INVALID_RESPONSE);
 			}

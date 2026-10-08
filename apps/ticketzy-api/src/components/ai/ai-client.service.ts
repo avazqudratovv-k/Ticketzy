@@ -1,29 +1,32 @@
-import { HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { Message } from '../../libs/enums/common.enum';
 import { RateLimiter } from '../../libs/rate-limiter';
 import { AiConfig, getAiConfig } from '../../libs/env.validation';
-
-export interface AiCompleteParams {
-	system: string;
-	messages: Anthropic.MessageParam[];
-	maxTokens: number;
-	tools?: Anthropic.Tool[];
-	toolChoice?: Anthropic.ToolChoice;
-}
+import {
+	AiChatRequest,
+	AiChatResult,
+	AiJsonResult,
+	AiProvider,
+	AiProviderError,
+	AiTextRequest,
+	AiTextResult,
+} from './providers/ai-provider';
+import { AI_PROVIDER_FACTORY, AiProviderFactory } from './providers/create-ai-provider';
 
 /**
- * The only place that talks to the Anthropic API (the browser never does).
+ * The only place the AI services reach a model vendor (the browser never does), through the AiProvider of AI_PROVIDER.
  * Everything is read at call time, so a missing key or AI_ENABLED=false only turns the AI operations off:
  * they answer with a clear message and the rest of the app keeps working. The key and the prompts are never logged.
  */
 @Injectable()
 export class AiClientService {
 	private readonly logger = new Logger(AiClientService.name);
-	private client: Anthropic | null = null;
-	private clientKey = '';
+	private provider: AiProvider | null = null;
+	private providerKey = '';
 	private limiter: RateLimiter | null = null;
 	private limiterSize = 0;
+
+	constructor(@Inject(AI_PROVIDER_FACTORY) private readonly createProvider: AiProviderFactory) {}
 
 	public getConfig(): AiConfig {
 		return getAiConfig();
@@ -57,40 +60,41 @@ export class AiClientService {
 		return config;
 	}
 
+	public generateText(request: AiTextRequest): Promise<AiTextResult> {
+		return this.run((provider) => provider.generateText(request));
+	}
+
+	/** parsed but NOT validated JSON: the caller runs its strict parser. Not JSON at all means AI_INVALID_RESPONSE. */
+	public generateJson(request: AiTextRequest): Promise<AiJsonResult> {
+		return this.run((provider) => provider.generateJson(request));
+	}
+
+	public chat(request: AiChatRequest): Promise<AiChatResult> {
+		return this.run((provider) => provider.chat(request));
+	}
+
 	/** one model call; every failure becomes a clear Message, with only the error type and status in the log */
-	public async complete(params: AiCompleteParams): Promise<Anthropic.Message> {
+	private async run<T>(call: (provider: AiProvider) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
 		try {
-			return await this.getClient(config).messages.create({
-				model: config.model,
-				max_tokens: params.maxTokens,
-				system: params.system,
-				messages: params.messages,
-				...(params.tools ? { tools: params.tools } : {}),
-				...(params.toolChoice ? { tool_choice: params.toolChoice } : {}),
-			});
+			return await call(this.getProvider(config));
 		} catch (err) {
-			this.logger.error(`AI request failed: ${err?.constructor?.name ?? 'Error'} status=${err?.status ?? 'none'}`);
-			if (err instanceof Anthropic.APIConnectionTimeoutError) throw new ServiceUnavailableException(Message.AI_TIMEOUT);
+			if (err instanceof AiProviderError) {
+				this.logger.error(`AI request failed: provider=${config.provider} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
+				if (err.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
+				throw new ServiceUnavailableException(err.kind === 'timeout' ? Message.AI_TIMEOUT : Message.AI_REQUEST_FAILED);
+			}
+			this.logger.error(`AI request failed: provider=${config.provider} ${err?.constructor?.name ?? 'Error'}`);
 			throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
 		}
 	}
 
-	/** the text blocks of an answer, joined */
-	public getText(response: Anthropic.Message): string {
-		return response.content
-			.filter((block): block is Anthropic.TextBlock => block.type === 'text')
-			.map((block) => block.text)
-			.join('\n')
-			.trim();
-	}
-
-	private getClient(config: AiConfig): Anthropic {
-		const key = `${config.apiKey.length}:${config.apiKey.slice(-4)}:${config.timeoutMs}`;
-		if (!this.client || this.clientKey !== key) {
-			this.client = new Anthropic({ apiKey: config.apiKey, timeout: config.timeoutMs, maxRetries: 1 });
-			this.clientKey = key;
+	private getProvider(config: AiConfig): AiProvider {
+		const key = `${config.provider}:${config.model}:${config.apiKey.length}:${config.apiKey.slice(-4)}:${config.timeoutMs}`;
+		if (!this.provider || this.providerKey !== key) {
+			this.provider = this.createProvider(config);
+			this.providerKey = key;
 		}
-		return this.client;
+		return this.provider;
 	}
 }

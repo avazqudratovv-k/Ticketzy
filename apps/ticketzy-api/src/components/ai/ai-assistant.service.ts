@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
 import { AssistantAnswer } from '../../libs/dto/ai/ai';
 import { AskAssistantInput, AssistantRole, MAX_ASSISTANT_HISTORY, MAX_ASSISTANT_MESSAGE_LENGTH } from '../../libs/dto/ai/ai.input';
 import { Event } from '../../libs/dto/event/event';
@@ -9,6 +8,7 @@ import { EventLocale } from '../../libs/enums/event.enum';
 import { clip } from '../../libs/ai';
 import { AiClientService } from './ai-client.service';
 import { ASSISTANT_TOOLS, AiToolsService } from './ai-tools.service';
+import { AiChatResult, AiMessage, AiToolResult } from './providers/ai-provider';
 
 export const MAX_TOOL_ROUNDS = 4;
 export const MAX_TOOL_CALLS_PER_ROUND = 4;
@@ -34,11 +34,11 @@ You can only see the tickets of the person you are chatting with, through get_my
 If get_my_tickets says the user must log in, tell them to log in.`;
 
 /** the last turns of the chat, clipped, starting with a user turn */
-export const sanitizeHistory = (history: AskAssistantInput['history']): Anthropic.MessageParam[] => {
-	const turns: Anthropic.MessageParam[] = (history ?? [])
+export const sanitizeHistory = (history: AskAssistantInput['history']): AiMessage[] => {
+	const turns: AiMessage[] = (history ?? [])
 		.filter((turn) => (turn.role === AssistantRole.USER || turn.role === AssistantRole.ASSISTANT) && typeof turn.content === 'string' && turn.content.trim())
 		.slice(-MAX_ASSISTANT_HISTORY)
-		.map((turn) => ({ role: turn.role, content: clip(turn.content, MAX_ASSISTANT_MESSAGE_LENGTH) }));
+		.map((turn) => ({ role: turn.role as 'user' | 'assistant', text: clip(turn.content, MAX_ASSISTANT_MESSAGE_LENGTH) }));
 	while (turns.length && turns[0].role !== 'user') turns.shift();
 	return turns;
 };
@@ -60,44 +60,43 @@ export class AiAssistantService {
 		this.aiClient.begin(rateKey);
 
 		const message = clip(input.message, MAX_ASSISTANT_MESSAGE_LENGTH).trim();
-		const messages: Anthropic.MessageParam[] = [...sanitizeHistory(input.history), { role: 'user', content: message }];
+		const messages: AiMessage[] = [...sanitizeHistory(input.history), { role: 'user', text: message }];
 		const system = buildAssistantSystemPrompt(input.locale ?? EventLocale.EN);
 		const events = new Map<string, Event>();
 
 		let toolRounds = 0;
-		let response: Anthropic.Message;
+		let response: AiChatResult;
 		for (;;) {
 			const canUseTools = toolRounds < MAX_TOOL_ROUNDS;
-			response = await this.aiClient.complete({
+			response = await this.aiClient.chat({
 				system,
 				messages,
 				maxTokens: ASSISTANT_MAX_TOKENS,
 				tools: ASSISTANT_TOOLS,
-				toolChoice: canUseTools ? undefined : { type: 'none' },
+				toolChoice: canUseTools ? 'auto' : 'none',
 			});
-			if (response.stop_reason !== 'tool_use' || !canUseTools) break;
+			if (!response.toolCalls.length || !canUseTools) break;
 
 			toolRounds += 1;
-			messages.push({ role: 'assistant', content: response.content as Anthropic.ContentBlockParam[] });
-			messages.push({ role: 'user', content: await this.runTools(response, authMember, events) });
+			messages.push(response.assistantMessage);
+			messages.push({ role: 'tool', results: await this.runTools(response, authMember, events) });
 		}
 
-		const answer = clip(this.aiClient.getText(response), MAX_ANSWER_LENGTH);
+		const answer = clip(response.text, MAX_ANSWER_LENGTH);
 		return { answer: answer || Message.AI_ASSISTANT_NO_ANSWER, events: [...events.values()].slice(0, MAX_ANSWER_EVENTS) };
 	}
 
-	/** one tool_result for every tool_use of the turn (the API needs all of them), a few calls at most */
-	private async runTools(response: Anthropic.Message, authMember: Member | null, events: Map<string, Event>): Promise<Anthropic.ToolResultBlockParam[]> {
-		const calls = response.content.filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use');
-		const results: Anthropic.ToolResultBlockParam[] = [];
-		for (const [index, call] of calls.entries()) {
+	/** one result for every tool call of the turn (the providers need all of them), a few calls at most */
+	private async runTools(response: AiChatResult, authMember: Member | null, events: Map<string, Event>): Promise<AiToolResult[]> {
+		const results: AiToolResult[] = [];
+		for (const [index, call] of response.toolCalls.entries()) {
 			if (index >= MAX_TOOL_CALLS_PER_ROUND) {
-				results.push({ type: 'tool_result', tool_use_id: call.id, content: JSON.stringify({ error: 'Too many tool calls.' }), is_error: true });
+				results.push({ callId: call.id, name: call.name, content: JSON.stringify({ error: 'Too many tool calls.' }), isError: true });
 				continue;
 			}
-			const outcome = await this.aiTools.execute(call.name, call.input, authMember);
+			const outcome = await this.aiTools.execute(call.name, call.args, authMember);
 			for (const event of outcome.events ?? []) events.set(String(event._id), event);
-			results.push({ type: 'tool_result', tool_use_id: call.id, content: outcome.content, ...(outcome.isError ? { is_error: true } : {}) });
+			results.push({ callId: call.id, name: call.name, content: outcome.content, ...(outcome.isError ? { isError: true } : {}) });
 		}
 		return results;
 	}

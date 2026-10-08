@@ -10,6 +10,7 @@ import { AuditAction } from '../../libs/enums/audit-log.enum';
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { AssistantRole } from '../../libs/dto/ai/ai.input';
 import { extractJson, parseModerationResult } from '../../libs/ai';
+import { AiProviderError } from './providers/ai-provider';
 
 const exec = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
 const lean = (value: any) => ({ lean: () => exec(value) });
@@ -18,28 +19,25 @@ const chain = (value: any) => {
 	return c;
 };
 
-const textReply = (text: string) => ({ model: 'claude-haiku-4-5', stop_reason: 'end_turn', content: [{ type: 'text', text }] });
-const toolReply = (calls: { id: string; name: string; input?: any }[]) => ({
-	model: 'claude-haiku-4-5',
-	stop_reason: 'tool_use',
-	content: calls.map((call) => ({ type: 'tool_use', id: call.id, name: call.name, input: call.input ?? {} })),
-});
+const jsonReply = (data: unknown) => ({ data, model: 'claude-haiku-4-5' });
+const chatReply = (text: string, calls: { id: string; name: string; args?: any }[] = []) => {
+	const toolCalls = calls.map((call) => ({ id: call.id, name: call.name, args: call.args ?? {} }));
+	return { text, toolCalls, model: 'claude-haiku-4-5', assistantMessage: { role: 'assistant', text, toolCalls } };
+};
+const toolReply = (calls: { id: string; name: string; args?: any }[]) => chatReply('', calls);
 const goodModeration = {
 	flags: [{ type: 'DUPLICATE', reason: 'same title as another event', confidence: 0.8 }],
 	reason: 'Looks like a duplicate',
 	confidence: 0.7,
 };
 
-/** a client whose Anthropic SDK is replaced by a mock */
-const makeClient = (create: jest.Mock): AiClientService => {
-	const client = new AiClientService();
-	(client as any).client = { messages: { create } };
-	(client as any).clientKey = '';
-	jest.spyOn(client as any, 'getClient').mockReturnValue({ messages: { create } });
-	return client;
-};
+type MockProvider = { name: string; generateText: jest.Mock; generateJson: jest.Mock; chat: jest.Mock };
+const makeProvider = (): MockProvider => ({ name: 'mock', generateText: jest.fn(), generateJson: jest.fn(), chat: jest.fn() });
 
-const ENV_KEYS = ['AI_ENABLED', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
+/** a client whose provider is a mock: the services never see a vendor SDK */
+const makeClient = (provider: MockProvider = makeProvider()): AiClientService => new AiClientService(() => provider as any);
+
+const ENV_KEYS = ['AI_ENABLED', 'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
 let savedEnv: Record<string, string | undefined>;
 beforeEach(() => {
 	savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -60,18 +58,22 @@ describe('AiClientService: disabled AI and rate limit', () => {
 		['the key is missing', { ANTHROPIC_API_KEY: '' }, Message.AI_NOT_CONFIGURED],
 	])('fails with a clear message when %s, and never calls the API', async (_name, env, message) => {
 		Object.assign(process.env, env);
-		const create = jest.fn();
-		const client = makeClient(create);
+		const provider = makeProvider();
+		const client = makeClient(provider);
 
 		expect(client.isAvailable()).toBe(false);
 		expect(() => client.begin('member:1')).toThrow(message);
-		await expect(client.complete({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(ServiceUnavailableException);
-		expect(create).not.toHaveBeenCalled();
+		await expect(client.chat({ system: 's', messages: [], maxTokens: 10, tools: [] })).rejects.toThrow(ServiceUnavailableException);
+		await expect(client.generateJson({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(ServiceUnavailableException);
+		await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(ServiceUnavailableException);
+		expect(provider.chat).not.toHaveBeenCalled();
+		expect(provider.generateJson).not.toHaveBeenCalled();
+		expect(provider.generateText).not.toHaveBeenCalled();
 	});
 
 	it('limits each member (or IP) on its own', () => {
 		process.env.AI_RATE_LIMIT_PER_MINUTE = '2';
-		const client = makeClient(jest.fn());
+		const client = makeClient();
 		client.begin('member:1');
 		client.begin('member:1');
 		expect(() => client.begin('member:1')).toThrow(HttpException);
@@ -80,12 +82,44 @@ describe('AiClientService: disabled AI and rate limit', () => {
 		expect(() => client.begin('ip:1.2.3.4')).not.toThrow();
 	});
 
-	it('turns an API error into a clear message without leaking the key or the prompt', async () => {
-		const create = jest.fn().mockRejectedValue(Object.assign(new Error('401 invalid x-api-key sk-test-key SECRET PROMPT'), { status: 401 }));
-		const client = makeClient(create);
-		const error = await client.complete({ system: 'SECRET PROMPT', messages: [], maxTokens: 10 }).catch((err) => err);
-		expect(error.message).toBe(Message.AI_REQUEST_FAILED);
-		expect(JSON.stringify(error.getResponse())).not.toContain('sk-test-key');
+	it.each([
+		['a failed call', new AiProviderError('failed', 401, 'APIError'), Message.AI_REQUEST_FAILED],
+		['a timeout', new AiProviderError('timeout', undefined, 'TimeoutError'), Message.AI_TIMEOUT],
+		['an unexpected error', new Error('401 invalid key sk-test-key SECRET PROMPT'), Message.AI_REQUEST_FAILED],
+	])('turns %s into a clear message without leaking the key or the prompt', async (_name, failure, message) => {
+		const provider = makeProvider();
+		provider.chat.mockRejectedValue(failure);
+		const error = await makeClient(provider).chat({ system: 'SECRET PROMPT', messages: [], maxTokens: 10, tools: [] }).catch((err) => err);
+		expect(error.message).toBe(message);
+		expect(JSON.stringify(error.getResponse())).not.toMatch(/sk-test-key|SECRET/);
+	});
+
+	it('turns text that is not JSON into AI_INVALID_RESPONSE', async () => {
+		const provider = makeProvider();
+		provider.generateJson.mockRejectedValue(new AiProviderError('invalid_response'));
+		await expect(makeClient(provider).generateJson({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_INVALID_RESPONSE);
+	});
+
+	it('builds the provider of AI_PROVIDER from that provider\'s own settings, and rebuilds it when they change', async () => {
+		const factory = jest.fn().mockReturnValue({ ...makeProvider(), generateText: jest.fn().mockResolvedValue({ text: 't', model: 'm' }) });
+		const client = new AiClientService(factory);
+		process.env.AI_PROVIDER = 'gemini';
+		process.env.GEMINI_API_KEY = 'g-key';
+		process.env.GEMINI_MODEL = 'gemini-x';
+		const req = { system: 's', messages: [], maxTokens: 1 };
+		await client.generateText(req);
+		await client.generateText(req);
+		expect(factory).toHaveBeenCalledTimes(1);
+		expect(factory).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gemini', apiKey: 'g-key', model: 'gemini-x' }));
+
+		process.env.AI_PROVIDER = 'anthropic'; // the Anthropic key is set by beforeEach
+		await client.generateText(req);
+		expect(factory).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'anthropic', apiKey: 'sk-test-key' }));
+
+		delete process.env.GEMINI_API_KEY;
+		process.env.AI_PROVIDER = 'gemini';
+		expect(client.isAvailable()).toBe(false); // a key of another provider does not count
+		expect(() => client.begin('member:1')).toThrow(Message.AI_NOT_CONFIGURED);
 	});
 });
 
@@ -118,6 +152,7 @@ describe('AiModerationService', () => {
 	let venueModel: any;
 	let ticketTypeModel: any;
 	let auditLogService: any;
+	let provider: MockProvider;
 	let create: jest.Mock;
 	let service: AiModerationService;
 	const event = (over: any = {}) => ({
@@ -144,14 +179,15 @@ describe('AiModerationService', () => {
 		venueModel = { findById: jest.fn().mockReturnValue(lean({ venueName: 'Arena', venueCity: 'Seoul', venueAddress: '1 Main St' })) };
 		ticketTypeModel = { find: jest.fn().mockReturnValue(lean([{ ticketTypeName: 'VIP', ticketPrice: 90, ticketCurrency: 'USD', totalQuantity: 10 }])) };
 		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
-		create = jest.fn();
-		service = new AiModerationService(eventModel, venueModel, ticketTypeModel, makeClient(create), auditLogService);
+		provider = makeProvider();
+		create = provider.generateJson;
+		service = new AiModerationService(eventModel, venueModel, ticketTypeModel, makeClient(provider), auditLogService);
 	});
 
 	const stored = () => eventModel.findOneAndUpdate.mock.calls[0][1].$set.eventModeration;
 
 	it('stores a valid result with model and checkedAt, and sends the event data as one JSON object', async () => {
-		create.mockResolvedValue(textReply(JSON.stringify(goodModeration)));
+		create.mockResolvedValue(jsonReply(goodModeration));
 
 		const result = await service.moderateEvent('e1' as any);
 
@@ -160,7 +196,7 @@ describe('AiModerationService', () => {
 		expect(stored().checkedAt).toBeInstanceOf(Date);
 
 		const request = create.mock.calls[0][0];
-		const payload = JSON.parse(request.messages[0].content);
+		const payload = JSON.parse(request.messages[0].text);
 		expect(payload).toMatchObject({
 			title: 'Rock Night',
 			venue: { city: 'Seoul' },
@@ -169,12 +205,16 @@ describe('AiModerationService', () => {
 			translations: [{ locale: 'ko' }],
 		});
 		expect(request.tools).toBeUndefined();
+		expect(provider.chat).not.toHaveBeenCalled();
 		// moderation only stores a result: the event status is never part of the update
 		expect(JSON.stringify(eventModel.findOneAndUpdate.mock.calls[0][1])).not.toMatch(/eventStatus/);
 	});
 
-	it('marks the event "not checked" when the model returns invalid JSON', async () => {
-		create.mockResolvedValue(textReply('I think this event is fine.'));
+	it.each([
+		['text that is not JSON', () => create.mockRejectedValue(new AiProviderError('invalid_response'))],
+		['JSON of the wrong shape', () => create.mockResolvedValue(jsonReply({ flags: 'none' }))],
+	])('marks the event "not checked" when the model returns %s', async (_name, arrange) => {
+		arrange();
 
 		const result = await service.moderateEvent('e1' as any);
 
@@ -183,7 +223,7 @@ describe('AiModerationService', () => {
 	});
 
 	it('marks the event "not checked" when the API fails, and never throws', async () => {
-		create.mockRejectedValue(new Error('network down'));
+		create.mockRejectedValue(new AiProviderError('failed', 503));
 		await expect(service.moderateEvent('e1' as any)).resolves.toMatchObject({ checked: false });
 		expect(stored().checked).toBe(false);
 	});
@@ -197,7 +237,7 @@ describe('AiModerationService', () => {
 
 	it('is "not checked" when the rate limit is used up', async () => {
 		process.env.AI_RATE_LIMIT_PER_MINUTE = '1';
-		create.mockResolvedValue(textReply(JSON.stringify(goodModeration)));
+		create.mockResolvedValue(jsonReply(goodModeration));
 		await service.moderateEvent('e1' as any);
 		await expect(service.moderateEvent('e1' as any)).resolves.toMatchObject({ checked: false });
 		expect(create).toHaveBeenCalledTimes(1);
@@ -208,7 +248,7 @@ describe('AiModerationService', () => {
 		eventModel.findById.mockReturnValue(lean(event({ eventDesc: injection })));
 		// a model that obeyed the injection and added fields of its own
 		create.mockResolvedValue(
-			textReply(JSON.stringify({ ...goodModeration, approved: true, eventStatus: 'APPROVED', flags: [{ ...goodModeration.flags[0], approve: true }] })),
+			jsonReply({ ...goodModeration, approved: true, eventStatus: 'APPROVED', flags: [{ ...goodModeration.flags[0], approve: true }] }),
 		);
 
 		await service.moderateEvent('e1' as any);
@@ -217,7 +257,7 @@ describe('AiModerationService', () => {
 		expect(Object.keys(stored().flags[0]).sort()).toEqual(['confidence', 'reason', 'type']);
 		// the text only travelled as a JSON string value, and the system prompt calls it data
 		const request = create.mock.calls[0][0];
-		expect(JSON.parse(request.messages[0].content).description).toBe(injection);
+		expect(JSON.parse(request.messages[0].text).description).toBe(injection);
 		expect(request.system).toMatch(/untrusted DATA/);
 		expect(request.system).not.toContain(injection);
 	});
@@ -228,7 +268,7 @@ describe('AiModerationService', () => {
 		expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
 
 		process.env.AI_ENABLED = 'true';
-		create.mockResolvedValue(textReply(JSON.stringify(goodModeration)));
+		create.mockResolvedValue(jsonReply(goodModeration));
 		await service.runEventModerationByAdmin('admin1' as any, 'e1' as any);
 		expect(auditLogService.record).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'admin1', action: AuditAction.EVENT_MODERATION_RUN }));
 	});
@@ -241,13 +281,14 @@ describe('AiTranslationService', () => {
 
 	beforeEach(() => {
 		eventModel = { findOne: jest.fn().mockReturnValue(lean({ _id: 'e1', organizerId: 'org1', eventTitle: 'Rock Night 2026', eventDesc: 'Tickets from $20' })), findOneAndUpdate: jest.fn() };
-		create = jest.fn();
-		service = new AiTranslationService(eventModel, makeClient(create));
+		const provider = makeProvider();
+		create = provider.generateJson;
+		service = new AiTranslationService(eventModel, makeClient(provider));
 	});
 
 	it('returns suggestions for the owner and saves nothing', async () => {
 		create.mockResolvedValue(
-			textReply(JSON.stringify({ translations: [{ locale: 'ko', title: '록 나이트 2026', description: '티켓 $20부터' }, { locale: 'uz', title: 'Rock Night 2026', description: 'Biletlar $20 dan' }] })),
+			jsonReply({ translations: [{ locale: 'ko', title: '록 나이트 2026', description: '티켓 $20부터' }, { locale: 'uz', title: 'Rock Night 2026', description: 'Biletlar $20 dan' }] }),
 		);
 
 		const result = await service.translateEvent('org1' as any, 'e1' as any, [EventLocale.KO, EventLocale.UZ]);
@@ -262,10 +303,10 @@ describe('AiTranslationService', () => {
 		eventModel.findOne.mockReturnValueOnce(lean(null));
 		await expect(service.translateEvent('other' as any, 'e1' as any, [EventLocale.KO])).rejects.toThrow(Message.NO_DATA_FOUND);
 
-		create.mockResolvedValueOnce(textReply('sure!'));
+		create.mockRejectedValueOnce(new AiProviderError('invalid_response'));
 		await expect(service.translateEvent('org1' as any, 'e1' as any, [EventLocale.KO])).rejects.toThrow(Message.AI_INVALID_RESPONSE);
 
-		create.mockResolvedValueOnce(textReply(JSON.stringify({ translations: [{ locale: 'ru', title: 'Рок ночь', description: 'Билеты от $20' }] })));
+		create.mockResolvedValueOnce(jsonReply({ translations: [{ locale: 'ru', title: 'Рок ночь', description: 'Билеты от $20' }] }));
 		await expect(service.translateEvent('org1' as any, 'e1' as any, [EventLocale.KO])).rejects.toThrow(Message.AI_INVALID_RESPONSE);
 	});
 
@@ -351,19 +392,21 @@ describe('AiToolsService', () => {
 });
 
 describe('AiAssistantService', () => {
+	let provider: MockProvider;
 	let create: jest.Mock;
 	let toolsService: { execute: jest.Mock };
 	let service: AiAssistantService;
 	const ask = (over: any = {}, member: any = null, key = 'ip:1') => service.askAssistant(member, key, { message: 'rock concerts in Seoul?', ...over });
 
 	beforeEach(() => {
-		create = jest.fn();
+		provider = makeProvider();
+		create = provider.chat;
 		toolsService = { execute: jest.fn().mockResolvedValue({ content: '{"events":[]}' }) };
-		service = new AiAssistantService(makeClient(create), toolsService as any);
+		service = new AiAssistantService(makeClient(provider), toolsService as any);
 	});
 
 	it('answers a visitor without tools', async () => {
-		create.mockResolvedValue(textReply('Hello!'));
+		create.mockResolvedValue(chatReply('Hello!'));
 		const result = await ask({ locale: EventLocale.KO });
 		expect(result).toEqual({ answer: 'Hello!', events: [] });
 		expect(create.mock.calls[0][0].system).toContain('Korean');
@@ -374,8 +417,8 @@ describe('AiAssistantService', () => {
 		const found = { _id: 'e1', eventTitle: 'Rock Night' };
 		toolsService.execute.mockResolvedValueOnce({ content: '{"events":[{"id":"e1"}]}', events: [found, found] });
 		create
-			.mockResolvedValueOnce(toolReply([{ id: 't1', name: 'get_my_tickets', input: { memberId: 'victim' } }, { id: 't2', name: 'search_events' }]))
-			.mockResolvedValueOnce(textReply('Here is one.'));
+			.mockResolvedValueOnce(toolReply([{ id: 't1', name: 'get_my_tickets', args: { memberId: 'victim' } }, { id: 't2', name: 'search_events' }]))
+			.mockResolvedValueOnce(chatReply('Here is one.'));
 
 		const me = { _id: 'me' };
 		const result = await ask({}, me);
@@ -383,7 +426,8 @@ describe('AiAssistantService', () => {
 		expect(result.events).toEqual([found]);
 		expect(toolsService.execute).toHaveBeenNthCalledWith(1, 'get_my_tickets', { memberId: 'victim' }, me);
 		const second = create.mock.calls[1][0].messages;
-		expect(second[second.length - 1].content.map((block: any) => block.tool_use_id)).toEqual(['t1', 't2']);
+		expect(second[second.length - 1].results.map((result: any) => result.callId)).toEqual(['t1', 't2'])
+		expect(second[second.length - 2]).toMatchObject({ role: 'assistant', toolCalls: [{ id: 't1' }, { id: 't2' }] });
 	});
 
 	it('stops after the maximum number of tool rounds', async () => {
@@ -394,12 +438,13 @@ describe('AiAssistantService', () => {
 		expect(MAX_TOOL_ROUNDS).toBe(4);
 		expect(toolsService.execute).toHaveBeenCalledTimes(MAX_TOOL_ROUNDS);
 		expect(create).toHaveBeenCalledTimes(MAX_TOOL_ROUNDS + 1);
-		expect(create.mock.calls[MAX_TOOL_ROUNDS][0].toolChoice ?? create.mock.calls[MAX_TOOL_ROUNDS][0].tool_choice).toEqual({ type: 'none' });
+		expect(create.mock.calls[MAX_TOOL_ROUNDS][0].toolChoice).toBe('none');
+		expect(create.mock.calls[0][0].toolChoice).toBe('auto');
 		expect(result.answer).toBe(Message.AI_ASSISTANT_NO_ANSWER);
 	});
 
 	it('limits the history, the message and the answer', async () => {
-		create.mockResolvedValue(textReply('x'.repeat(5000)));
+		create.mockResolvedValue(chatReply('x'.repeat(5000)));
 		const history = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? AssistantRole.ASSISTANT : AssistantRole.USER, content: 'y'.repeat(3000) }));
 
 		const result = await ask({ history, message: 'z'.repeat(5000) });
@@ -407,15 +452,15 @@ describe('AiAssistantService', () => {
 		const sent = create.mock.calls[0][0];
 		expect(sent.messages.length).toBeLessThanOrEqual(11);
 		expect(sent.messages[0].role).toBe('user');
-		expect(sent.messages.every((turn: any) => turn.content.length <= 1000)).toBe(true);
-		expect(sent.max_tokens).toBe(700);
+		expect(sent.messages.every((turn: any) => turn.text.length <= 1000)).toBe(true);
+		expect(sent.maxTokens).toBe(700);
 		expect(result.answer.length).toBe(2000);
 		expect(sanitizeHistory([{ role: AssistantRole.ASSISTANT, content: 'hi' }])).toEqual([]);
 	});
 
 	it('does not leak a tool failure and is rate limited per caller', async () => {
 		process.env.AI_RATE_LIMIT_PER_MINUTE = '1';
-		create.mockResolvedValue(textReply('ok'));
+		create.mockResolvedValue(chatReply('ok'));
 		await ask({}, null, 'ip:9');
 		await expect(ask({}, null, 'ip:9')).rejects.toThrow(Message.AI_RATE_LIMITED);
 		await expect(ask({}, null, 'ip:10')).resolves.toBeDefined();

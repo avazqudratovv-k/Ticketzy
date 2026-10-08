@@ -5,7 +5,7 @@ import { Event, EventTranslation } from '../../libs/dto/event/event';
 import { Message } from '../../libs/enums/common.enum';
 import { EventLocale } from '../../libs/enums/event.enum';
 import { AiClientService } from './ai-client.service';
-import { clip, extractJson, parseTranslationResult } from '../../libs/ai';
+import { clip, parseTranslationResult } from '../../libs/ai';
 
 const TRANSLATION_MAX_TOKENS = 3000;
 
@@ -37,14 +37,14 @@ export class AiTranslationService {
 
 		this.aiClient.begin(`member:${memberId}`);
 		const description = event.eventDesc?.trim() ? clip(event.eventDesc, 2000) : undefined;
-		const response = await this.aiClient.complete({
+		const response = await this.aiClient.generateJson({
 			system: TRANSLATION_SYSTEM_PROMPT,
-			messages: [{ role: 'user', content: JSON.stringify({ title: clip(event.eventTitle, 200), description, targetLocales: locales }) }],
+			messages: [{ role: 'user', text: JSON.stringify({ title: clip(event.eventTitle, 200), description, targetLocales: locales }) }],
 			maxTokens: TRANSLATION_MAX_TOKENS,
 		});
 
 		try {
-			return parseTranslationResult(extractJson(this.aiClient.getText(response)), locales, !!description);
+			return parseTranslationResult(response.data, locales, !!description);
 		} catch {
 			throw new BadRequestException(Message.AI_INVALID_RESPONSE);
 		}
