@@ -467,3 +467,7 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - `SeatHold.holdSeconds` and public `getSeatConfig { seatHoldSeconds, maxSeatsPerOrder }`.
 - Not done: STANDING remaining capacity (no stock exists for standing sections).
 - Tests: seat references (resolve, both forms, mixed/partial rejection, not found, limit, duplicates, config) and seat map `mine`. `tsc` (api and batch), `npm run build` and `npx jest` (532 tests, 28 suites) pass.
+
+## Event and venue on order and ticket queries (decision #68)
+- `getOrder` now joins the event (it returned `eventData: null` before); `getMyOrders`, `getAllOrdersByAdmin`, `getMyTickets` and `getTicket` also fill `eventData.venueData`. New `lookupEventWithVenue` in `libs/config.ts`; single aggregation per query, no extra queries, no view counting.
+- Tests: pipeline checks for the venue join in orders (`getOrder` owner match and NO_DATA_FOUND, `getMyOrders` per page) and tickets (list, time filter, `getTicket`).

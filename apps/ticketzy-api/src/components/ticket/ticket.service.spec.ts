@@ -26,6 +26,12 @@ describe('TicketService', () => {
 	const stages = () => ticketModel.aggregate.mock.calls[0][0];
 	const facet = () => stages().find((stage) => stage.$facet).$facet;
 
+	const expectVenueInEventLookup = (pipeline: any[]) => {
+		const lookup = pipeline.find((s) => s.$lookup && s.$lookup.from === 'events').$lookup;
+		expect(lookup.as).toBe('eventData');
+		expect(lookup.pipeline.find((s) => s.$lookup).$lookup).toMatchObject({ from: 'venues', localField: 'venueId', as: 'venueData' });
+	};
+
 	describe('getMyTickets', () => {
 		it('only reads the caller\'s tickets and joins event, ticket type and seat', async () => {
 			await service.getMyTickets(ME as any, { page: 1, limit: 5 });
@@ -33,6 +39,15 @@ describe('TicketService', () => {
 			const lookups = facet().list.filter((s) => s.$lookup).map((s) => s.$lookup.from);
 			expect(lookups).toEqual(['events', 'ticketTypes', 'eventSeats']);
 			expect(facet().list.find((s) => s.$skip !== undefined).$skip).toBe(0);
+		});
+
+		it('joins the event\'s venue inside the same event lookup, for every page', async () => {
+			await service.getMyTickets(ME as any, { page: 1, limit: 5 });
+			expectVenueInEventLookup(facet().list);
+			ticketModel.aggregate.mockClear();
+			await service.getMyTickets(ME as any, { page: 1, limit: 5, timeFilter: TicketTimeFilter.UPCOMING });
+			expectVenueInEventLookup(stages());
+			expect(ticketModel.aggregate).toHaveBeenCalledTimes(1);
 		});
 
 		it('UPCOMING keeps events that have not ended, soonest first, before paging', async () => {
@@ -58,6 +73,13 @@ describe('TicketService', () => {
 			await expect(service.getTicket(new ObjectId() as any, TICKET as any)).rejects.toBeInstanceOf(InternalServerErrorException);
 			expect(String(stages()[0].$match._id)).toBe(String(TICKET));
 			expect(String(stages()[0].$match.ownerId)).not.toBe(String(ME));
+		});
+
+		it('joins the event\'s venue in the single aggregation', async () => {
+			ticketModel.aggregate.mockReturnValue(query([{ _id: 't1' }]));
+			await service.getTicket(ME as any, TICKET as any);
+			expectVenueInEventLookup(stages());
+			expect(ticketModel.aggregate).toHaveBeenCalledTimes(1);
 		});
 
 		it('returns the ticket with its qrToken, event and seat to the owner', async () => {

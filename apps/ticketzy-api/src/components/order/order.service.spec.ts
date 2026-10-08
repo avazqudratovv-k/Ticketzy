@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ObjectId } from 'bson';
 import { FakeModel } from '../../../test/fake-model';
 import { OrderService } from './order.service';
@@ -120,5 +120,50 @@ describe('OrderService.createCheckout (general admission)', () => {
 		events.docs[0].saleStartAt = new Date(Date.now() + day);
 		await expect(attempt()).rejects.toBeInstanceOf(BadRequestException);
 		expect(ticketTypeService.reserve).not.toHaveBeenCalled();
+	});
+});
+
+describe('OrderService order queries (event and venue)', () => {
+	const query = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
+	let orders: any;
+	let service: OrderService;
+
+	beforeEach(() => {
+		orders = { aggregate: jest.fn().mockReturnValue(query([{ list: [], metaCounter: [] }])) };
+		service = new OrderService(orders, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+	});
+
+	const eventLookup = (pipeline: any[]) => pipeline.find((s) => s.$lookup && s.$lookup.from === 'events').$lookup;
+	const expectVenueNested = (pipeline: any[]) => {
+		const lookup = eventLookup(pipeline);
+		expect(lookup.as).toBe('eventData');
+		expect(lookup.pipeline.find((s) => s.$lookup).$lookup).toMatchObject({ from: 'venues', localField: 'venueId', as: 'venueData' });
+	};
+
+	it('getOrder matches order and buyer, and returns the order with its event and venue in one query', async () => {
+		orders.aggregate.mockReturnValue(query([{ _id: A, eventData: { venueData: { venueName: 'Hall' } } }]));
+		const order: any = await service.getOrder(BUYER as any, A as any);
+
+		const pipeline = orders.aggregate.mock.calls[0][0];
+		expect(String(pipeline[0].$match._id)).toBe(String(A));
+		expect(String(pipeline[0].$match.buyerId)).toBe(String(BUYER));
+		expectVenueNested(pipeline);
+		expect(orders.aggregate).toHaveBeenCalledTimes(1);
+		expect(order.eventData.venueData.venueName).toBe('Hall');
+	});
+
+	it('getOrder answers NO_DATA_FOUND for another buyer\'s or a missing order', async () => {
+		orders.aggregate.mockReturnValue(query([]));
+		await expect(service.getOrder(BUYER as any, A as any)).rejects.toBeInstanceOf(InternalServerErrorException);
+	});
+
+	it('getMyOrders joins event and venue for the page only, in one aggregation', async () => {
+		await service.getMyOrders(BUYER as any, { page: 2, limit: 5 } as any);
+
+		const pipeline = orders.aggregate.mock.calls[0][0];
+		const list = pipeline.find((s) => s.$facet).$facet.list;
+		expect(list.find((s) => s.$skip !== undefined).$skip).toBe(5);
+		expectVenueNested(list);
+		expect(orders.aggregate).toHaveBeenCalledTimes(1);
 	});
 });

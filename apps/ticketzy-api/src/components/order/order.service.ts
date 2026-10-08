@@ -13,7 +13,7 @@ import { Direction, Message } from '../../libs/enums/common.enum';
 import { SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentSimulation, TicketStatus } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
-import { lookupEvent, shapeIntoMongoObjectId } from '../../libs/config';
+import { lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
 import { buildQrToken } from '../../libs/qr-token';
@@ -347,9 +347,15 @@ export class OrderService {
 	}
 
 	public async getOrder(memberId: ObjectId, orderId: ObjectId): Promise<Order> {
-		const result = await this.orderModel.findOne({ _id: orderId, buyerId: memberId }).exec();
-		if (!result) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
-		return result;
+		const result = await this.orderModel
+			.aggregate([
+				{ $match: { _id: shapeIntoMongoObjectId(orderId), buyerId: shapeIntoMongoObjectId(memberId) } },
+				lookupEventWithVenue,
+				{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
+			])
+			.exec();
+		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		return result[0];
 	}
 
 	public async getMyOrders(memberId: ObjectId, input: OrdersInquiry): Promise<Orders> {
@@ -378,7 +384,7 @@ export class OrderService {
 						list: [
 							{ $skip: (input.page - 1) * input.limit },
 							{ $limit: input.limit },
-							lookupEvent,
+							lookupEventWithVenue,
 							{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],

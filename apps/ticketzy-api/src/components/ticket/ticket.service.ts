@@ -14,7 +14,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { TicketStatus, TicketTimeFilter } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
-import { lookupEvent, lookupSeat, lookupTicketType, shapeIntoMongoObjectId } from '../../libs/config';
+import { lookupEventWithVenue, lookupSeat, lookupTicketType, shapeIntoMongoObjectId } from '../../libs/config';
 
 @Injectable()
 export class TicketService {
@@ -42,7 +42,7 @@ export class TicketService {
 			// the event is needed before paging, so the filter is applied to the right page
 			const upcoming = input.timeFilter === TicketTimeFilter.UPCOMING;
 			stages.push(
-				lookupEvent,
+				lookupEventWithVenue,
 				unwindEvent,
 				{ $match: { 'eventData.endAt': upcoming ? { $gte: new Date() } : { $lt: new Date() } } },
 				{ $sort: { 'eventData.startAt': upcoming ? 1 : -1, createdAt: -1 } },
@@ -50,7 +50,7 @@ export class TicketService {
 			listStages = [{ $skip: (input.page - 1) * input.limit }, { $limit: input.limit }, ...details];
 		} else {
 			stages.push({ $sort: { createdAt: -1 } });
-			listStages = [{ $skip: (input.page - 1) * input.limit }, { $limit: input.limit }, lookupEvent, unwindEvent, ...details];
+			listStages = [{ $skip: (input.page - 1) * input.limit }, { $limit: input.limit }, lookupEventWithVenue, unwindEvent, ...details];
 		}
 
 		const result = await this.ticketModel
@@ -65,7 +65,7 @@ export class TicketService {
 		const result = await this.ticketModel
 			.aggregate([
 				{ $match: { _id: shapeIntoMongoObjectId(ticketId), ownerId: shapeIntoMongoObjectId(memberId) } },
-				lookupEvent,
+				lookupEventWithVenue,
 				{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
 				lookupTicketType,
 				{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },

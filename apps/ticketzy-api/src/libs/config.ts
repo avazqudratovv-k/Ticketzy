@@ -242,6 +242,20 @@ export const lookupEvent = {
   },
 };
 
+/** like lookupEvent, with the event's venue attached as eventData.venueData (one nested join, no extra queries) */
+export const lookupEventWithVenue = {
+  $lookup: {
+    from: 'events',
+    let: { eventId: '$eventId' },
+    pipeline: [
+      { $match: { $expr: { $eq: ['$_id', '$$eventId'] } } },
+      lookupVenue,
+      { $unwind: { path: '$venueData', preserveNullAndEmptyArrays: true } },
+    ],
+    as: 'eventData',
+  },
+};
+
 export const lookupTicketType = {
   $lookup: {
     from: 'ticketTypes',
