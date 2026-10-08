@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { UnauthorizedException, ValidationPipe } from '@nestjs/common';
 import { MemberService } from './member.service';
 import { AuthService } from '../auth/auth.service';
 import { Message } from '../../libs/enums/common.enum';
@@ -63,16 +63,17 @@ describe('MemberService signup and login', () => {
 			expect(unknown.message).toBe(Message.WRONG_EMAIL_OR_PASSWORD);
 			expect(wrong.message).toBe(Message.WRONG_EMAIL_OR_PASSWORD);
 			expect(unknown.getStatus()).toBe(401);
+			expect(unknown).toBeInstanceOf(UnauthorizedException);
 		});
 
 		it.each([MemberStatus.REJECTED, MemberStatus.SUSPENDED, MemberStatus.DELETE])(
-			'refuses a %s account with ACCOUNT_NOT_VERIFIED (401)',
+			'refuses a %s account with the ACCOUNT_NOT_VERIFIED code',
 			async (status) => {
 				memberModel.findOne.mockReturnValue(query(await stored(status)));
 				const err: any = await service.login(login).catch((e) => e);
 
 				expect(err.message).toBe(Message.ACCOUNT_NOT_VERIFIED);
-				expect(err.getStatus()).toBe(401);
+				expect(err.extensions.code).toBe('ACCOUNT_NOT_VERIFIED');
 			},
 		);
 

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { GraphQLError } from 'graphql';
 import { Model, ObjectId } from 'mongoose';
 import { Member, Members } from '../../libs/dto/member/member';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
@@ -73,8 +74,9 @@ export class MemberService {
 		if (!response || !isMatch) throw new UnauthorizedException(Message.WRONG_EMAIL_OR_PASSWORD);
 
 		// PENDING organizers may log in, they just cannot use organizer features yet
+		// a GraphQLError keeps its own code; an HttpException would be mapped to UNAUTHENTICATED by the Apollo driver
 		if (unverifiedMemberStatuses.includes(response.memberStatus)) {
-			throw new UnauthorizedException(Message.ACCOUNT_NOT_VERIFIED);
+			throw new GraphQLError(Message.ACCOUNT_NOT_VERIFIED, { extensions: { code: 'ACCOUNT_NOT_VERIFIED' } });
 		}
 
 		response.accessToken = await this.authService.createToken(response);

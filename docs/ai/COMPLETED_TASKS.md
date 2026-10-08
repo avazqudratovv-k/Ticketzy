@@ -447,3 +447,8 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - `AI_TIMEOUT_MS` default 15000 (`.env.example`, `env.validation.ts`); Anthropic client `maxRetries: 0`; the retry in `AiClientService` now waits 1000 ms and also covers provider timeouts; two failed attempts return `AI_BUSY`.
 - Tests: timeout retried once after exactly 1 s then `AI_BUSY` (fake timers), delay constant, Anthropic SDK client gets the timeout and no SDK retries, new default in `env.validation.spec.ts`.
 - `tsc` (api and batch), `npm run build` and `npx jest` (505 tests, 27 suites) pass.
+
+## Distinct login error codes (decision #64)
+- `MemberService.login`: a REJECTED, SUSPENDED or DELETE account now fails with code `ACCOUNT_NOT_VERIFIED` (a `GraphQLError`, same message as before); wrong email or password stays `UNAUTHENTICATED` with the same message.
+- Tests (`member.service.spec.ts`): the not-verified case checks `extensions.code` and the message; the wrong-credentials case checks it is still an `UnauthorizedException`.
+- `tsc` (api and batch), `npm run build` and `npx jest` (505 tests, 27 suites) pass.
