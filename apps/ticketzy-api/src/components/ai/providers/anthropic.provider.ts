@@ -22,7 +22,7 @@ export class AnthropicProvider implements AiProvider {
 		private readonly settings: AiProviderSettings,
 		client?: Anthropic,
 	) {
-		this.client = client ?? new Anthropic({ apiKey: settings.apiKey, timeout: settings.timeoutMs, maxRetries: 1 });
+		this.client = client ?? new Anthropic({ apiKey: settings.apiKey, timeout: settings.timeoutMs, maxRetries: 0 });
 	}
 
 	public async generateText(request: AiTextRequest): Promise<AiTextResult> {

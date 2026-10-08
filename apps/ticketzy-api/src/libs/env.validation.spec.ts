@@ -27,7 +27,7 @@ describe('SEAT_HOLD_SECONDS', () => {
 
 describe('AI settings', () => {
 	it('is off by default, the key is optional and the model is a small one', () => {
-		expect(getAiConfig({})).toEqual({ enabled: false, provider: 'anthropic', apiKey: '', model: 'claude-haiku-4-5', timeoutMs: 20000, rateLimitPerMinute: 10 });
+		expect(getAiConfig({})).toEqual({ enabled: false, provider: 'anthropic', apiKey: '', model: 'claude-haiku-4-5', timeoutMs: 15000, rateLimitPerMinute: 10 });
 		expect(getAiConfig({ AI_ENABLED: 'true', ANTHROPIC_API_KEY: ' k ', ANTHROPIC_MODEL: 'm' })).toMatchObject({ enabled: true, apiKey: 'k', model: 'm' });
 	});
 

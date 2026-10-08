@@ -4,7 +4,7 @@ import { ObjectId } from 'bson';
  * A tiny in-memory stand-in for a Mongoose model, for tests that need state to carry across calls
  * (seat races, payment idempotency). Each operation runs synchronously when exec() is called, so a
  * findOneAndUpdate is atomic exactly like the real one; only the matching subset the services use is supported:
- * equality, $or, $and, $in, $nin, $ne, $gt, $gte, $lt, $lte and the $set, $unset, $inc update operators.
+ * equality, regular expressions, $or, $and, $in, $nin, $ne, $gt, $gte, $lt, $lte and the $set, $unset, $inc update operators.
  */
 const same = (a: any, b: any): boolean => (a === undefined || a === null ? b === undefined || b === null : String(a) === String(b));
 const isObjectId = (value: any): boolean => value instanceof ObjectId;
@@ -16,6 +16,7 @@ const order = (a: any, b: any): number => {
 const time = (value: any): number => new Date(value).getTime();
 
 const matchesCondition = (value: any, condition: any): boolean => {
+	if (condition instanceof RegExp) return typeof value === 'string' && condition.test(value);
 	const isOperatorObject =
 		condition && typeof condition === 'object' && !(condition instanceof Date) && !(condition instanceof ObjectId) &&
 		Object.keys(condition).some((key) => key.startsWith('$'));

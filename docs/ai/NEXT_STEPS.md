@@ -48,6 +48,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | N24 | Schedule a retry for FAILED refunds of a cancelled event (the batch app could call the same loop), and show admins which orders failed; today `retryEventRefundsByAdmin` is manual | DECISIONS #56 |
 | N25 | Existing tickets have the old bare-HMAC `qrToken` and cannot be scanned; re-issue them if any real data exists. The scanner client must send `qrToken` (and optionally `eventId`) instead of `ticketCode` | DECISIONS #52 |
 | N26 | Smoke-test messaging against a dev DB and a real WebSocket client: the two partial unique indexes on `conversations`, the lookups of `getConversation`, header auth and first-message auth, the `Authorization` header is not sent by browsers so the frontend must use the `auth` message. Decide whether REJECTED and SUSPENDED organizers should read notifications (they cannot today, DECISIONS #58) and whether a conversation list needs a per-member socket room for live badges | DECISIONS #58, not run live |
+| N28 | Run `npm run seed:demo` once against a dev DB (twice, to see the cleanup), log in with each demo account, open the seat maps and the buyer's tickets; check the sections' `x`/`y` against what the frontend seat map expects (a 1000 x 700 canvas was assumed) | the seed is covered by unit tests with an in-memory model only (DECISIONS #62) |
 
 ## Frontend migration
 (See `FRONTEND_MIGRATION.md`.)

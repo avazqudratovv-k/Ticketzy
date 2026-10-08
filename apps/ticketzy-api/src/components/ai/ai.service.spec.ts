@@ -1,5 +1,5 @@
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
-import { AiClientService } from './ai-client.service';
+import { AI_RETRY_DELAY_MS, AiClientService } from './ai-client.service';
 import { AiModerationService } from './ai-moderation.service';
 import { AiTranslationService } from './ai-translation.service';
 import { ASSISTANT_TOOLS, AiToolsService, MAX_SEARCH_RESULTS } from './ai-tools.service';
@@ -84,7 +84,6 @@ describe('AiClientService: disabled AI and rate limit', () => {
 
 	it.each([
 		['a failed call', new AiProviderError('failed', 401, 'APIError'), Message.AI_REQUEST_FAILED],
-		['a timeout', new AiProviderError('timeout', undefined, 'TimeoutError'), Message.AI_TIMEOUT],
 		['an unexpected error', new Error('401 invalid key sk-test-key SECRET PROMPT'), Message.AI_REQUEST_FAILED],
 	])('turns %s into a clear message without leaking the key or the prompt', async (_name, failure, message) => {
 		const provider = makeProvider();
@@ -111,6 +110,26 @@ describe('AiClientService: disabled AI and rate limit', () => {
 		other.chat.mockRejectedValue(new AiProviderError('failed', 400));
 		await expect(makeClient(other).chat({ system: 's', messages: [], maxTokens: 10, tools: [] })).rejects.toThrow(Message.AI_REQUEST_FAILED);
 		expect(other.chat).toHaveBeenCalledTimes(1);
+	});
+
+	it('retries a timeout once after 1 second, and says busy when both attempts time out', async () => {
+		jest.useFakeTimers();
+		try {
+			const provider = makeProvider();
+			provider.generateText.mockRejectedValue(new AiProviderError('timeout', undefined, 'TimeoutError'));
+			const result = makeClient(provider).generateText({ system: 's', messages: [], maxTokens: 10 }).catch((err) => err);
+			await jest.advanceTimersByTimeAsync(AI_RETRY_DELAY_MS - 1);
+			expect(provider.generateText).toHaveBeenCalledTimes(1);
+			await jest.advanceTimersByTimeAsync(1);
+			expect((await result).message).toBe(Message.AI_BUSY);
+			expect(provider.generateText).toHaveBeenCalledTimes(2);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it('waits 1 second before the retry', () => {
+		expect(AI_RETRY_DELAY_MS).toBe(1000);
 	});
 
 	it('turns text that is not JSON into AI_INVALID_RESPONSE', async () => {

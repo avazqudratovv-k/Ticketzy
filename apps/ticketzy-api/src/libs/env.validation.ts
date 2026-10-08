@@ -21,7 +21,7 @@ export const getSeatHoldSeconds = (env: Record<string, any> = process.env): numb
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'; // flash models have a free tier
-export const DEFAULT_AI_TIMEOUT_MS = 20000;
+export const DEFAULT_AI_TIMEOUT_MS = 15000;
 export const DEFAULT_AI_RATE_LIMIT_PER_MINUTE = 10;
 
 export type AiProviderName = 'anthropic' | 'gemini';

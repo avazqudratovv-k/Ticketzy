@@ -7,6 +7,12 @@ const make = (create: jest.Mock) => new AnthropicProvider(settings, { messages: 
 const reply = (content: any[]) => ({ model: 'claude-haiku-4-5', stop_reason: 'end_turn', content });
 
 describe('AnthropicProvider', () => {
+	it('gives the SDK client the configured timeout and no SDK-level retries (the single retry is the client service\'s)', () => {
+		const client = (new AnthropicProvider({ ...settings, timeoutMs: 15000 }) as any).client;
+		expect(client.timeout).toBe(15000);
+		expect(client.maxRetries).toBe(0);
+	});
+
 	it('generateText sends the neutral messages and joins the text blocks', async () => {
 		const create = jest.fn().mockResolvedValue(reply([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]));
 		const result = await make(create).generateText({ system: 'sys', messages: [{ role: 'user', text: 'hi' }], maxTokens: 50 });

@@ -13,10 +13,11 @@ import {
 } from './providers/ai-provider';
 import { AI_PROVIDER_FACTORY, AiProviderFactory } from './providers/create-ai-provider';
 
-export const AI_RETRY_DELAY_MS = 800;
+export const AI_RETRY_DELAY_MS = 1000;
 
-/** the vendor said 503/504: overloaded or gateway timeout, worth one more try */
-const isBusyError = (err: unknown): boolean => err instanceof AiProviderError && (Number(err.status) === 503 || Number(err.status) === 504);
+/** the vendor said 503/504 (overloaded, gateway timeout) or our own per-request timeout hit: worth one more try */
+const isBusyError = (err: unknown): boolean =>
+	err instanceof AiProviderError && (err.kind === 'timeout' || Number(err.status) === 503 || Number(err.status) === 504);
 
 /**
  * The only place the AI services reach a model vendor (the browser never does), through the AiProvider of AI_PROVIDER.
@@ -78,7 +79,7 @@ export class AiClientService {
 		return this.run((provider) => provider.chat(request));
 	}
 
-	/** one retry after a 503/504 (the model is overloaded), then AI_BUSY */
+	/** one retry, 1 second later, after a 503/504 or a timeout, then AI_BUSY */
 	private async runWithRetry<T>(call: () => Promise<T>): Promise<T> {
 		try {
 			return await call();
@@ -99,7 +100,7 @@ export class AiClientService {
 				this.logger.error(`AI request failed: provider=${config.provider} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
 				if (err.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
 				if (isBusyError(err)) throw new ServiceUnavailableException(Message.AI_BUSY);
-				throw new ServiceUnavailableException(err.kind === 'timeout' ? Message.AI_TIMEOUT : Message.AI_REQUEST_FAILED);
+				throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
 			}
 			this.logger.error(`AI request failed: provider=${config.provider} ${err?.constructor?.name ?? 'Error'}`);
 			throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);

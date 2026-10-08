@@ -416,3 +416,34 @@ Backend only. No new dependency.
 | `npm run build` | pass |
 | `npx jest` (482 tests, 26 suites) | pass |
 | Live Gemini call | not run: no key available |
+
+
+## 21. Demo data seed (`npm run seed:demo`)
+
+Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin only) is unchanged.
+
+- `apps/ticketzy-api/src/seed-demo.ts` boots a Nest application context (`DatabaseModule` + `ComponentsModule`, no GraphQL or sockets) and drives the **real services**: `OrganizerService` (verify / reject), `VenueService.createVenue`, `EventService.createEvent` / `submitEventForApproval` / `approveEventByAdmin` (generates the seats) / `rejectEventByAdmin` / `cancelEventByAdmin` (refunds through the real hook), `TicketTypeService`, `SeatService.holdSeats`, `OrderService.createCheckout` / `payOrder` (QR tokens signed by `buildQrToken`), `RefundService.requestRefund`, `TicketService.checkInTicket`, `ConversationService`, `NotificationService`. `libs/demo-seed.ts` holds the pure parts (guard, accounts, venue and event data, cleanup, seat block picker, summary) so they are unit tested
+- **Safe to re-run**: demo data is recognised by the fixed email domain `@ticketzy.demo` (no schema change). `removeDemoData` finds the non-admin members with that address and deletes everything that hangs off them (their venues and events, the seats, ticket types, orders, tickets, payments and refunds of those events and buyers, conversations and messages, notifications and audit entries about them), then the members; the run then creates it all again. ADMIN members are never removed
+- **Guard**: refuses to run when `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`; the check runs before anything connects. The AI is forced off for the run (submit would start a moderation call) and `SEAT_HOLD_SECONDS` is set to 300 for this process only
+- **Accounts** (password = `DEMO_PASSWORD`, default `Demo1234!`, min 8 characters): `buyer@ticketzy.demo` (USER), `organizer@ticketzy.demo` (ACTIVE, owns every event), `pending@ticketzy.demo` (PENDING), `rejected@ticketzy.demo` (REJECTED with `rejectReason`), plus `crowd@ticketzy.demo`, a filler USER that buys the seat blocks that make the seat maps and sales look alive (orders must belong to someone; the task listed one buyer). The admin is the **existing** one from `npm run seed`: it is never created, changed or given the demo password, so it logs in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`; the seed stops with a clear message when no admin exists
+- **Venues** (Asia/Seoul, layouts validated by the real `createVenue`): Harbor Sky Stadium, Incheon (1200 standing + 4 tiers of seated sections, 864 seats); Hanbit Concert Hall, Seoul (VIP boxes, two orchestra blocks, balcony, 408 seats); Laugh Cellar Comedy Club, Busan (2 sections, 64 seats)
+- **Events** (13, KRW, placeholder images from picsum.photos, titles and descriptions in en / ko / ru / uz): 7 APPROVED (concert x3, football x2, comedy, other; 5 RESERVED with generated seats, 2 GENERAL), 2 PENDING, 1 DRAFT, 1 REJECTED (with reason), 1 CANCELLED (reason; its two orders were refunded by the real cancel), 1 ENDED. Upcoming dates are 31 to 88 days away. The ENDED event is created and sold as a normal future event, then its dates and status are moved into the past with one update (the status machine only ends events through the batch job)
+- **Buyer**: 2 PAID orders (2 football seats; 2 seats of the ENDED comedy showcase, one of the two tickets checked in by the organizer), 1 REFUNDED order (comedy, refunded through `requestRefund`, so it has a Refund record, a refunded payment, REFUNDED tickets and freed seats)
+- **Chats**: a support conversation (4 messages) and an event conversation about the PENDING jazz event (3 messages) between the ACTIVE organizer and the admin, sent through `sendMessage`. Notifications come from the flows above (verify, reject, approve, reject event, cancel, payment, refund, messages) plus an event reminder for the buyer; a few are marked read
+- The summary prints the logins (emails only) and the name `DEMO_PASSWORD`, never a password
+- `.env.example` documents `DEMO_PASSWORD` and `ALLOW_DEMO_SEED`; `test/fake-model.ts` matches regular expressions
+
+**Tests** (`libs/demo-seed.spec.ts`, 21): the production guard (refused without the flag, allowed with `true`, cleanup and create never called when refused), the password default and minimum, the account, venue and event definitions (mix of categories and statuses, dates, four translations, every seated tier covered by a ticket type, no client quantity for RESERVED events, valid layouts), idempotency with the in-memory model (two or three runs leave one copy, real members, admins on any address and their data untouched, cleanup before create every time, no create when the cleanup fails), the seat block picker, and the summary (emails and variable name, no password).
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (503 tests, 27 suites) | pass |
+| `NODE_ENV=production npm run seed:demo` | refused before connecting, as intended |
+| `npm run seed:demo` against a real MongoDB | **not run**: it writes to the dev database in `.env`, so it is left for the owner (see N28) |
+
+## AI request timeout and 1 second retry (decision #63)
+- `AI_TIMEOUT_MS` default 15000 (`.env.example`, `env.validation.ts`); Anthropic client `maxRetries: 0`; the retry in `AiClientService` now waits 1000 ms and also covers provider timeouts; two failed attempts return `AI_BUSY`.
+- Tests: timeout retried once after exactly 1 s then `AI_BUSY` (fake timers), delay constant, Anthropic SDK client gets the timeout and no SDK retries, new default in `env.validation.spec.ts`.
+- `tsc` (api and batch), `npm run build` and `npx jest` (505 tests, 27 suites) pass.
