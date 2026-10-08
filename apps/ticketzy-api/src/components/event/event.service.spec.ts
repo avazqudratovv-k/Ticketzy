@@ -392,6 +392,72 @@ describe('EventService', () => {
 		});
 	});
 
+	describe('cancelMyEvent (organizer)', () => {
+		const input = (reason = 'Artist is ill') => ({ eventId: 'e1', reason }) as any;
+
+		it('needs a reason and never touches the event without one', async () => {
+			await expect(service.cancelMyEvent('org1' as any, input('  '))).rejects.toThrow(Message.EVENT_CANCEL_REASON_REQUIRED);
+			expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('filters by owner and APPROVED, then audits, notifies and refunds like the admin path', async () => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.CANCELLED })));
+			const result = await service.cancelMyEvent('org1' as any, input());
+
+			const [filter, update] = eventModel.findOneAndUpdate.mock.calls[0];
+			expect(filter).toEqual({ _id: 'e1', eventStatus: { $in: [EventStatus.APPROVED] }, organizerId: 'org1' });
+			expect(update.$set).toEqual({ eventStatus: EventStatus.CANCELLED, cancelReason: 'Artist is ill' });
+			expect(result.eventStatus).toBe(EventStatus.CANCELLED);
+			expect(auditLogService.record).toHaveBeenCalledWith(
+				expect.objectContaining({ actorId: 'org1', action: AuditAction.EVENT_CANCELLED, meta: expect.objectContaining({ reason: 'Artist is ill' }) }),
+			);
+			expect(notificationService.createNotification).toHaveBeenCalledWith(
+				expect.objectContaining({ notificationType: NotificationType.EVENT_CANCELLED }),
+			);
+			expect(memberService.memberStatsEditor).toHaveBeenCalledWith({ _id: 'org1', targetKey: 'memberEvents', modifier: -1 });
+			expect(refundService.refundOrdersForCancelledEvent).toHaveBeenCalledWith('org1', expect.objectContaining({ _id: 'e1' }));
+		});
+
+		it("refuses another organizer's event and a missing one the same way, without side effects", async () => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(null));
+			eventModel.findById.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED, organizerId: 'someoneElse' })));
+			await expect(service.cancelMyEvent('org1' as any, input())).rejects.toThrow(Message.NOT_ALLOWED_REQUEST);
+
+			eventModel.findById.mockReturnValue(lean(null));
+			await expect(service.cancelMyEvent('org1' as any, input())).rejects.toThrow(Message.NOT_ALLOWED_REQUEST);
+
+			expect(auditLogService.record).not.toHaveBeenCalled();
+			expect(refundService.refundOrdersForCancelledEvent).not.toHaveBeenCalled();
+		});
+
+		it.each([EventStatus.CANCELLED, EventStatus.ENDED])('refuses an event that is already %s', async (status) => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(null));
+			eventModel.findById.mockReturnValue(lean(draft({ eventStatus: status })));
+			await expect(service.cancelMyEvent('org1' as any, input())).rejects.toThrow(Message.EVENT_ALREADY_CLOSED);
+			expect(auditLogService.record).not.toHaveBeenCalled();
+			expect(refundService.refundOrdersForCancelledEvent).not.toHaveBeenCalled();
+		});
+
+		it.each([EventStatus.DRAFT, EventStatus.PENDING, EventStatus.REJECTED])('refuses a %s event with the transition error', async (status) => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(null));
+			eventModel.findById.mockReturnValue(lean(draft({ eventStatus: status })));
+			await expect(service.cancelMyEvent('org1' as any, input())).rejects.toThrow(Message.INVALID_EVENT_TRANSITION);
+		});
+
+		it('a refund run that throws never fails the cancellation', async () => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.CANCELLED })));
+			refundService.refundOrdersForCancelledEvent.mockRejectedValue(new Error('db down'));
+			const result = await service.cancelMyEvent('org1' as any, input());
+			expect(result.eventStatus).toBe(EventStatus.CANCELLED);
+		});
+
+		it('the admin path is unchanged: no owner filter', async () => {
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.CANCELLED })));
+			await service.cancelEventByAdmin('admin1' as any, input());
+			expect(eventModel.findOneAndUpdate.mock.calls[0][0].organizerId).toBeUndefined();
+		});
+	});
+
 	describe('getEventsByAdmin', () => {
 		it('filters by status, category, organizer and escaped text', async () => {
 			eventModel.aggregate.mockReturnValue(exec([{ list: [{}], metaCounter: [] }]));
@@ -794,7 +860,7 @@ describe('EventResolver access', () => {
 		},
 	);
 
-	it.each(['createEvent', 'updateEvent', 'submitEventForApproval', 'getMyEvents'] as (keyof EventResolver)[])(
+	it.each(['createEvent', 'updateEvent', 'submitEventForApproval', 'getMyEvents', 'cancelMyEvent'] as (keyof EventResolver)[])(
 		'%s is for active organizers',
 		(name) => {
 			expect(rolesOf(name)).toEqual([MemberType.ORGANIZER]);

@@ -2,6 +2,8 @@ import { BadRequestException, InternalServerErrorException } from '@nestjs/commo
 import { ObjectId } from 'bson';
 import { FakeModel } from '../../../test/fake-model';
 import { OrderService } from './order.service';
+import { OrderResolver } from './order.resolver';
+import { Message } from '../../libs/enums/common.enum';
 import { EventStatus, SeatingType } from '../../libs/enums/event.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { OrderStatus } from '../../libs/enums/ticket.enum';
@@ -165,5 +167,75 @@ describe('OrderService order queries (event and venue)', () => {
 		expect(list.find((s) => s.$skip !== undefined).$skip).toBe(5);
 		expectVenueNested(list);
 		expect(orders.aggregate).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('OrderService.getMyEventOrders (organizer)', () => {
+	const query = (value: any): any => ({
+		exec: jest.fn().mockResolvedValue(value),
+		select: () => ({ lean: () => query(value) }),
+		then: (resolve: any, reject: any) => Promise.resolve(value).then(resolve, reject),
+	});
+	const OTHER = oid();
+	let orders: any;
+	let events: any;
+	let service: OrderService;
+
+	beforeEach(() => {
+		orders = { aggregate: jest.fn().mockReturnValue(query([{ list: [], metaCounter: [] }])) };
+		events = {
+			exists: jest.fn().mockImplementation((filter) => query(String(filter.organizerId) === String(ORG) ? { _id: E } : null)),
+			find: jest.fn().mockReturnValue(query([{ _id: E }, { _id: A }])),
+		};
+		service = new OrderService(orders, events, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+	});
+
+	const pipeline = () => orders.aggregate.mock.calls[0][0];
+
+	it("without an eventId it matches only orders on the organizer's own events", async () => {
+		await service.getMyEventOrders(ORG as any, { page: 1, limit: 10 } as any);
+
+		expect(events.find).toHaveBeenCalledWith({ organizerId: ORG });
+		expect(pipeline()[0].$match.eventId.$in.map(String)).toEqual([String(E), String(A)]);
+	});
+
+	it('an organizer without events matches nothing', async () => {
+		events.find.mockReturnValue(query([]));
+		await service.getMyEventOrders(ORG as any, { page: 1, limit: 10 } as any);
+		expect(pipeline()[0].$match.eventId).toEqual({ $in: [] });
+	});
+
+	it('filters by own event and status, and paginates', async () => {
+		await service.getMyEventOrders(ORG as any, { page: 3, limit: 5, eventId: String(E), orderStatus: OrderStatus.PAID } as any);
+
+		expect(events.exists).toHaveBeenCalledWith({ _id: expect.anything(), organizerId: ORG });
+		const match = pipeline()[0].$match;
+		expect(String(match.eventId)).toBe(String(E));
+		expect(match.orderStatus).toBe(OrderStatus.PAID);
+		expect(pipeline().find((s) => s.$facet).$facet.list.find((s) => s.$skip !== undefined).$skip).toBe(10);
+	});
+
+	it("refuses another organizer's event and an unknown one, before any order is read", async () => {
+		await expect(service.getMyEventOrders(OTHER as any, { page: 1, limit: 10, eventId: String(E) } as any)).rejects.toThrow(
+			Message.NOT_ALLOWED_REQUEST,
+		);
+		expect(orders.aggregate).not.toHaveBeenCalled();
+	});
+
+	it('the buyer is reduced to a nickname: no email or phone in the pipeline', async () => {
+		await service.getMyEventOrders(ORG as any, { page: 1, limit: 10 } as any);
+		const list = pipeline().find((s) => s.$facet).$facet.list;
+
+		const buyer = list.find((s) => s.$lookup?.from === 'members').$lookup;
+		expect(buyer.pipeline.find((s) => s.$project).$project).toEqual({ memberNick: 1 });
+		const stripped = list.find((s) => s.$project && s.$project.buyer === 0).$project;
+		expect(stripped).toMatchObject({ buyer: 0, buyerId: 0 });
+		expect(JSON.stringify(list)).not.toMatch(/memberEmail|memberPhone/);
+	});
+
+	it('is for active organizers only', () => {
+		expect(Reflect.getMetadata('roles', OrderResolver.prototype.getMyEventOrders)).toEqual(['ORGANIZER']);
+		const guards = (Reflect.getMetadata('__guards__', OrderResolver.prototype.getMyEventOrders) ?? []).map((g: any) => g.name);
+		expect(guards).toEqual(['RolesGuard', 'ActiveOrganizerGuard']);
 	});
 });

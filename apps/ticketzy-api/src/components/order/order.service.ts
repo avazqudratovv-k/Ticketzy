@@ -3,8 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
 import * as moment from 'moment';
-import { Order, Orders } from '../../libs/dto/order/order';
-import { CheckoutInput, OrdersInquiry } from '../../libs/dto/order/order.input';
+import { Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
+import { CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
 import { Ticket } from '../../libs/dto/ticket/ticket';
 import { Event } from '../../libs/dto/event/event';
 import { Member } from '../../libs/dto/member/member';
@@ -13,7 +13,7 @@ import { Direction, Message } from '../../libs/enums/common.enum';
 import { SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentSimulation, TicketStatus } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
-import { lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
+import { lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
 import { buildQrToken } from '../../libs/qr-token';
@@ -370,6 +370,73 @@ export class OrderService {
 		const match: T = {};
 		if (input.orderStatus) match.orderStatus = input.orderStatus;
 		return await this.listOrders(match, input);
+	}
+
+	/**
+	 * Orders on the organizer's own events only. A foreign or unknown eventId is refused, so the filter cannot be used
+	 * to probe other organizers' events. The buyer is reduced to a nickname in the pipeline itself.
+	 */
+	public async getMyEventOrders(organizerId: ObjectId, input: OrganizerOrdersInquiry): Promise<OrganizerOrders> {
+		const match: T = {};
+		if (input.eventId) {
+			const eventId = shapeIntoMongoObjectId(input.eventId);
+			const owned = await this.eventModel.exists({ _id: eventId, organizerId: organizerId });
+			if (!owned) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+			match.eventId = eventId;
+		} else {
+			const own = await this.eventModel.find({ organizerId: organizerId }).select('_id').lean().exec();
+			match.eventId = { $in: own.map((event) => event._id) };
+		}
+		if (input.orderStatus) match.orderStatus = input.orderStatus;
+
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC, _id: -1 };
+		const result = await this.orderModel
+			.aggregate([
+				{ $match: match },
+				{ $sort: sort },
+				{
+					$facet: {
+						list: [
+							{ $skip: (input.page - 1) * input.limit },
+							{ $limit: input.limit },
+							lookupEvent,
+							{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
+							{
+								$lookup: {
+									from: 'members',
+									let: { buyerId: '$buyerId' },
+									pipeline: [{ $match: { $expr: { $eq: ['$_id', '$$buyerId'] } } }, { $project: { memberNick: 1 } }],
+									as: 'buyer',
+								},
+							},
+							{
+								$lookup: {
+									from: 'eventSeats',
+									let: { seatIds: '$seatIds' },
+									pipeline: [
+										{ $match: { $expr: { $in: ['$_id', { $ifNull: ['$$seatIds', []] }] } } },
+										{ $sort: { sectionKey: 1, row: 1, number: 1 } },
+										{ $project: { _id: 0, sectionKey: 1, row: 1, number: 1 } },
+									],
+									as: 'seats',
+								},
+							},
+							{
+								$addFields: {
+									buyerNick: { $arrayElemAt: ['$buyer.memberNick', 0] },
+									ticketCount: { $sum: '$items.quantity' },
+								},
+							},
+							{ $project: { buyer: 0, buyerId: 0, seatIds: 0 } },
+						],
+						metaCounter: [{ $count: 'total' }],
+					},
+				},
+			])
+			.exec();
+
+		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		return result[0];
 	}
 
 	private async listOrders(match: T, input: OrdersInquiry): Promise<Orders> {

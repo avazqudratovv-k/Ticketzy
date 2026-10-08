@@ -471,3 +471,14 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 ## Event and venue on order and ticket queries (decision #68)
 - `getOrder` now joins the event (it returned `eventData: null` before); `getMyOrders`, `getAllOrdersByAdmin`, `getMyTickets` and `getTicket` also fill `eventData.venueData`. New `lookupEventWithVenue` in `libs/config.ts`; single aggregation per query, no extra queries, no view counting.
 - Tests: pipeline checks for the venue join in orders (`getOrder` owner match and NO_DATA_FOUND, `getMyOrders` per page) and tickets (list, time filter, `getTicket`).
+
+## Organizer cancel, organizer orders list, view race (decision #69)
+- `cancelMyEvent`: organizer cancel through the shared `cancelEvent` (same transition, refunds, notifications, audit as the admin cancel); ownership in the update filter; new message `EVENT_ALREADY_CLOSED`.
+- `getMyEventOrders`: paginated orders of the organizer's own events, filter by event and status, buyer nickname only, seats, ticket count, totals.
+- `ViewService.recordView`: atomic upsert with one duplicate-key retry; never throws (fixes `E11000 ... views`).
+- Tests: organizer cancel (reason, owner filter, side effects, foreign and missing event, CANCELLED/ENDED, other statuses, refund failure, admin unchanged, guards), organizer orders (own events, filters, access control, nickname only, guards), views (concurrent calls, retry, swallowed errors). `tsc` (api and batch) and `npm run build` pass; `npx jest`: 558 pass, 2 fail in `refund.service.spec` (they fail identically on the untouched tree).
+
+## Refund test flakiness (decision #70)
+- Cause: two tests assumed an event one hour away is always past the buyer deadline; it is not between 23:00 and 23:59 Seoul time. Production logic (`getRefundDeadline`, `RefundService.assess`) is correct and unchanged.
+- `refund.service.spec.ts` runs on a fixed fake clock plus a nine-clock regression sweep; `refund-policy.spec.ts` has the boundary, timezone and DST cases.
+- Verified with `TZ` set to Asia/Seoul, UTC, America/Los_Angeles, Pacific/Kiritimati and Australia/Lord_Howe: 62 refund tests pass each time. `tsc` (api and batch), `npm run build` and `npx jest` (587 tests, 29 suites) pass.

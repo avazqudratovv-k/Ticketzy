@@ -154,7 +154,21 @@ const build = (options: Options = {}) => {
 	};
 };
 
+/**
+ * Every test runs on a fixed clock: 2026-12-01T12:00:00Z, which is 21:00 in Seoul, so "starts in an hour" is the same
+ * Seoul day and the buyer deadline has passed. Without it those tests depended on the time of day they were run at.
+ */
+const FIXED_NOW = '2026-12-01T12:00:00Z';
+const freezeClock = (iso: string) =>
+	jest.useFakeTimers({
+		now: new Date(iso),
+		doNotFake: ['nextTick', 'setImmediate', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'clearImmediate', 'queueMicrotask'],
+	});
+
 describe('RefundService', () => {
+	beforeEach(() => freezeClock(FIXED_NOW));
+	afterEach(() => jest.useRealTimers());
+
 	describe('getRefundQuote', () => {
 		it('gives the deadline in the venue timezone, that it is refundable and the amount', async () => {
 			const startAt = new Date(Date.now() + 10 * 86400000);
@@ -387,6 +401,30 @@ describe('RefundService', () => {
 			const order = await ctx.addPaidOrder();
 			at('2026-12-24T10:00:00Z');
 			expect((await ctx.service.getRefundQuote(BUYER as any, order._id)).venueTimezone).toBe('Asia/Seoul');
+		});
+	});
+
+	describe('quote for an event that starts one hour from now, at every time of day (regression)', () => {
+		// The old tests assumed this event is always past the deadline. It is only so when the hour does not cross midnight
+		// in the venue: at 23:30 Seoul the event starts at 00:30 tomorrow and the buyer may refund until the end of today.
+		const seoulDay = (at: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(at);
+		const clocks = ['00:00:00.000', '00:30:00.000', '10:00:00.000', '14:59:59.999', '15:00:00.000', '20:00:00.000', '22:59:59.999', '23:00:00.000', '23:59:59.999'];
+
+		it.each(clocks)('Seoul wall clock %s', async (time) => {
+			// the Seoul wall time is `time`: subtract the 9 hours to get the UTC instant
+			const wall = new Date(`2026-12-10T${time}Z`);
+			const now = new Date(wall.getTime() - 9 * 3600000);
+			freezeClock(now.toISOString());
+			const startAt = new Date(now.getTime() + 3600000);
+
+			const ctx = build({ startAt, timezone: 'Asia/Seoul' });
+			const order = await ctx.addPaidOrder();
+			const quote = await ctx.service.getRefundQuote(BUYER as any, order._id);
+
+			const sameDay = seoulDay(now) === seoulDay(startAt);
+			expect(quote.refundable).toBe(!sameDay);
+			if (sameDay) expect(quote.reason).toBe(Message.REFUND_DEADLINE_PASSED);
+			expect(quote.deadline.getTime()).toBeLessThan(startAt.getTime());
 		});
 	});
 

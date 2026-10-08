@@ -17,18 +17,32 @@ export class ViewService {
 
 	constructor(@InjectModel('View') private readonly viewModel: Model<View>) {}
 
+	/**
+	 * Idempotent and safe under concurrent requests: one upsert on the unique key, so only the call that inserts gets a View.
+	 * When two upserts race, the loser hits the duplicate key (11000); it retries once and then matches the existing view.
+	 * It never throws: a failed view must not fail the request that asked for it.
+	 */
 	public async recordView(input: ViewInput): Promise<View | null> {
-		const viewExist = await this.checkViewExistence(input);
-		if (!viewExist) {
-			this.logger.log('- New View Insert -');
-			return await this.viewModel.create(input);
-		} else return null;
-	}
-
-	private async checkViewExistence(input: ViewInput): Promise<View | null> {
 		const { memberId, viewRefId, viewGroup } = input;
-		const search = { memberId: memberId, viewRefId: viewRefId, viewGroup: viewGroup };
-		return await this.viewModel.findOne(search).exec();
+		const filter = { memberId: memberId, viewRefId: viewRefId, viewGroup: viewGroup };
+
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			try {
+				const now = new Date();
+				// timestamps are set by hand so that seeing a view again does not touch its updatedAt (the visited list sorts by it)
+				const result = await this.viewModel
+					.updateOne(filter, { $setOnInsert: { ...filter, createdAt: now, updatedAt: now } }, { upsert: true, timestamps: false })
+					.exec();
+				if (!result.upsertedCount) return null; // already seen
+				this.logger.log('- New View Insert -');
+				return { _id: result.upsertedId, ...filter } as unknown as View;
+			} catch (err) {
+				if (err?.code === 11000 && attempt === 1) continue;
+				if (err?.code !== 11000) this.logger.error(`View NOT RECORDED: ${err.message}`);
+				return null;
+			}
+		}
+		return null;
 	}
 
 	public async getVisitedEvents(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {

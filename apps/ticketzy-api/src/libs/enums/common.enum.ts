@@ -33,6 +33,7 @@ export enum Message {
 	EVENT_NOT_EDITABLE = 'This event cannot be edited in its current status!',
 	EVENT_REJECT_REASON_REQUIRED = 'A reason is required to reject an event!',
 	EVENT_CANCEL_REASON_REQUIRED = 'A reason is required to cancel an event!',
+	EVENT_ALREADY_CLOSED = 'This event is already cancelled or ended!',
 	CANNOT_APPROVE_OWN_EVENT = 'Organizers cannot approve their own events!',
 	EVENT_SUBMIT_TITLE_REQUIRED = 'The event needs a title before it can be submitted!',
 	EVENT_SUBMIT_IMAGE_REQUIRED = 'The event needs at least one image before it can be submitted!',

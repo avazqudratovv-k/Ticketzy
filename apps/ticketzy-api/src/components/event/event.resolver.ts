@@ -126,6 +126,18 @@ export class EventResolver {
 
 	@Roles(MemberType.ORGANIZER)
 	@UseGuards(RolesGuard, ActiveOrganizerGuard)
+	@Mutation(() => Event)
+	public async cancelMyEvent(
+		@Args('input') input: EventReasonInput,
+		@AuthMember('_id') organizerId: ObjectId,
+	): Promise<Event> {
+		this.logger.log('Mutation: cancelMyEvent');
+		input.eventId = shapeIntoMongoObjectId(input.eventId);
+		return await this.eventService.cancelMyEvent(organizerId, input);
+	}
+
+	@Roles(MemberType.ORGANIZER)
+	@UseGuards(RolesGuard, ActiveOrganizerGuard)
 	@Query((returns) => Events)
 	public async getMyEvents(
 		@Args('input') input: OrganizerEventsInquiry,

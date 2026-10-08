@@ -514,8 +514,21 @@ export class EventService {
 	}
 
 	public async cancelEventByAdmin(adminId: ObjectId, input: EventReasonInput): Promise<Event> {
+		return await this.cancelEvent(adminId, input);
+	}
+
+	/**
+	 * An ACTIVE organizer (the resolver guards that) cancels their own event: same transition, refunds, notifications
+	 * and audit log as the admin path. Somebody else's event looks the same as a missing one.
+	 */
+	public async cancelMyEvent(organizerId: ObjectId, input: EventReasonInput): Promise<Event> {
+		return await this.cancelEvent(organizerId, input, organizerId);
+	}
+
+	/** shared by both cancel mutations; ownerId is set when the caller may only cancel their own event */
+	private async cancelEvent(actorId: ObjectId, input: EventReasonInput, ownerId?: ObjectId): Promise<Event> {
 		const reason = this.requireReason(input.reason, Message.EVENT_CANCEL_REASON_REQUIRED);
-		const result = await this.changeStatusByAdmin(adminId, input.eventId, 'cancel', reason);
+		const result = await this.changeStatusByAdmin(actorId, input.eventId, 'cancel', reason, ownerId);
 
 		// the organizer's active event counter drops once, when an event is cancelled
 		try {
@@ -523,7 +536,7 @@ export class EventService {
 		} catch (err) {
 			this.logger.error(`memberEvents NOT DECREMENTED for cancelled event ${result._id}: ${err.message}`);
 		}
-		await this.refundOrdersForCancelledEvent(result, adminId);
+		await this.refundOrdersForCancelledEvent(result, actorId);
 		return result;
 	}
 
@@ -550,6 +563,7 @@ export class EventService {
 		eventId: ObjectId,
 		action: 'approve' | 'reject' | 'cancel',
 		reason?: string,
+		ownerId?: ObjectId,
 	): Promise<Event> {
 		const { from, to } = eventTransitions[action];
 		const update: T = { $set: { eventStatus: to } };
@@ -559,11 +573,18 @@ export class EventService {
 
 		const filter: T = { _id: eventId, eventStatus: { $in: from } };
 		if (action === 'approve') filter.organizerId = { $ne: adminId }; // nobody approves their own event
+		if (ownerId) filter.organizerId = ownerId;
 
 		const result = await this.eventModel.findOneAndUpdate(filter, update, { new: true }).exec();
 		if (!result) {
 			const current = await this.eventModel.findById(eventId).lean().exec();
+			if (ownerId && (!current || String(current.organizerId) !== String(ownerId))) {
+				throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+			}
 			if (!current) throw new BadRequestException(Message.NO_DATA_FOUND);
+			if (ownerId && action === 'cancel' && closedEventStatuses.includes(current.eventStatus)) {
+				throw new BadRequestException(Message.EVENT_ALREADY_CLOSED);
+			}
 			if (action === 'approve' && String(current.organizerId) === String(adminId)) {
 				throw new BadRequestException(Message.CANNOT_APPROVE_OWN_EVENT);
 			}

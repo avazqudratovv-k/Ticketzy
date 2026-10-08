@@ -2,12 +2,13 @@ import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { OrderService } from './order.service';
-import { Order, Orders } from '../../libs/dto/order/order';
-import { CheckoutInput, OrdersInquiry } from '../../libs/dto/order/order.input';
+import { Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
+import { CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
 import { PaymentSimulation } from '../../libs/enums/ticket.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { ActiveOrganizerGuard } from '../auth/guards/organizer.guard';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { shapeIntoMongoObjectId } from '../../libs/config';
@@ -58,6 +59,19 @@ export class OrderResolver {
 	): Promise<Orders> {
 		this.logger.log('Query: getMyOrders');
 		return await this.orderService.getMyOrders(memberId, input);
+	}
+
+	/** ORGANIZER */
+
+	@Roles(MemberType.ORGANIZER)
+	@UseGuards(RolesGuard, ActiveOrganizerGuard)
+	@Query(() => OrganizerOrders)
+	public async getMyEventOrders(
+		@Args('input') input: OrganizerOrdersInquiry,
+		@AuthMember('_id') organizerId: ObjectId,
+	): Promise<OrganizerOrders> {
+		this.logger.log('Query: getMyEventOrders');
+		return await this.orderService.getMyEventOrders(organizerId, input);
 	}
 
 	/** ADMIN */

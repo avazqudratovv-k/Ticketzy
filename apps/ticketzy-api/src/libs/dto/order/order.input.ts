@@ -66,3 +66,11 @@ export class OrdersInquiry {
 	@Field(() => OrderStatus, { nullable: true })
 	orderStatus?: OrderStatus;
 }
+
+/** orders on the organizer's own events; eventId and orderStatus are optional filters */
+@InputType()
+export class OrganizerOrdersInquiry extends OrdersInquiry {
+	@IsOptional()
+	@Field(() => String, { nullable: true })
+	eventId?: ObjectId;
+}
