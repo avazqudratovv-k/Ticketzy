@@ -3,6 +3,8 @@ import { registerEnumType } from '@nestjs/graphql';
 export enum EventCategory {
 	CONCERT = 'CONCERT',
 	SPORT = 'SPORT',
+	FOOTBALL = 'FOOTBALL',
+	COMEDY = 'COMEDY',
 	THEATER = 'THEATER',
 	CONFERENCE = 'CONFERENCE',
 	FESTIVAL = 'FESTIVAL',

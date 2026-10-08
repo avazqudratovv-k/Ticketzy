@@ -13,6 +13,11 @@ import {
 } from './providers/ai-provider';
 import { AI_PROVIDER_FACTORY, AiProviderFactory } from './providers/create-ai-provider';
 
+export const AI_RETRY_DELAY_MS = 800;
+
+/** the vendor said 503/504: overloaded or gateway timeout, worth one more try */
+const isBusyError = (err: unknown): boolean => err instanceof AiProviderError && (Number(err.status) === 503 || Number(err.status) === 504);
+
 /**
  * The only place the AI services reach a model vendor (the browser never does), through the AiProvider of AI_PROVIDER.
  * Everything is read at call time, so a missing key or AI_ENABLED=false only turns the AI operations off:
@@ -73,15 +78,27 @@ export class AiClientService {
 		return this.run((provider) => provider.chat(request));
 	}
 
+	/** one retry after a 503/504 (the model is overloaded), then AI_BUSY */
+	private async runWithRetry<T>(call: () => Promise<T>): Promise<T> {
+		try {
+			return await call();
+		} catch (err) {
+			if (!isBusyError(err)) throw err;
+			await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
+			return call();
+		}
+	}
+
 	/** one model call; every failure becomes a clear Message, with only the error type and status in the log */
 	private async run<T>(call: (provider: AiProvider) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
 		try {
-			return await call(this.getProvider(config));
+			return await this.runWithRetry(() => call(this.getProvider(config)));
 		} catch (err) {
 			if (err instanceof AiProviderError) {
 				this.logger.error(`AI request failed: provider=${config.provider} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
 				if (err.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
+				if (isBusyError(err)) throw new ServiceUnavailableException(Message.AI_BUSY);
 				throw new ServiceUnavailableException(err.kind === 'timeout' ? Message.AI_TIMEOUT : Message.AI_REQUEST_FAILED);
 			}
 			this.logger.error(`AI request failed: provider=${config.provider} ${err?.constructor?.name ?? 'Error'}`);

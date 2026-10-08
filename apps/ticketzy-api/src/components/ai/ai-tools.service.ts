@@ -30,16 +30,16 @@ export const ASSISTANT_TOOLS: AiToolDefinition[] = [
 	{
 		name: 'search_events',
 		description:
-			'Search upcoming public events. Every filter is optional. Returns at most 5 events. Use it to find events by category, city, date range, price or words in the title.',
+			'Search upcoming public events. Every filter is optional. Returns at most 5 events. Use it to find events by category, city, date range, price or words in the title or description. Only set category when the user clearly names it (for example concerts, football, comedy); otherwise leave it empty and never guess a category.',
 		parameters: {
 			type: 'object',
 			properties: {
-				category: { type: 'string', enum: Object.values(EventCategory) },
+				category: { type: 'string', enum: Object.values(EventCategory), description: 'only when the user clearly names the category, otherwise leave it empty; never guess' },
 				dateFrom: { type: 'string', description: 'ISO date, events starting on or after it (default: now)' },
 				dateTo: { type: 'string', description: 'ISO date, events starting on or before it' },
 				city: { type: 'string' },
 				maxPrice: { type: 'number', description: 'highest cheapest-ticket price' },
-				text: { type: 'string', description: 'words from the event title' },
+				text: { type: 'string', description: 'words from the event title or description, in any language' },
 			},
 			additionalProperties: false,
 		},
@@ -124,7 +124,10 @@ export class AiToolsService {
 			if (typeof args.maxPrice !== 'number' || !Number.isFinite(args.maxPrice) || args.maxPrice < 0) return this.fail('maxPrice must be a number.');
 			match.eventMinPrice = { $lte: args.maxPrice };
 		}
-		if (args.text !== undefined) match.eventTitle = { $regex: new RegExp(escapeRegExp(clip(args.text, 100)), 'i') };
+		if (args.text !== undefined) {
+			const regex = { $regex: new RegExp(escapeRegExp(clip(args.text, 100)), 'i') };
+			match.$or = [{ eventTitle: regex }, { eventDesc: regex }, { 'eventTranslations.title': regex }, { 'eventTranslations.description': regex }];
+		}
 		if (args.city !== undefined) {
 			const venueIds = await this.venueModel.distinct('_id', {
 				venueCity: { $regex: new RegExp(`^${escapeRegExp(clip(args.city, 100).trim())}$`, 'i') },

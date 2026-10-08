@@ -397,3 +397,22 @@ Backend only. Decision: DECISIONS #61. New dependency `@google/genai`. Behavior 
 | `npm run build` | pass |
 | `npx jest` (478 tests, 26 suites) | pass |
 | Live call to Gemini or Anthropic, GraphQL smoke test | not run: no keys available, the Nest app was not booted |
+
+
+## 20. Assistant search_events fixes
+
+Backend only. No new dependency.
+
+- `EventCategory` gets `FOOTBALL` and `COMEDY` (DECISIONS #14 updated). `SPORT`, `THEATER`, `CONFERENCE` and `FESTIVAL` stay: removing values is not cheap. The DTOs, schema and validation use the enum, so they pick the values up
+- `search_events`: the description and the `category` parameter tell the model to set category only when the user clearly names it, otherwise leave it empty and never guess
+- `text` now matches `eventTitle`, `eventDesc`, `eventTranslations.title` and `eventTranslations.description` (escaped, case-insensitive), so a query in any language can find events
+- `AiClientService`: a 503/504 from the provider is retried once after 800 ms (`AI_RETRY_DELAY_MS`); if it fails again the caller gets `Message.AI_BUSY` ("The AI is busy right now, please try again in a moment."). Other errors are not retried
+
+**Tests** (`ai.service.spec.ts`): multi-field escaped text search, no category filter unless given and the tool wording, retry then success, busy message after a failed retry, no retry for other errors.
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit` `ticketzy-api` and `ticketzy-batch` | pass |
+| `npm run build` | pass |
+| `npx jest` (482 tests, 26 suites) | pass |
+| Live Gemini call | not run: no key available |

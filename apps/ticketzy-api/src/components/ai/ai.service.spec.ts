@@ -2,10 +2,10 @@ import { HttpException, ServiceUnavailableException } from '@nestjs/common';
 import { AiClientService } from './ai-client.service';
 import { AiModerationService } from './ai-moderation.service';
 import { AiTranslationService } from './ai-translation.service';
-import { AiToolsService, MAX_SEARCH_RESULTS } from './ai-tools.service';
+import { ASSISTANT_TOOLS, AiToolsService, MAX_SEARCH_RESULTS } from './ai-tools.service';
 import { AiAssistantService, MAX_TOOL_ROUNDS, sanitizeHistory } from './ai-assistant.service';
 import { Message } from '../../libs/enums/common.enum';
-import { EventLocale, EventStatus } from '../../libs/enums/event.enum';
+import { EventCategory, EventLocale, EventStatus } from '../../libs/enums/event.enum';
 import { AuditAction } from '../../libs/enums/audit-log.enum';
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { AssistantRole } from '../../libs/dto/ai/ai.input';
@@ -92,6 +92,25 @@ describe('AiClientService: disabled AI and rate limit', () => {
 		const error = await makeClient(provider).chat({ system: 'SECRET PROMPT', messages: [], maxTokens: 10, tools: [] }).catch((err) => err);
 		expect(error.message).toBe(message);
 		expect(JSON.stringify(error.getResponse())).not.toMatch(/sk-test-key|SECRET/);
+	});
+
+	it('retries once after a 503/504 and returns the second answer', async () => {
+		const provider = makeProvider();
+		provider.generateText.mockRejectedValueOnce(new AiProviderError('failed', 503)).mockResolvedValueOnce({ text: 'ok', model: 'm' });
+		await expect(makeClient(provider).generateText({ system: 's', messages: [], maxTokens: 10 })).resolves.toMatchObject({ text: 'ok' });
+		expect(provider.generateText).toHaveBeenCalledTimes(2);
+	});
+
+	it('says the AI is busy when the retry fails too, and does not retry other errors', async () => {
+		const busy = makeProvider();
+		busy.chat.mockRejectedValue(new AiProviderError('failed', 504));
+		await expect(makeClient(busy).chat({ system: 's', messages: [], maxTokens: 10, tools: [] })).rejects.toThrow(Message.AI_BUSY);
+		expect(busy.chat).toHaveBeenCalledTimes(2);
+
+		const other = makeProvider();
+		other.chat.mockRejectedValue(new AiProviderError('failed', 400));
+		await expect(makeClient(other).chat({ system: 's', messages: [], maxTokens: 10, tools: [] })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+		expect(other.chat).toHaveBeenCalledTimes(1);
 	});
 
 	it('turns text that is not JSON into AI_INVALID_RESPONSE', async () => {
@@ -347,13 +366,36 @@ describe('AiToolsService', () => {
 
 	it('search_events escapes text and rejects bad input without querying', async () => {
 		await tools.execute('search_events', { text: '.*(a+)+$' }, null);
-		expect(String(eventModel.aggregate.mock.calls[0][0][0].$match.eventTitle.$regex)).toContain('\\.\\*');
+		expect(String(eventModel.aggregate.mock.calls[0][0][0].$match.$or[0].eventTitle.$regex)).toContain('\\.\\*');
 
 		eventModel.aggregate.mockClear();
 		expect((await tools.execute('search_events', { category: 'WRESTLING' }, null)).isError).toBe(true);
 		expect((await tools.execute('search_events', { maxPrice: 'cheap' }, null)).isError).toBe(true);
 		expect((await tools.execute('search_events', { dateFrom: 'tomorrow-ish' }, null)).isError).toBe(true);
 		expect(eventModel.aggregate).not.toHaveBeenCalled();
+	});
+
+	it('search_events matches title, description and all translation titles and descriptions, escaped and case-insensitive', async () => {
+		await tools.execute('search_events', { text: 'Rock.' }, null);
+
+		const match = eventModel.aggregate.mock.calls[0][0][0].$match;
+		expect(match.$or.map((condition: any) => Object.keys(condition)[0])).toEqual(['eventTitle', 'eventDesc', 'eventTranslations.title', 'eventTranslations.description']);
+		for (const condition of match.$or) {
+			const regex: RegExp = Object.values<any>(condition)[0].$regex;
+			expect(regex.flags).toBe('i');
+			expect(regex.test('ROCK. night')).toBe(true);
+			expect(regex.test('rocky')).toBe(false); // the dot is escaped
+		}
+	});
+
+	it('search_events leaves the category filter out unless it is given, and tells the model never to guess', async () => {
+		await tools.execute('search_events', { text: 'rock' }, null);
+		expect(eventModel.aggregate.mock.calls[0][0][0].$match).not.toHaveProperty('eventCategory');
+
+		for (const category of ['CONCERT', 'FOOTBALL', 'COMEDY', 'OTHER']) expect(Object.values(EventCategory)).toContain(category);
+		const tool = ASSISTANT_TOOLS.find((t) => t.name === 'search_events')!;
+		expect(tool.description).toMatch(/only set category when the user clearly names it/i);
+		expect(tool.description).toMatch(/never guess/i);
 	});
 
 	it('get_event applies the public visibility rules and hides everything else as not found', async () => {
