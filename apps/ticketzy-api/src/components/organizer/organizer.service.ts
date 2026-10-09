@@ -2,7 +2,9 @@ import { BadRequestException, Injectable, InternalServerErrorException, Logger }
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { Member, Members } from '../../libs/dto/member/member';
-import { CommissionOverrideInput, OrganizerReasonInput, OrganizersByAdminInquiry } from '../../libs/dto/organizer/organizer.input';
+import { CommissionOverrideCleared } from '../../libs/dto/organizer/organizer';
+import { getCommissionRate } from '../../libs/commission';
+import { ClearCommissionOverrideInput, CommissionOverrideInput, OrganizerReasonInput, OrganizersByAdminInquiry } from '../../libs/dto/organizer/organizer.input';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
 import { MemberStatus, MemberType, OrganizerAction, organizerTransitions } from '../../libs/enums/member.enum';
@@ -101,6 +103,51 @@ export class OrganizerService {
 		});
 		await this.notify(adminId, result._id, NotificationType.COMMISSION_UPDATED, 'Your commission rate was changed', reason);
 		return result;
+	}
+
+	/** removes the override in one conditional update, so the organizer goes back to the automatic tier rate */
+	public async clearCommissionOverrideByAdmin(adminId: ObjectId, input: ClearCommissionOverrideInput): Promise<CommissionOverrideCleared> {
+		const reason = this.requireReason(input.reason, Message.COMMISSION_CLEAR_REASON_REQUIRED);
+
+		const before = await this.memberModel
+			.findOneAndUpdate(
+				{
+					_id: input.memberId,
+					memberType: MemberType.ORGANIZER,
+					memberStatus: { $ne: MemberStatus.DELETE },
+					commissionOverride: { $ne: null },
+				},
+				{ $unset: { commissionOverride: '' } },
+				{ new: false },
+			)
+			.exec();
+
+		if (!before) {
+			const current = await this.memberModel
+				.findOne({ _id: input.memberId, memberType: MemberType.ORGANIZER, memberStatus: { $ne: MemberStatus.DELETE } })
+				.lean()
+				.exec();
+			throw new BadRequestException(current ? Message.NO_COMMISSION_OVERRIDE : Message.NO_ORGANIZER_FOUND);
+		}
+
+		const previous = before.commissionOverride;
+		const member = await this.memberModel.findById(before._id).exec();
+		await this.auditLogService.record({
+			actorId: adminId,
+			action: AuditAction.COMMISSION_OVERRIDE_CLEARED,
+			targetType: AuditTargetType.MEMBER,
+			targetId: before._id,
+			meta: { previousRate: previous.rate, previousEndsAt: previous.endsAt, previousReason: previous.reason, reason },
+		});
+		await this.notify(adminId, before._id, NotificationType.COMMISSION_UPDATED, 'Your commission override was removed', reason);
+
+		return {
+			member,
+			previousOverride: previous,
+			automaticRate: getCommissionRate({ completedEvents: member.completedEvents }),
+			reason,
+			clearedAt: new Date(),
+		};
 	}
 
 	/**

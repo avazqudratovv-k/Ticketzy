@@ -236,11 +236,14 @@ export class MemberService {
 		return result[0];
 	}
 
-	public async updateMemberByAdmin(input: MemberUpdate): Promise<Member> {
-		// organizer status changes must go through verify / reject / suspend / reinstate so they are audited and notified
+	public async updateMemberByAdmin(adminId: ObjectId, input: MemberUpdate): Promise<Member> {
 		if (input.memberStatus || input.memberType) {
-			const target = await this.memberModel.findOne({ _id: input._id, memberType: MemberType.ORGANIZER }).lean().exec();
-			if (target) throw new BadRequestException(Message.USE_ORGANIZER_OPERATIONS);
+			// an admin cannot lock themselves out or promote / demote themselves, and admin accounts are not touched by other admins
+			if (String(input._id) === String(adminId)) throw new BadRequestException(Message.CANNOT_CHANGE_OWN_ACCESS);
+			const target = await this.memberModel.findOne({ _id: input._id }).select('memberType').lean().exec();
+			if (target?.memberType === MemberType.ADMIN) throw new BadRequestException(Message.CANNOT_CHANGE_ADMIN_ACCESS);
+			// organizer status changes must go through verify / reject / suspend / reinstate so they are audited and notified
+			if (target?.memberType === MemberType.ORGANIZER) throw new BadRequestException(Message.USE_ORGANIZER_OPERATIONS);
 		}
 		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true }).exec();

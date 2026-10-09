@@ -84,6 +84,28 @@ export class Orders {
 	metaCounter: TotalCounter[];
 }
 
+/** an order as the admin sees it: the buyer's nickname and email and the event title come with it */
+@ObjectType()
+export class AdminOrder extends Order {
+	@Field(() => String, { nullable: true })
+	buyerNick?: string;
+
+	@Field(() => String, { nullable: true })
+	buyerEmail?: string;
+
+	@Field(() => String, { nullable: true })
+	eventTitle?: string;
+}
+
+@ObjectType()
+export class AdminOrders {
+	@Field(() => [AdminOrder])
+	list: AdminOrder[];
+
+	@Field(() => [TotalCounter], { nullable: true })
+	metaCounter: TotalCounter[];
+}
+
 /** one seat of an order, as the organizer sees it */
 @ObjectType()
 export class OrderSeat {

@@ -3,8 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
 import * as moment from 'moment';
-import { Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
-import { CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
+import { AdminOrders, Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
+import { AdminOrdersInquiry, CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
 import { Ticket } from '../../libs/dto/ticket/ticket';
 import { Event } from '../../libs/dto/event/event';
 import { Member } from '../../libs/dto/member/member';
@@ -13,7 +13,7 @@ import { Direction, Message } from '../../libs/enums/common.enum';
 import { SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentSimulation, TicketStatus } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
-import { lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
+import { escapeRegExp, lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
 import { buildQrToken } from '../../libs/qr-token';
@@ -367,10 +367,72 @@ export class OrderService {
 
 	/** ADMIN */
 
-	public async getAllOrdersByAdmin(input: OrdersInquiry): Promise<Orders> {
+	/**
+	 * Filters: event, status, buyer text (nickname, full name or email) and a createdAt range. The buyer text is turned
+	 * into buyer ids first, so the order match stays one indexed $match. Each order carries the buyer's nickname and email
+	 * and the event title; pagination is the same facet as the other order lists.
+	 */
+	public async getAllOrdersByAdmin(input: AdminOrdersInquiry): Promise<AdminOrders> {
+		if (input.dateFrom && input.dateTo && input.dateFrom.getTime() > input.dateTo.getTime()) {
+			throw new BadRequestException(Message.INVALID_ORDER_DATE_RANGE);
+		}
+
 		const match: T = {};
 		if (input.orderStatus) match.orderStatus = input.orderStatus;
-		return await this.listOrders(match, input);
+		if (input.eventId) match.eventId = shapeIntoMongoObjectId(input.eventId);
+		if (input.dateFrom || input.dateTo) {
+			match.createdAt = {};
+			if (input.dateFrom) match.createdAt.$gte = input.dateFrom;
+			if (input.dateTo) match.createdAt.$lte = input.dateTo;
+		}
+		const text = input.text?.trim();
+		if (text) {
+			const regex = { $regex: new RegExp(escapeRegExp(text), 'i') };
+			const buyers = await this.memberModel
+				.find({ $or: [{ memberNick: regex }, { memberFullName: regex }, { memberEmail: regex }] })
+				.select('_id')
+				.lean()
+				.exec();
+			match.buyerId = { $in: buyers.map((buyer) => buyer._id) };
+		}
+
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC, _id: -1 };
+		const result = await this.orderModel
+			.aggregate([
+				{ $match: match },
+				{ $sort: sort },
+				{
+					$facet: {
+						list: [
+							{ $skip: (input.page - 1) * input.limit },
+							{ $limit: input.limit },
+							lookupEventWithVenue,
+							{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
+							{
+								$lookup: {
+									from: 'members',
+									let: { buyerId: '$buyerId' },
+									pipeline: [{ $match: { $expr: { $eq: ['$_id', '$$buyerId'] } } }, { $project: { memberNick: 1, memberEmail: 1 } }],
+									as: 'buyer',
+								},
+							},
+							{
+								$addFields: {
+									buyerNick: { $arrayElemAt: ['$buyer.memberNick', 0] },
+									buyerEmail: { $arrayElemAt: ['$buyer.memberEmail', 0] },
+									eventTitle: '$eventData.eventTitle',
+								},
+							},
+							{ $project: { buyer: 0 } },
+						],
+						metaCounter: [{ $count: 'total' }],
+					},
+				},
+			])
+			.exec();
+
+		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		return result[0];
 	}
 
 	/**

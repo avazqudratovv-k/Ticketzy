@@ -1,6 +1,6 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, IsNotEmpty, IsOptional, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsDate, IsIn, IsInt, IsNotEmpty, IsOptional, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ObjectId } from 'mongoose';
 import { OrderStatus } from '../../enums/ticket.enum';
 import { Direction } from '../../enums/common.enum';
@@ -73,4 +73,28 @@ export class OrganizerOrdersInquiry extends OrdersInquiry {
 	@IsOptional()
 	@Field(() => String, { nullable: true })
 	eventId?: ObjectId;
+}
+
+/** admin orders list: all filters are optional and combine; the date range applies to the order's createdAt */
+@InputType()
+export class AdminOrdersInquiry extends OrdersInquiry {
+	@IsOptional()
+	@Field(() => String, { nullable: true })
+	eventId?: ObjectId;
+
+	/** matches the buyer's nickname, full name or email */
+	@IsOptional()
+	@MaxLength(100)
+	@Field(() => String, { nullable: true })
+	text?: string;
+
+	@IsOptional()
+	@IsDate()
+	@Field(() => Date, { nullable: true })
+	dateFrom?: Date;
+
+	@IsOptional()
+	@IsDate()
+	@Field(() => Date, { nullable: true })
+	dateTo?: Date;
 }

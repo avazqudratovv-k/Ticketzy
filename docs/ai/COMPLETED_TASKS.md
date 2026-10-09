@@ -487,3 +487,12 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - New `libs/sales-window.ts`: `getSalesWindowError` (create, update, admin update, submit) and `getPurchaseWindowError` (checkout, seat hold). Six new messages in `Message`.
 - `holdSeats` now refuses outside the event sales window (it only checked status and start before). `createCheckout` answers specific messages instead of `NOT_ALLOWED_REQUEST` for an ended event or a closed / not yet open window. Demo and base seeds set no event sales window, so they are unaffected.
 - Tests: `libs/sales-window.spec.ts`, event create / update / admin update / submit rules, hold outside the window, checkout of an ended event or outside the window (reserved and general). `tsc` (api and batch), `npm run build` and `npx jest` (610 tests) pass.
+
+## Admin safety, commission clear, admin orders filters (decision #72)
+- `updateMemberByAdmin`: an admin can no longer change their own status or role, and nobody can change another ADMIN's status or role; other profile fields stay editable. The resolver passes the calling admin.
+- `clearCommissionOverrideByAdmin`: returns an organizer to the automatic tier rate, reason required, audited (`COMMISSION_OVERRIDE_CLEARED`), notified, atomic.
+- `getAllOrdersByAdmin`: filters `eventId`, `orderStatus`, `text` (buyer nick, full name, email), `dateFrom`, `dateTo`; each order has `buyerNick`, `buyerEmail`, `eventTitle`; pagination kept.
+- Every admin operation was checked: all `*ByAdmin` operations and `createNotice` / `updateNotice` are `@Roles(ADMIN)` with `RolesGuard`; this is now enforced by `admin-access.spec.ts`.
+- Tests: member guards (own, other admin, organizer, user, profile edits), commission clear (result, audit, notification, repeat, blank reason, non-organizer, rate after clear), admin orders (each filter, combined, range error, pipeline fields, pagination), resolver role audit.
+
+- `tsc` (api and batch), `npm run build` and `npx jest` (659 tests, 31 suites) pass.

@@ -84,3 +84,17 @@ export class CommissionOverrideInput {
 	@Field(() => String)
 	reason: string;
 }
+
+/** clears the override, so the organizer returns to the automatic tier rate; the reason is kept in the audit log */
+@InputType()
+export class ClearCommissionOverrideInput {
+	@IsNotEmpty()
+	@Field(() => String)
+	memberId: ObjectId;
+
+	@IsString()
+	@MaxLength(500)
+	@Transform(trim)
+	@Field(() => String)
+	reason: string;
+}

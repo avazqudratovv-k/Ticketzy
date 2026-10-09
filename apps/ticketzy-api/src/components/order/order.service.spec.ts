@@ -249,3 +249,103 @@ describe('OrderService.getMyEventOrders (organizer)', () => {
 		expect(guards).toEqual(['RolesGuard', 'ActiveOrganizerGuard']);
 	});
 });
+
+describe('OrderService.getAllOrdersByAdmin', () => {
+	const query = (value: any): any => ({
+		exec: jest.fn().mockResolvedValue(value),
+		select: () => ({ lean: () => query(value) }),
+	});
+	let orders: any;
+	let members: any;
+	let service: OrderService;
+
+	beforeEach(() => {
+		orders = { aggregate: jest.fn().mockReturnValue(query([{ list: [], metaCounter: [] }])) };
+		members = { find: jest.fn().mockReturnValue(query([{ _id: BUYER }, { _id: ORG }])) };
+		service = new OrderService(orders, {} as any, {} as any, members, {} as any, {} as any, {} as any, {} as any);
+	});
+
+	const pipeline = () => orders.aggregate.mock.calls[0][0];
+	const list = () => pipeline().find((s) => s.$facet).$facet.list;
+	const base = { page: 1, limit: 10 } as any;
+
+	it('without filters it matches everything, newest first, with a stable tie-break', async () => {
+		await service.getAllOrdersByAdmin(base);
+
+		expect(pipeline()[0].$match).toEqual({});
+		expect(pipeline()[1].$sort).toEqual({ createdAt: -1, _id: -1 });
+		expect(members.find).not.toHaveBeenCalled();
+	});
+
+	it('filters by event id and order status', async () => {
+		await service.getAllOrdersByAdmin({ ...base, eventId: String(E), orderStatus: OrderStatus.PAID });
+
+		const match = pipeline()[0].$match;
+		expect(String(match.eventId)).toBe(String(E));
+		expect(match.orderStatus).toBe(OrderStatus.PAID);
+	});
+
+	it('filters by a date range on createdAt, from and to together or alone', async () => {
+		const from = new Date('2026-01-01T00:00:00Z');
+		const to = new Date('2026-02-01T00:00:00Z');
+
+		await service.getAllOrdersByAdmin({ ...base, dateFrom: from, dateTo: to });
+		expect(pipeline()[0].$match.createdAt).toEqual({ $gte: from, $lte: to });
+
+		orders.aggregate.mockClear();
+		await service.getAllOrdersByAdmin({ ...base, dateTo: to });
+		expect(pipeline()[0].$match.createdAt).toEqual({ $lte: to });
+	});
+
+	it('refuses a range whose start is after its end, before any query', async () => {
+		await expect(
+			service.getAllOrdersByAdmin({ ...base, dateFrom: new Date('2026-03-01'), dateTo: new Date('2026-01-01') }),
+		).rejects.toThrow(Message.INVALID_ORDER_DATE_RANGE);
+		expect(orders.aggregate).not.toHaveBeenCalled();
+		expect(members.find).not.toHaveBeenCalled();
+	});
+
+	it('buyer text searches nick, full name and email case-insensitively, with regex characters escaped', async () => {
+		await service.getAllOrdersByAdmin({ ...base, text: ' a.b+c ' });
+
+		const [filter] = members.find.mock.calls[0];
+		expect(filter.$or.map((c) => Object.keys(c)[0])).toEqual(['memberNick', 'memberFullName', 'memberEmail']);
+		const regex: RegExp = filter.$or[0].memberNick.$regex;
+		expect(regex.flags).toBe('i');
+		expect(regex.test('a.b+c')).toBe(true);
+		expect(regex.test('aXb+c')).toBe(false);
+		expect(pipeline()[0].$match.buyerId).toEqual({ $in: [BUYER, ORG] });
+	});
+
+	it('buyer text with no matching member matches no order', async () => {
+		members.find.mockReturnValue(query([]));
+		await service.getAllOrdersByAdmin({ ...base, text: 'nobody' });
+		expect(pipeline()[0].$match.buyerId).toEqual({ $in: [] });
+	});
+
+	it('all filters combine', async () => {
+		await service.getAllOrdersByAdmin({ ...base, text: 'kim', eventId: String(E), orderStatus: OrderStatus.REFUNDED, dateFrom: new Date(0) });
+		expect(Object.keys(pipeline()[0].$match).sort()).toEqual(['buyerId', 'createdAt', 'eventId', 'orderStatus']);
+	});
+
+	it('paginates and returns the buyer nickname and email and the event title in the same aggregation', async () => {
+		await service.getAllOrdersByAdmin({ page: 3, limit: 5 } as any);
+
+		expect(list().find((s) => s.$skip !== undefined).$skip).toBe(10);
+		expect(list().find((s) => s.$limit !== undefined).$limit).toBe(5);
+		const buyer = list().find((s) => s.$lookup?.from === 'members').$lookup;
+		expect(buyer.pipeline.find((s) => s.$project).$project).toEqual({ memberNick: 1, memberEmail: 1 });
+		expect(list().find((s) => s.$addFields).$addFields).toEqual({
+			buyerNick: { $arrayElemAt: ['$buyer.memberNick', 0] },
+			buyerEmail: { $arrayElemAt: ['$buyer.memberEmail', 0] },
+			eventTitle: '$eventData.eventTitle',
+		});
+		expect(list().find((s) => s.$project)?.$project).toEqual({ buyer: 0 });
+		expect(pipeline().find((s) => s.$facet).$facet.metaCounter).toEqual([{ $count: 'total' }]);
+		expect(orders.aggregate).toHaveBeenCalledTimes(1);
+	});
+
+	it('is ADMIN only', () => {
+		expect(Reflect.getMetadata('roles', OrderResolver.prototype.getAllOrdersByAdmin)).toEqual(['ADMIN']);
+	});
+});

@@ -2,8 +2,8 @@ import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { OrderService } from './order.service';
-import { Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
-import { CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
+import { AdminOrders, Order, Orders, OrganizerOrders } from '../../libs/dto/order/order';
+import { AdminOrdersInquiry, CheckoutInput, OrdersInquiry, OrganizerOrdersInquiry } from '../../libs/dto/order/order.input';
 import { PaymentSimulation } from '../../libs/enums/ticket.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -78,8 +78,8 @@ export class OrderResolver {
 
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
-	@Query(() => Orders)
-	public async getAllOrdersByAdmin(@Args('input') input: OrdersInquiry): Promise<Orders> {
+	@Query(() => AdminOrders)
+	public async getAllOrdersByAdmin(@Args('input') input: AdminOrdersInquiry): Promise<AdminOrders> {
 		this.logger.log('Query: getAllOrdersByAdmin');
 		return await this.orderService.getAllOrdersByAdmin(input);
 	}

@@ -28,6 +28,11 @@ export enum Message {
 	COMMISSION_REASON_REQUIRED = 'A reason is required to set a commission override!',
 	INVALID_COMMISSION_RATE = 'The commission rate must be between 0 and 100!',
 	INVALID_COMMISSION_END_DATE = 'The commission override end date must be in the future!',
+	COMMISSION_CLEAR_REASON_REQUIRED = 'A reason is required to clear a commission override!',
+	NO_COMMISSION_OVERRIDE = 'This organizer has no commission override to clear!',
+	CANNOT_CHANGE_OWN_ACCESS = 'Admins cannot change their own status or role!',
+	CANNOT_CHANGE_ADMIN_ACCESS = 'The status and role of an admin account cannot be changed!',
+	INVALID_ORDER_DATE_RANGE = 'The start date must not be after the end date!',
 
 	INVALID_EVENT_TRANSITION = 'This event status change is not allowed from the current status!',
 	EVENT_NOT_EDITABLE = 'This event cannot be edited in its current status!',

@@ -16,6 +16,7 @@ const fakeMemberModel = (members: any[]) => {
 	const matches = (filter: any) => (m: any) =>
 		(filter._id === undefined || m._id === filter._id) &&
 		(filter.memberType === undefined || m.memberType === filter.memberType) &&
+		(filter.commissionOverride === undefined || (filter.commissionOverride.$ne === null && m.commissionOverride != null)) &&
 		(filter.memberStatus === undefined ||
 			(filter.memberStatus.$in
 				? filter.memberStatus.$in.includes(m.memberStatus)
@@ -240,6 +241,89 @@ describe('OrganizerService status transitions', () => {
 				service.setCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, rate: 5, endsAt: new Date(Date.now() - 1000), reason: 'x' }),
 			).rejects.toThrow(Message.INVALID_COMMISSION_END_DATE);
 		});
+	});
+});
+
+describe('OrganizerService.clearCommissionOverrideByAdmin', () => {
+	const override = { rate: 3, endsAt: new Date(Date.now() + 86400000), reason: 'Launch partner' };
+	let members: any[];
+	let auditLogService: any;
+	let notificationService: any;
+	let service: OrganizerService;
+
+	beforeEach(() => {
+		members = [
+			{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, completedEvents: 6, commissionOverride: override },
+			{ _id: 'plain', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, completedEvents: 0 },
+			{ _id: 'user', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, commissionOverride: override },
+		];
+		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
+		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
+		service = new OrganizerService(fakeMemberModel(members) as any, auditLogService, notificationService, { setMemberRestricted: jest.fn() } as any);
+	});
+
+	it('removes the override and answers with the previous override, the reason and the automatic tier rate', async () => {
+		const result = await service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: ' Deal ended ' });
+
+		expect(members[0].commissionOverride).toBeUndefined();
+		expect(result.member._id).toBe(ORG);
+		expect(result.previousOverride).toEqual(override);
+		expect(result.automaticRate).toBe(7); // 6 completed events
+		expect(result.reason).toBe('Deal ended');
+		expect(result.clearedAt).toBeInstanceOf(Date);
+	});
+
+	it('writes an audit entry with the removed values and notifies the organizer', async () => {
+		await service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'Deal ended' });
+
+		expect(auditLogService.record).toHaveBeenCalledWith({
+			actorId: ADMIN,
+			action: AuditAction.COMMISSION_OVERRIDE_CLEARED,
+			targetType: AuditTargetType.MEMBER,
+			targetId: ORG,
+			meta: { previousRate: 3, previousEndsAt: override.endsAt, previousReason: 'Launch partner', reason: 'Deal ended' },
+		});
+		expect(notificationService.createNotification).toHaveBeenCalledWith(
+			expect.objectContaining({ notificationType: NotificationType.COMMISSION_UPDATED, receiverId: ORG, authorId: ADMIN }),
+		);
+	});
+
+	it('the cleared organizer is charged the automatic rate again', async () => {
+		const { getCommissionRate } = require('../../libs/commission');
+		expect(getCommissionRate(members[0])).toBe(3);
+		await service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' });
+		expect(getCommissionRate(members[0])).toBe(7);
+	});
+
+	it('refuses a blank reason without touching anything', async () => {
+		await expect(service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: '  ' })).rejects.toThrow(
+			Message.COMMISSION_CLEAR_REASON_REQUIRED,
+		);
+		expect(members[0].commissionOverride).toBe(override);
+	});
+
+	it('refuses an organizer without an override, so a second clear does nothing and is not audited twice', async () => {
+		await expect(service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: 'plain' as any, reason: 'x' })).rejects.toThrow(
+			Message.NO_COMMISSION_OVERRIDE,
+		);
+		await service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' });
+		await expect(service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' })).rejects.toThrow(
+			Message.NO_COMMISSION_OVERRIDE,
+		);
+		expect(auditLogService.record).toHaveBeenCalledTimes(1);
+		expect(notificationService.createNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses a member that is not an organizer, and an unknown id', async () => {
+		await expect(service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: 'user' as any, reason: 'x' })).rejects.toThrow(Message.NO_ORGANIZER_FOUND);
+		await expect(service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: 'nope' as any, reason: 'x' })).rejects.toThrow(Message.NO_ORGANIZER_FOUND);
+		expect(members[2].commissionOverride).toBe(override);
+	});
+
+	it('setCommissionOverrideByAdmin still works after a clear', async () => {
+		await service.clearCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'x' });
+		const result = await service.setCommissionOverrideByAdmin(ADMIN as any, { memberId: ORG as any, rate: 2, reason: 'again' });
+		expect(result.commissionOverride).toEqual({ rate: 2, endsAt: undefined, reason: 'again' });
 	});
 });
 

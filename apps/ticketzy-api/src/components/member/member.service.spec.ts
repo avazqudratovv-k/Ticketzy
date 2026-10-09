@@ -189,28 +189,72 @@ describe('MemberService public listings', () => {
 	});
 });
 
-describe('MemberService.updateMemberByAdmin keeps organizer status changes audited', () => {
-	const lean = (value: any) => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
+describe('MemberService.updateMemberByAdmin keeps organizer status changes audited and protects admins', () => {
+	const ADMIN = 'admin-1';
+	const target = (value: any) => ({ select: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(value) }) }) });
+	const build = (found: any, updated: any = { _id: 'u1' }) => {
+		const memberModel: any = {
+			findOne: jest.fn().mockReturnValue(target(found)),
+			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) }),
+		};
+		return { memberModel, service: new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any) };
+	};
 
 	it('refuses to change status or role of an organizer, and points to the organizer operations', async () => {
-		const memberModel: any = { findOne: jest.fn().mockReturnValue(lean({ _id: 'o1' })), findOneAndUpdate: jest.fn() };
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
+		const { memberModel, service } = build({ _id: 'o1', memberType: MemberType.ORGANIZER });
 
-		await expect(service.updateMemberByAdmin({ _id: 'o1' as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow(
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: 'o1' as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow(
 			Message.USE_ORGANIZER_OPERATIONS,
 		);
 		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
 	});
 
 	it('still lets an admin change the status of a USER', async () => {
-		const memberModel: any = {
-			findOne: jest.fn().mockReturnValue(lean(null)),
-			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: 'u1', memberStatus: MemberStatus.SUSPENDED }) }),
-		};
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
+		const { service } = build({ _id: 'u1', memberType: MemberType.USER }, { _id: 'u1', memberStatus: MemberStatus.SUSPENDED });
 
-		const result = await service.updateMemberByAdmin({ _id: 'u1' as any, memberStatus: MemberStatus.SUSPENDED });
+		const result = await service.updateMemberByAdmin(ADMIN as any, { _id: 'u1' as any, memberStatus: MemberStatus.SUSPENDED });
 
 		expect(result.memberStatus).toBe(MemberStatus.SUSPENDED);
+	});
+
+	it.each([
+		['status', { memberStatus: MemberStatus.SUSPENDED }],
+		['role', { memberType: MemberType.USER }],
+	])('refuses an admin changing their own %s, before any database call', async (_name, change) => {
+		const { memberModel, service } = build(null);
+
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: ADMIN as any, ...change })).rejects.toThrow(Message.CANNOT_CHANGE_OWN_ACCESS);
+		expect(memberModel.findOne).not.toHaveBeenCalled();
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
+	it('compares ids as strings, so an ObjectId and its hex string are the same admin', async () => {
+		const { ObjectId } = require('bson');
+		const id = new ObjectId();
+		const { service } = build(null);
+
+		await expect(service.updateMemberByAdmin(id as any, { _id: String(id) as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow(
+			Message.CANNOT_CHANGE_OWN_ACCESS,
+		);
+	});
+
+	it.each([
+		['status', { memberStatus: MemberStatus.SUSPENDED }],
+		['role', { memberType: MemberType.USER }],
+	])("refuses changing another ADMIN account's %s", async (_name, change) => {
+		const { memberModel, service } = build({ _id: 'admin-2', memberType: MemberType.ADMIN });
+
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: 'admin-2' as any, ...change })).rejects.toThrow(Message.CANNOT_CHANGE_ADMIN_ACCESS);
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
+	it('does not block profile edits: an admin can still edit their own nick, and another admin\'s, without status or role', async () => {
+		const { memberModel, service } = build({ _id: 'admin-2', memberType: MemberType.ADMIN });
+
+		await service.updateMemberByAdmin(ADMIN as any, { _id: ADMIN as any, memberNick: 'newnick' });
+		await service.updateMemberByAdmin(ADMIN as any, { _id: 'admin-2' as any, memberNick: 'other' });
+
+		expect(memberModel.findOne).not.toHaveBeenCalled();
+		expect(memberModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
 	});
 });

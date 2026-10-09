@@ -3,7 +3,8 @@ import { Logger, UseGuards } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { OrganizerService } from './organizer.service';
 import { Member, Members } from '../../libs/dto/member/member';
-import { CommissionOverrideInput, OrganizerReasonInput, OrganizersByAdminInquiry } from '../../libs/dto/organizer/organizer.input';
+import { ClearCommissionOverrideInput, CommissionOverrideInput, OrganizerReasonInput, OrganizersByAdminInquiry } from '../../libs/dto/organizer/organizer.input';
+import { CommissionOverrideCleared } from '../../libs/dto/organizer/organizer';
 import { MemberType } from '../../libs/enums/member.enum';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -81,5 +82,17 @@ export class OrganizerResolver {
 		this.logger.log('Mutation: setCommissionOverrideByAdmin');
 		input.memberId = shapeIntoMongoObjectId(input.memberId);
 		return await this.organizerService.setCommissionOverrideByAdmin(adminId, input);
+	}
+
+	@Roles(MemberType.ADMIN)
+	@UseGuards(RolesGuard)
+	@Mutation(() => CommissionOverrideCleared)
+	public async clearCommissionOverrideByAdmin(
+		@Args('input') input: ClearCommissionOverrideInput,
+		@AuthMember('_id') adminId: ObjectId,
+	): Promise<CommissionOverrideCleared> {
+		this.logger.log('Mutation: clearCommissionOverrideByAdmin');
+		input.memberId = shapeIntoMongoObjectId(input.memberId);
+		return await this.organizerService.clearCommissionOverrideByAdmin(adminId, input);
 	}
 }
