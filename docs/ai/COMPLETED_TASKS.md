@@ -516,3 +516,9 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Tests: `libs/payout.spec.ts`, `components/payout/payout.service.spec.ts`, `libs/seat-counts.spec.ts`, seat cases in `event.service.spec.ts`, payout cases in `admin-access.spec.ts`. The pipeline itself was also run once against a real MongoDB 8.2 (throwaway in-memory server, not a project dependency): statuses, totals, status filter with paging, date range and the `$dateAdd` result for New York matched the JS `getPayoutDate`.
 - Full suite: 740 tests pass, both `tsc` checks and `nest build` pass.
 - Not done: the aggregation has no automated test in the repo (the unit tests check its shape and the service around it); payouts assume one currency (KRW) per event.
+
+## Buyer-only purchases (decisions #80 to #82)
+- Only `MemberType.USER` can buy tickets. `libs/buyer.ts` `assertBuyerAccount` is called in `SeatService.holdSeats`, `OrderService.createCheckout` and `OrderService.payOrder`; new `Message.ONLY_BUYERS_CAN_BUY` ("Only buyer accounts can buy tickets! Organizer and admin accounts cannot."), `BadRequestException`. Organizer on their own event is refused too. Refunds, my orders, my tickets, ticket viewing and check-in are unchanged.
+- Tests: `components/order/buyer-only.spec.ts` (ORGANIZER and ADMIN refused on all three operations, organizer on own event, USER still works, inactive account keeps the old message, AuthGuard on the purchase resolvers, read operations not role-limited).
+- Dev database check (read only): 5 orders and 10 tickets are owned by non-USER members; not touched.
+- Full suite passes (751 tests), both `tsc` checks pass.

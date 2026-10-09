@@ -33,6 +33,7 @@ export enum Message {
 	CANNOT_CHANGE_OWN_ACCESS = 'Admins cannot change their own status or role!',
 	CANNOT_CHANGE_ADMIN_ACCESS = 'The status and role of an admin account cannot be changed!',
 	CANNOT_ASSIGN_ADMIN_ROLE = 'The admin role cannot be assigned through the API, admin accounts are created only by the server seed!',
+	ONLY_BUYERS_CAN_BUY = 'Only buyer accounts can buy tickets! Organizer and admin accounts cannot.',
 	INVALID_ORDER_DATE_RANGE = 'The start date must not be after the end date!',
 
 	INVALID_EVENT_TRANSITION = 'This event status change is not allowed from the current status!',

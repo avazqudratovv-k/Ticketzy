@@ -16,6 +16,7 @@ import { T } from '../../libs/types/common';
 import { escapeRegExp, lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
+import { assertBuyerAccount } from '../../libs/buyer';
 import { buildQrToken } from '../../libs/qr-token';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
 import { NotificationService } from '../notification/notification.service';
@@ -56,8 +57,9 @@ export class OrderService {
 		const eventId = shapeIntoMongoObjectId(input.eventId);
 		const now = new Date();
 
-		const buyerActive = await this.memberModel.exists({ _id: memberId, memberStatus: MemberStatus.ACTIVE });
-		if (!buyerActive) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		const buyer = await this.memberModel.findOne({ _id: memberId, memberStatus: MemberStatus.ACTIVE }).select('memberType').lean().exec();
+		if (!buyer) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		assertBuyerAccount(buyer.memberType);
 
 		const event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
 		if (!event) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
@@ -172,6 +174,8 @@ export class OrderService {
 	 * FAILURE: seats or stock are released and the order is FAILED.
 	 */
 	public async payOrder(memberId: ObjectId, orderId: ObjectId, simulate: PaymentSimulation): Promise<Order> {
+		const payer = await this.memberModel.findOne({ _id: memberId }).select('memberType').lean().exec();
+		assertBuyerAccount(payer?.memberType);
 		const order = await this.orderModel.findOne({ _id: orderId, buyerId: memberId }).lean().exec();
 		if (!order) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		if (order.orderStatus === OrderStatus.PAID) return order;
