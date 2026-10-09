@@ -51,6 +51,30 @@ export class EventModeration {
 }
 
 @ObjectType()
+export class VenueConflict {
+	@Field(() => String)
+	eventId: ObjectId;
+
+	@Field(() => String)
+	eventTitle: string;
+
+	@Field(() => EventStatus)
+	eventStatus: EventStatus;
+
+	@Field(() => String)
+	organizerNick: string;
+
+	@Field(() => String)
+	venueName: string;
+
+	@Field(() => Date)
+	startAt: Date;
+
+	@Field(() => Date)
+	endAt: Date;
+}
+
+@ObjectType()
 export class Event {
 	@Field(() => String)
 	_id: ObjectId;
@@ -135,6 +159,13 @@ export class Event {
 
 	@Field(() => Int, { nullable: true, description: 'tickets in paid, non-refunded orders; held and unpaid ones do not count' })
 	eventSoldSeats?: number;
+
+	@Field(() => [VenueConflict], {
+		nullable: true,
+		description:
+			'ADMIN only (null for everyone else). Other PENDING/APPROVED/ENDED events at the same time at a venue that looks like the same place. A hint for the review, never blocks.',
+	})
+	possibleVenueConflicts?: VenueConflict[];
 
 	@Field(() => Member, { nullable: true })
 	memberData?: Member;

@@ -54,6 +54,7 @@ import {
 
 import { getSalesWindowError } from '../../libs/sales-window';
 import { attachSeatCounts } from '../../libs/seat-counts';
+import { attachPossibleVenueConflicts, buildVenueClashFilter, formatVenueBookedMessage } from '../../libs/venue-conflicts';
 
 const SEAT_BULK_SIZE = 5000;
 
@@ -116,6 +117,7 @@ export class EventService {
 	public async createEvent(input: EventInput): Promise<Event> {
 		this.assertValidDates(input.startAt, input.endAt, input.saleStartAt, input.saleEndAt);
 		await this.assertVenueUsable(input.venueId);
+		await this.assertVenueFree(input.venueId, input.startAt, input.endAt);
 
 		try {
 			const result = await this.eventModel.create({ ...input, eventStatus: EventStatus.DRAFT });
@@ -169,6 +171,7 @@ export class EventService {
 
 		targetEvent.venueData = await this.venueModel.findById(targetEvent.venueId).lean().exec();
 		await this.addSeatCounts([targetEvent]);
+		if (isAdmin) await attachPossibleVenueConflicts([targetEvent], this.venueModel, this.eventModel);
 		return targetEvent;
 	}
 
@@ -321,6 +324,7 @@ export class EventService {
 		}
 		const error = getEventSubmitError(event, !!venueUsable, ticketTypeCount, new Date(), seating);
 		if (error) throw new BadRequestException(error);
+		await this.assertVenueFree(event.venueId, event.startAt, event.endAt, event._id);
 
 		// conditional on the status we validated, so a concurrent edit or submit cannot slip through
 		const result = await this.eventModel
@@ -407,6 +411,7 @@ export class EventService {
 		if (!result[0] || !result[0].list.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
 		await this.addSeatCounts(result[0].list);
+		await attachPossibleVenueConflicts(result[0].list, this.venueModel, this.eventModel); // two queries for the whole page
 		return result[0];
 	}
 
@@ -431,12 +436,10 @@ export class EventService {
 	 */
 	public async approveEventByAdmin(adminId: ObjectId, eventId: ObjectId): Promise<Event> {
 		const event: Event = await this.eventModel.findById(eventId).lean().exec();
-		const approvable =
-			event &&
-			event.seatingType === SeatingType.RESERVED &&
-			eventTransitions.approve.from.includes(event.eventStatus) &&
-			String(event.organizerId) !== String(adminId);
-		if (approvable) await this.generateEventSeats(event);
+		const approvable = event && eventTransitions.approve.from.includes(event.eventStatus) && String(event.organizerId) !== String(adminId);
+		// the slot is checked again here: another event may have taken it while this one waited for the review
+		if (approvable) await this.assertVenueFree(event.venueId, event.startAt, event.endAt, event._id);
+		if (approvable && event.seatingType === SeatingType.RESERVED) await this.generateEventSeats(event);
 
 		return await this.changeStatusByAdmin(adminId, eventId, 'approve');
 	}
@@ -669,6 +672,10 @@ export class EventService {
 			input.saleEndAt ?? before.saleEndAt,
 		);
 		if (input.venueId) await this.assertVenueUsable(input.venueId);
+		// only when the slot moves: an unrelated edit of an event that already overlaps (old data) is not blocked
+		if (input.venueId || input.startAt || input.endAt) {
+			await this.assertVenueFree(input.venueId ?? before.venueId, input.startAt ?? before.startAt, input.endAt ?? before.endAt, before._id);
+		}
 
 		const { _id, ...fields } = input;
 		const update: T = { ...fields };
@@ -696,5 +703,25 @@ export class EventService {
 			.lean()
 			.exec();
 		if (!venue) throw new BadRequestException(Message.NO_DATA_FOUND);
+	}
+
+	/**
+	 * Two events of the same venue record must not overlap in [startAt, endAt) (compared as instants).
+	 * DRAFT, REJECTED and CANCELLED events do not block. excludeEventId keeps an event from clashing with itself.
+	 * Check then write, so two simultaneous requests could both pass (no transaction without a replica set, decision #83).
+	 */
+	private async assertVenueFree(venueId: ObjectId, startAt: Date, endAt: Date, excludeEventId?: ObjectId): Promise<void> {
+		if (!moment(endAt).isAfter(startAt)) return; // an empty range cannot overlap anything
+		const [clash] = await this.eventModel
+			.find(buildVenueClashFilter(venueId, startAt, endAt, excludeEventId))
+			.sort({ startAt: 1 })
+			.limit(1)
+			.select('eventTitle startAt endAt')
+			.lean()
+			.exec();
+		if (!clash) return;
+
+		const venue = await this.venueModel.findById(venueId).select('venueTimezone').lean().exec();
+		throw new BadRequestException(formatVenueBookedMessage(clash, venue?.venueTimezone));
 	}
 }

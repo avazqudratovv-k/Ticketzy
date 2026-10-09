@@ -522,3 +522,11 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Tests: `components/order/buyer-only.spec.ts` (ORGANIZER and ADMIN refused on all three operations, organizer on own event, USER still works, inactive account keeps the old message, AuthGuard on the purchase resolvers, read operations not role-limited).
 - Dev database check (read only): 5 orders and 10 tickets are owned by non-USER members; not touched.
 - Full suite passes (751 tests), both `tsc` checks pass.
+
+## Venue double-booking checks (decisions #83 and #84)
+- Same venue record: overlapping `[startAt, endAt)` of PENDING / APPROVED / ENDED events is refused with `Message.VENUE_ALREADY_BOOKED` ("This venue is already booked for {title} from {start} to {end}.", venue wall clock). Runs in `createEvent`, `updateEvent` / `updateEventByAdmin` (when venue or dates are in the input), `submitEventForApproval` and `approveEventByAdmin`. DRAFT, REJECTED, CANCELLED do not block; an event never clashes with itself.
+- Admin warning: `Event.possibleVenueConflicts: [VenueConflict!]` (same city + normalized name, or same coordinates, different or same record), filled in `getEventsByAdmin` and admin `getEvent`, two queries per page, null for non-admins.
+- Code: `libs/venue-conflicts.ts`, `VenueConflict` in `libs/dto/event/event.ts`, field resolver in `event.resolver.ts`.
+- Tests: `libs/venue-conflicts.spec.ts`, and `venue double-booking` / `possibleVenueConflicts` blocks in `event.service.spec.ts`. The existing `eventModel` mock got a default `find`. Full suite 807 tests, both `tsc` checks and `npm run build` pass.
+- Dev database (read only, `MONGO_DEV` = Ticketzy_dev): 22 events, 14 with a blocking status, 6 venues. Rule 1 would flag 0 pairs, rule 2 would flag 0 pairs. One of the 14 spans more than 24 hours. Nothing was changed.
+- Not done: no atomic guard (check then write), no fuzzy name or distance matching, `MONGO_PROD` not checked.

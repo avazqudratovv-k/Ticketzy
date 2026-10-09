@@ -2,7 +2,7 @@ import { Args, Context, Mutation, Parent, Query, ResolveField, Resolver } from '
 import { UseGuards, Logger } from '@nestjs/common';
 import { ObjectId } from 'mongoose';
 import { EventService } from './event.service';
-import { Event, EventModeration, Events } from '../../libs/dto/event/event';
+import { Event, EventModeration, Events, VenueConflict } from '../../libs/dto/event/event';
 import {
 	EventInput,
 	EventReasonInput,
@@ -49,6 +49,13 @@ export class EventResolver {
 	@ResolveField(() => EventModeration, { nullable: true })
 	public eventModeration(@Parent() event: Event, @Context() context: any): EventModeration | null {
 		return event.eventModeration && this.isOwnerOrAdmin(event, context) ? event.eventModeration : null;
+	}
+
+	/** admins only: where another organizer's event may clash with this one; organizers and buyers always get null */
+	@ResolveField(() => [VenueConflict], { nullable: true })
+	public possibleVenueConflicts(@Parent() event: Event, @Context() context: any): VenueConflict[] | null {
+		const isAdmin = context?.req?.body?.authMember?.memberType === MemberType.ADMIN;
+		return isAdmin && event.possibleVenueConflicts ? event.possibleVenueConflicts : null;
 	}
 
 	@Roles(MemberType.ORGANIZER)

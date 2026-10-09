@@ -47,6 +47,8 @@ export enum Message {
 	EVENT_SUBMIT_DATES_IN_PAST = 'The event start and end dates must be in the future to submit it!',
 	EVENT_SUBMIT_VENUE_REQUIRED = 'The event needs an active venue before it can be submitted!',
 	EVENT_SUBMIT_TICKET_TYPE_REQUIRED = 'The event needs at least one ticket type before it can be submitted!',
+	/** template: {title}, {start} and {end} are filled in by formatVenueBookedMessage (libs/venue-conflicts.ts) */
+	VENUE_ALREADY_BOOKED = 'This venue is already booked for {title} from {start} to {end}.',
 
 	SALES_START_NOT_BEFORE_SALES_END = 'The ticket sales start must be before the ticket sales end!',
 	SALES_END_AFTER_EVENT_END = 'The ticket sales must end no later than the event end!',

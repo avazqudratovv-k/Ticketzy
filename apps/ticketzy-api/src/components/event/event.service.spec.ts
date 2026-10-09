@@ -11,6 +11,12 @@ import { NotificationType } from '../../libs/enums/notification.enum';
 
 const exec = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
 const lean = (value: any) => ({ lean: () => exec(value) });
+/** find().sort().limit().select().lean().exec() */
+const chain = (value: any): any => {
+	const c: any = { exec: jest.fn().mockResolvedValue(value) };
+	for (const name of ['sort', 'limit', 'select', 'lean']) c[name] = jest.fn().mockReturnValue(c);
+	return c;
+};
 
 const seatedSection = (over: any = {}) => ({
 	key: 'A',
@@ -146,6 +152,7 @@ describe('EventService', () => {
 	beforeEach(() => {
 		eventModel = {
 			findOne: jest.fn(),
+			find: jest.fn().mockReturnValue(chain([])), // venue clash check: no clash unless a test says so
 			findById: jest.fn().mockReturnValue(lean(null)),
 			findOneAndUpdate: jest.fn(),
 			findOneAndDelete: jest.fn(),
@@ -257,6 +264,303 @@ describe('EventService', () => {
 				eventModel.findOneAndUpdate.mockReturnValue(exec(draft({ eventStatus: EventStatus.PENDING })));
 				await service.submitEventForApproval('org1' as any, 'e1' as any);
 				expect(eventModel.findOneAndUpdate).toHaveBeenCalled();
+			});
+		});
+	});
+
+	describe('venue double-booking (decision #83)', () => {
+		const at = (hour: number, day = 1) => new Date(Date.UTC(2031, 0, day, hour));
+		const stored = (over: any) => ({
+			_id: 'other',
+			organizerId: 'org2',
+			venueId: 'v1',
+			eventTitle: 'Jazz Night',
+			eventStatus: EventStatus.APPROVED,
+			startAt: at(10),
+			endAt: at(12),
+			...over,
+		});
+
+		/** `find` evaluates the clash filter against these events, so the real overlap rules are exercised */
+		const store = (events: any[]) =>
+			eventModel.find.mockImplementation((filter: any) =>
+				chain(
+					events.filter(
+						(event) =>
+							String(event.venueId) === String(filter.venueId) &&
+							filter.eventStatus.$in.includes(event.eventStatus) &&
+							event.startAt < filter.startAt.$lt &&
+							event.endAt > filter.endAt.$gt &&
+							(!filter._id || String(event._id) !== String(filter._id.$ne)),
+					),
+				),
+			);
+		const create = (over: any = {}) => {
+			eventModel.create = jest.fn().mockResolvedValue({ _id: 'new', organizerId: 'org1' });
+			return service.createEvent({ organizerId: 'org1', venueId: 'a'.repeat(24), startAt: at(11), endAt: at(13), ...over } as any);
+		};
+		beforeEach(() => {
+			venueModel.findOne.mockReturnValue(lean({ _id: 'v1' }));
+			venueModel.findById.mockReturnValue(chain({ venueTimezone: 'Asia/Seoul' }));
+		});
+
+		it.each([
+			['exact overlap', 10, 12],
+			['partial overlap at the start', 9, 11],
+			['partial overlap at the end', 11, 13],
+			['contained in the other event', 10.5 as any, 11],
+			['containing the other event', 9, 13],
+		])('refuses %s', async (_name, start, end) => {
+			store([stored({ venueId: 'a'.repeat(24) })]);
+			const toDate = (hour: number) => new Date(Date.UTC(2031, 0, 1, Math.floor(hour), (hour % 1) * 60));
+			await expect(create({ startAt: toDate(start), endAt: toDate(end) })).rejects.toThrow(
+				'This venue is already booked for Jazz Night from 2031-01-01 19:00 to 2031-01-01 21:00.',
+			);
+			expect(eventModel.create).not.toHaveBeenCalled();
+		});
+
+		it('names the clash with the venue wall clock (Asia/Seoul is UTC+9)', async () => {
+			store([stored({ venueId: 'a'.repeat(24) })]);
+			await expect(create()).rejects.toThrow(/from 2031-01-01 19:00 to 2031-01-01 21:00\.$/);
+			expect(Message.VENUE_ALREADY_BOOKED).toContain('{title}');
+		});
+
+		it('uses the timezone of the venue', async () => {
+			venueModel.findById.mockReturnValue(chain({ venueTimezone: 'UTC' }));
+			store([stored({ venueId: 'a'.repeat(24) })]);
+			await expect(create()).rejects.toThrow('from 2031-01-01 10:00 to 2031-01-01 12:00.');
+		});
+
+		it('allows an event that starts exactly when the other one ends, and one that ends exactly when it starts', async () => {
+			store([stored({ venueId: 'a'.repeat(24) })]);
+			await expect(create({ startAt: at(12), endAt: at(14) })).resolves.toBeDefined();
+			await expect(create({ startAt: at(8), endAt: at(10) })).resolves.toBeDefined();
+		});
+
+		it('allows the same time at another venue record', async () => {
+			store([stored({ venueId: 'b'.repeat(24) })]);
+			await expect(create()).resolves.toBeDefined();
+		});
+
+		it.each([EventStatus.DRAFT, EventStatus.REJECTED, EventStatus.CANCELLED])('a %s event does not block', async (status) => {
+			store([stored({ venueId: 'a'.repeat(24), eventStatus: status })]);
+			await expect(create()).resolves.toBeDefined();
+		});
+
+		it.each([EventStatus.PENDING, EventStatus.APPROVED, EventStatus.ENDED])('a %s event blocks', async (status) => {
+			store([stored({ venueId: 'a'.repeat(24), eventStatus: status })]);
+			await expect(create()).rejects.toThrow(/already booked/);
+		});
+
+		it('blocks another organizer too (the venue record is shared)', async () => {
+			store([stored({ venueId: 'a'.repeat(24), organizerId: 'someone-else' })]);
+			await expect(create()).rejects.toThrow(/already booked/);
+		});
+
+		describe('submit', () => {
+			it('refuses a submit that clashes and leaves the status alone', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ _id: 'e1', venueId: 'a'.repeat(24), startAt: future(7), endAt: future(8) })));
+				store([stored({ venueId: 'a'.repeat(24), startAt: future(7), endAt: future(8) })]);
+				await expect(service.submitEventForApproval('org1' as any, 'e1' as any)).rejects.toThrow(/already booked for Jazz Night/);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('does not clash with itself', async () => {
+				const me = draft({ _id: 'e1', venueId: 'a'.repeat(24), eventStatus: EventStatus.REJECTED });
+				eventModel.findOne.mockReturnValue(lean(me));
+				eventModel.findOneAndUpdate.mockReturnValue(exec({ ...me, eventStatus: EventStatus.PENDING }));
+				store([{ ...me, eventStatus: EventStatus.PENDING }]); // the stored copy of the very same event
+				await expect(service.submitEventForApproval('org1' as any, 'e1' as any)).resolves.toBeDefined();
+			});
+		});
+
+		describe('update', () => {
+			const update = (stored_: any, patch: any) => {
+				eventModel.findOne.mockReturnValue(lean(draft({ _id: 'e1', venueId: 'a'.repeat(24), startAt: at(14), endAt: at(16), ...stored_ })));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(draft()));
+				return service.updateEvent('org1' as any, { _id: 'e1', ...patch } as any);
+			};
+
+			it('refuses a date change into a clash', async () => {
+				store([stored({ venueId: 'a'.repeat(24) })]);
+				await expect(update({}, { startAt: at(11), endAt: at(15) })).rejects.toThrow(/already booked for Jazz Night/);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('checks the stored dates when only the venue changes, and the stored venue when only the dates change', async () => {
+				store([stored({ venueId: 'c'.repeat(24), startAt: at(15), endAt: at(17) })]);
+				await expect(update({}, { venueId: 'c'.repeat(24) })).rejects.toThrow(/already booked/);
+				store([stored({ venueId: 'a'.repeat(24), startAt: at(18), endAt: at(20) })]);
+				await expect(update({}, { endAt: at(19) })).rejects.toThrow(/already booked/);
+			});
+
+			it('does not clash with itself when its own dates are edited', async () => {
+				store([stored({ _id: 'e1', venueId: 'a'.repeat(24), eventStatus: EventStatus.APPROVED, startAt: at(14), endAt: at(16) })]);
+				await expect(update({ eventStatus: EventStatus.APPROVED }, { startAt: at(13), endAt: at(17) })).resolves.toBeDefined();
+			});
+
+			it('does not run the check for an edit that leaves venue and dates alone', async () => {
+				store([stored({ venueId: 'a'.repeat(24), startAt: at(14), endAt: at(16) })]); // old data that already overlaps
+				await expect(update({}, { eventTitle: 'New title' })).resolves.toBeDefined();
+				expect(eventModel.find).not.toHaveBeenCalled();
+			});
+
+			it('also applies to the admin edit', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ _id: 'e1', venueId: 'a'.repeat(24), startAt: at(14), endAt: at(16) })));
+				store([stored({ venueId: 'a'.repeat(24) })]);
+				await expect(service.updateEventByAdmin({ _id: 'e1', startAt: at(9), endAt: at(11) } as any)).rejects.toThrow(/already booked/);
+			});
+		});
+
+		describe('approve', () => {
+			it('refuses when another event took the slot while this one waited, and changes nothing', async () => {
+				const waiting = draft({ _id: 'e1', venueId: 'a'.repeat(24), eventStatus: EventStatus.PENDING, startAt: at(10), endAt: at(12) });
+				eventModel.findById.mockReturnValue(lean(waiting));
+				store([stored({ venueId: 'a'.repeat(24), startAt: at(11), endAt: at(13) })]);
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).rejects.toThrow(/already booked for Jazz Night/);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+				expect(eventSeatModel.bulkWrite).not.toHaveBeenCalled();
+			});
+
+			it('approves when the slot is free', async () => {
+				const waiting = draft({ _id: 'e1', venueId: 'a'.repeat(24), eventStatus: EventStatus.PENDING, seatingType: SeatingType.GENERAL });
+				eventModel.findById.mockReturnValue(lean(waiting));
+				eventModel.findOneAndUpdate.mockReturnValue(exec({ ...waiting, eventStatus: EventStatus.APPROVED }));
+				store([]);
+				await expect(service.approveEventByAdmin('admin1' as any, 'e1' as any)).resolves.toBeDefined();
+			});
+		});
+
+		describe('multi-day events use first-day start to last-day end', () => {
+			it('a one-day show inside the span of a multi-day event is refused, even outside the daily hours', async () => {
+				// festival: Jan 1 10:00 to Jan 3 22:00 (daily 10:00-22:00); a show on Jan 2 at 23:00-24:00 is outside its hours
+				store([stored({ venueId: 'a'.repeat(24), startAt: at(10, 1), endAt: at(22, 3), eventTitle: 'Three Day Festival' })]);
+				await expect(create({ startAt: at(23, 2), endAt: at(24, 2) })).rejects.toThrow(/already booked for Three Day Festival/);
+			});
+		});
+	});
+
+	describe('possibleVenueConflicts for admins (decision #84)', () => {
+		const at = (hour: number) => new Date(Date.UTC(2031, 0, 1, hour));
+		const venue = (over: any) => ({ _id: 'v1', venueName: 'Olympic Hall', venueCity: 'Seoul', venueCoordinates: [], ...over });
+		const mine = (over: any = {}) =>
+			draft({ _id: 'e1', eventStatus: EventStatus.PENDING, venueId: 'v1', startAt: at(10), endAt: at(12), venueData: venue({}), ...over });
+		const other = (over: any = {}) => ({
+			_id: 'e2',
+			venueId: 'v2',
+			eventTitle: 'Jazz Night',
+			eventStatus: EventStatus.APPROVED,
+			startAt: at(11),
+			endAt: at(13),
+			organizerNick: 'jazzbros',
+			...over,
+		});
+		/** first aggregate = the page, second = the conflict candidates; venueModel.find = the same-place venues */
+		const setup = (page: any[], venues: any[], candidates: any[]) => {
+			eventModel.aggregate
+				.mockReturnValueOnce(exec([{ list: page, metaCounter: [{ total: page.length }] }]))
+				.mockReturnValueOnce(exec(candidates));
+			venueModel.find = jest.fn().mockReturnValue(chain(venues));
+		};
+		const input = { page: 1, limit: 20, search: {} } as any;
+
+		it('lists an event of another organizer at a same-named venue record in the same city', async () => {
+			setup([mine()], [venue({ _id: 'v2', venueName: '  OLYMPIC   hall! ' })], [other()]);
+			const result = await service.getEventsByAdmin(input);
+			expect(result.list[0].possibleVenueConflicts).toEqual([
+				{ eventId: 'e2', eventTitle: 'Jazz Night', eventStatus: EventStatus.APPROVED, organizerNick: 'jazzbros', venueName: '  OLYMPIC   hall! ', startAt: at(11), endAt: at(13) },
+			]);
+		});
+
+		it('matches by coordinates when the names differ', async () => {
+			setup(
+				[mine({ venueData: venue({ venueCoordinates: [127.1, 37.5] }) })],
+				[venue({ _id: 'v2', venueName: 'Another name', venueCity: 'Elsewhere', venueCoordinates: [127.1, 37.5] })],
+				[other()],
+			);
+			const result = await service.getEventsByAdmin(input);
+			expect(result.list[0].possibleVenueConflicts).toHaveLength(1);
+		});
+
+		it('is empty for another city or another venue name', async () => {
+			setup([mine()], [venue({ _id: 'v2', venueName: 'Olympic Hall', venueCity: 'Busan' }), venue({ _id: 'v3', venueName: 'Sejong Center' })], [other(), other({ _id: 'e3', venueId: 'v3' })]);
+			const result = await service.getEventsByAdmin(input);
+			expect(result.list[0].possibleVenueConflicts).toEqual([]);
+		});
+
+		it('ignores events whose time only touches or does not reach, and the event itself', async () => {
+			setup(
+				[mine()],
+				[venue({ _id: 'v2' })],
+				[other({ _id: 'e4', startAt: at(12), endAt: at(14) }), other({ _id: 'e5', startAt: at(8), endAt: at(10) }), other({ _id: 'e1' })],
+			);
+			const result = await service.getEventsByAdmin(input);
+			expect(result.list[0].possibleVenueConflicts).toEqual([]);
+		});
+
+		it('asks the database only for PENDING / APPROVED / ENDED events (no draft, rejected, cancelled)', async () => {
+			setup([mine()], [venue({ _id: 'v2' })], [other()]);
+			await service.getEventsByAdmin(input);
+			const candidatePipeline = eventModel.aggregate.mock.calls[1][0];
+			expect(candidatePipeline[0].$match.eventStatus.$in).toEqual([EventStatus.PENDING, EventStatus.APPROVED, EventStatus.ENDED]);
+		});
+
+		it('costs two queries for a whole page, however many events it has', async () => {
+			const page = [mine({ _id: 'p1' }), mine({ _id: 'p2', startAt: at(20), endAt: at(21) }), mine({ _id: 'p3', eventStatus: EventStatus.APPROVED }), mine({ _id: 'p4', eventStatus: EventStatus.DRAFT })];
+			setup(page, [venue({ _id: 'v2' })], [other()]);
+			const result = await service.getEventsByAdmin(input);
+			expect(venueModel.find).toHaveBeenCalledTimes(1);
+			expect(eventModel.aggregate).toHaveBeenCalledTimes(2); // the page itself + one candidate query
+			expect(result.list.map((event) => event.possibleVenueConflicts?.length)).toEqual([1, 0, 1, undefined]); // a DRAFT is not looked at
+		});
+
+		it('does no extra query when nothing on the page is PENDING or APPROVED', async () => {
+			setup([mine({ eventStatus: EventStatus.DRAFT })], [], []);
+			await service.getEventsByAdmin(input);
+			expect(venueModel.find).not.toHaveBeenCalled();
+			expect(eventModel.aggregate).toHaveBeenCalledTimes(1);
+		});
+
+		it('stops after the venue query when no venue looks like the same place', async () => {
+			setup([mine()], [], []);
+			const result = await service.getEventsByAdmin(input);
+			expect(eventModel.aggregate).toHaveBeenCalledTimes(1);
+			expect(result.list[0].possibleVenueConflicts).toEqual([]);
+		});
+
+		it('getEvent fills it for an admin (and costs the same two queries)', async () => {
+			eventModel.findOne.mockReturnValue(lean(mine({ venueData: undefined })));
+			venueModel.findById.mockReturnValue(lean(venue({})));
+			memberModel.findById.mockReturnValue(lean({ _id: 'org1' }));
+			eventModel.aggregate.mockReturnValueOnce(exec([other()]));
+			venueModel.find = jest.fn().mockReturnValue(chain([venue({ _id: 'v2' })]));
+			const event = await service.getEvent({ _id: 'admin1', memberType: MemberType.ADMIN } as any, 'e1' as any);
+			expect(event.possibleVenueConflicts).toHaveLength(1);
+		});
+
+		it('getEvent does not compute it for the owner or a buyer', async () => {
+			eventModel.findOne.mockReturnValue(lean(mine({ venueData: undefined, eventStatus: EventStatus.APPROVED })));
+			venueModel.findById.mockReturnValue(lean(venue({})));
+			venueModel.find = jest.fn();
+			const event = await service.getEvent({ _id: 'org1', memberType: MemberType.ORGANIZER } as any, 'e1' as any);
+			expect(event.possibleVenueConflicts).toBeUndefined();
+			expect(venueModel.find).not.toHaveBeenCalled();
+		});
+
+		describe('field resolver', () => {
+			const resolver = () => new EventResolver({} as any);
+			const parent = { possibleVenueConflicts: [{ eventId: 'e2' }] } as any;
+			const ctx = (authMember: any) => ({ req: { body: { authMember } } });
+
+			it('returns it to an admin only', () => {
+				expect(resolver().possibleVenueConflicts(parent, ctx({ _id: 'a', memberType: MemberType.ADMIN }))).toHaveLength(1);
+				expect(resolver().possibleVenueConflicts(parent, ctx({ _id: 'org1', memberType: MemberType.ORGANIZER }))).toBeNull();
+				expect(resolver().possibleVenueConflicts(parent, ctx({ _id: 'u', memberType: MemberType.USER }))).toBeNull();
+				expect(resolver().possibleVenueConflicts(parent, ctx(undefined))).toBeNull();
+			});
+
+			it('returns null for the owning organizer even when the value is on the parent', () => {
+				expect(resolver().possibleVenueConflicts({ ...parent, organizerId: 'org1' }, ctx({ _id: 'org1', memberType: MemberType.ORGANIZER }))).toBeNull();
 			});
 		});
 	});
