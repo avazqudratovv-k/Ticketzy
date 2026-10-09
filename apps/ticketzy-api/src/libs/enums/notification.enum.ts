@@ -16,6 +16,7 @@ export enum NotificationType {
 	REFUND_COMPLETED = 'REFUND_COMPLETED',
 	ORDER_REFUNDED = 'ORDER_REFUNDED',
 	NEW_MESSAGE = 'NEW_MESSAGE',
+	PAYOUT_PAID = 'PAYOUT_PAID',
 }
 registerEnumType(NotificationType, {
 	name: 'NotificationType',

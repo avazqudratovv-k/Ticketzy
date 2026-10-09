@@ -1,5 +1,5 @@
 /** offset of `timeZone` from UTC at the instant `at`, in milliseconds */
-const getZoneOffsetMs = (at: Date, timeZone: string): number => {
+export const getZoneOffsetMs = (at: Date, timeZone: string): number => {
 	const parts = new Intl.DateTimeFormat('en-US', {
 		timeZone,
 		hourCycle: 'h23',

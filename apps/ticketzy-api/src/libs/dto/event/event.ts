@@ -130,6 +130,12 @@ export class Event {
 
 	/** from aggregation */
 
+	@Field(() => Int, { nullable: true, description: 'all tickets the event can sell (sum over its ticket types); filled by event queries and lists' })
+	eventTotalSeats?: number;
+
+	@Field(() => Int, { nullable: true, description: 'tickets in paid, non-refunded orders; held and unpaid ones do not count' })
+	eventSoldSeats?: number;
+
 	@Field(() => Member, { nullable: true })
 	memberData?: Member;
 

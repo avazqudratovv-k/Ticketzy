@@ -53,6 +53,7 @@ import {
 } from '../../libs/config';
 
 import { getSalesWindowError } from '../../libs/sales-window';
+import { attachSeatCounts } from '../../libs/seat-counts';
 
 const SEAT_BULK_SIZE = 5000;
 
@@ -109,6 +110,7 @@ export class EventService {
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 		private refundService: RefundService,
 		private aiModerationService: AiModerationService,
+		@InjectModel('Order') private readonly orderModel: Model<any>,
 	) {}
 
 	public async createEvent(input: EventInput): Promise<Event> {
@@ -166,6 +168,7 @@ export class EventService {
 		}
 
 		targetEvent.venueData = await this.venueModel.findById(targetEvent.venueId).lean().exec();
+		await this.addSeatCounts([targetEvent]);
 		return targetEvent;
 	}
 
@@ -203,6 +206,7 @@ export class EventService {
 
 		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		await this.addSeatCounts(result[0].list);
 		return result[0];
 	}
 
@@ -247,11 +251,20 @@ export class EventService {
 	}
 
 	public async getFavorites(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {
-		return await this.likeService.getFavoriteEvents(memberId, input);
+		const result = await this.likeService.getFavoriteEvents(memberId, input);
+		await this.addSeatCounts(result?.list);
+		return result;
 	}
 
 	public async getVisited(memberId: ObjectId, input: OrdinaryInquiry): Promise<Events> {
-		return await this.viewService.getVisitedEvents(memberId, input);
+		const result = await this.viewService.getVisitedEvents(memberId, input);
+		await this.addSeatCounts(result?.list);
+		return result;
+	}
+
+	/** seat totals for a whole page in two queries (libs/seat-counts.ts), never one query per event */
+	private async addSeatCounts(events: Array<{ _id: ObjectId }> | undefined): Promise<void> {
+		if (events?.length) await attachSeatCounts(events, this.ticketTypeModel, this.orderModel);
 	}
 
 	public async getMyEvents(memberId: ObjectId, input: OrganizerEventsInquiry): Promise<Events> {
@@ -283,6 +296,7 @@ export class EventService {
 
 		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		await this.addSeatCounts(result[0].list);
 		return result[0];
 	}
 
@@ -392,6 +406,7 @@ export class EventService {
 
 		if (!result[0] || !result[0].list.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		await this.addSeatCounts(result[0].list);
 		return result[0];
 	}
 

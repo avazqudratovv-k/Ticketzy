@@ -140,6 +140,7 @@ describe('EventService', () => {
 	let eventSeatModel: any;
 	let refundService: any;
 	let aiModerationService: any;
+	let orderModel: any;
 	let service: EventService;
 
 	beforeEach(() => {
@@ -152,7 +153,7 @@ describe('EventService', () => {
 		};
 		venueModel = { distinct: jest.fn().mockResolvedValue(['v9']), exists: jest.fn().mockResolvedValue({ _id: 'v1' }), findById: jest.fn().mockReturnValue(lean(null)), findOne: jest.fn().mockReturnValue(lean({ _id: 'v1' })) };
 		eventSeatModel = { bulkWrite: jest.fn().mockResolvedValue({}), find: jest.fn() };
-		ticketTypeModel = { find: jest.fn(), bulkWrite: jest.fn().mockResolvedValue({}), countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
+		ticketTypeModel = { find: jest.fn(), aggregate: jest.fn().mockReturnValue(exec([])), bulkWrite: jest.fn().mockResolvedValue({}), countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
 		memberModel = { distinct: jest.fn().mockResolvedValue(['o9']), findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
 		memberService = { getMember: jest.fn().mockResolvedValue({ _id: 'org1' }), memberStatsEditor: jest.fn().mockResolvedValue({}) };
 		viewService = { recordView: jest.fn().mockResolvedValue(null) };
@@ -161,6 +162,7 @@ describe('EventService', () => {
 		refundService = {
 			refundOrdersForCancelledEvent: jest.fn().mockResolvedValue({ refundedCount: 2, failedCount: 0, totalCount: 2, failedOrderIds: [] }),
 		};
+		orderModel = { aggregate: jest.fn().mockReturnValue(exec([])) };
 		aiModerationService = { moderateEvent: jest.fn().mockResolvedValue({ checked: true, flags: [] }) };
 		service = new EventService(
 			eventModel,
@@ -175,6 +177,7 @@ describe('EventService', () => {
 			eventSeatModel,
 			refundService,
 			aiModerationService,
+			orderModel,
 		);
 	});
 
@@ -552,6 +555,62 @@ describe('EventService', () => {
 			expect(match.eventCategory).toEqual({ $in: ['CONCERT'] });
 			expect(String(match.organizerId)).toBe('a'.repeat(24));
 			expect(match.$or[0].eventTitle.$regex.source).toBe('rock\\.\\*');
+		});
+	});
+
+	describe('seat totals on event lists and details', () => {
+		const ids = Array.from({ length: 25 }, (_, i) => `e${i}`);
+		const page = () => ids.map((_id) => ({ _id, eventTitle: _id }));
+		const seatQueries = () => ({ ticketTypes: ticketTypeModel.aggregate.mock.calls.length, orders: orderModel.aggregate.mock.calls.length });
+
+		beforeEach(() => {
+			ticketTypeModel.aggregate = jest.fn().mockReturnValue(exec([{ _id: 'e0', total: 300 }, { _id: 'e1', total: 50 }]));
+			orderModel.aggregate.mockReturnValue(exec([{ _id: 'e0', sold: 120 }]));
+			eventModel.aggregate.mockReturnValue(exec([{ list: page(), metaCounter: [{ total: 25 }] }]));
+		});
+
+		it('getEvents: a page of 25 events costs one ticket type query and one order query, not one per event', async () => {
+			const result = await service.getEvents(null as any, { page: 1, limit: 25, search: {} } as any);
+			expect(seatQueries()).toEqual({ ticketTypes: 1, orders: 1 });
+			expect(result.list[0]).toMatchObject({ eventTotalSeats: 300, eventSoldSeats: 120 });
+			expect(result.list[1]).toMatchObject({ eventTotalSeats: 50, eventSoldSeats: 0 });
+			expect(result.list[24]).toMatchObject({ eventTotalSeats: 0, eventSoldSeats: 0 });
+		});
+
+		it('getMyEvents and getEventsByAdmin use the same two queries for the whole page', async () => {
+			await service.getMyEvents('a'.repeat(24) as any, { page: 1, limit: 25, search: {} } as any);
+			expect(seatQueries()).toEqual({ ticketTypes: 1, orders: 1 });
+			await service.getEventsByAdmin({ page: 1, limit: 25, search: {} } as any);
+			expect(seatQueries()).toEqual({ ticketTypes: 2, orders: 2 });
+		});
+
+		it('only PAID orders are counted as sold (holds, unpaid and refunded orders are not)', async () => {
+			await service.getEvents(null as any, { page: 1, limit: 25, search: {} } as any);
+			const [match] = orderModel.aggregate.mock.calls[0][0];
+			expect(match.$match.orderStatus).toBe('PAID');
+		});
+
+		it('getFavorites and getVisited get the totals too', async () => {
+			const likeService = (service as any).likeService;
+			likeService.getFavoriteEvents = jest.fn().mockResolvedValue({ list: page(), metaCounter: [] });
+			(service as any).viewService.getVisitedEvents = jest.fn().mockResolvedValue({ list: page(), metaCounter: [] });
+			const favorites = await service.getFavorites('m1' as any, { page: 1, limit: 25 } as any);
+			const visited = await service.getVisited('m1' as any, { page: 1, limit: 25 } as any);
+			expect(favorites.list[0].eventTotalSeats).toBe(300);
+			expect(visited.list[0].eventSoldSeats).toBe(120);
+		});
+
+		it('getEvent adds the totals of that one event', async () => {
+			eventModel.findOne.mockReturnValue(lean({ _id: 'e0', organizerId: 'org1', venueId: 'v1', eventStatus: EventStatus.APPROVED, eventViews: 0 }));
+			memberModel.findById.mockReturnValue(lean({ _id: 'org1' }));
+			const result = await service.getEvent({ _id: 'admin1', memberType: MemberType.ADMIN } as any, 'e0' as any);
+			expect(result).toMatchObject({ eventTotalSeats: 300, eventSoldSeats: 120 });
+		});
+
+		it('an empty page runs no seat query', async () => {
+			eventModel.aggregate.mockReturnValue(exec([{ list: [], metaCounter: [] }]));
+			await service.getEvents(null as any, { page: 1, limit: 25, search: {} } as any);
+			expect(seatQueries()).toEqual({ ticketTypes: 0, orders: 0 });
 		});
 	});
 

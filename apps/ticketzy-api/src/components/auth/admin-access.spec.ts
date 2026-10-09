@@ -38,4 +38,17 @@ describe('admin operations are ADMIN only', () => {
 		const unguarded = operations.filter((op) => (Reflect.getMetadata('roles', op.handler) ?? []).includes('ADMIN') && !guardNames(op.handler).includes('RolesGuard'));
 		expect(unguarded.map((op) => `${op.resolver}.${op.name}`)).toEqual([]);
 	});
+
+	it('the payout operations are found and covered: admin list and mark-as-paid are ADMIN only, the organizer list is ORGANIZER only', () => {
+		const find = (name: string) => operations.find((op) => op.name === name);
+		for (const name of ['getPayoutsByAdmin', 'markPayoutPaidByAdmin']) {
+			expect(find(name)).toBeDefined();
+			expect(isAdminOperation(name)).toBe(true);
+			expect(Reflect.getMetadata('roles', find(name).handler)).toEqual(['ADMIN']);
+			expect(guardNames(find(name).handler)).toContain('RolesGuard');
+		}
+		const mine = find('getMyPayouts');
+		expect(Reflect.getMetadata('roles', mine.handler)).toEqual(['ORGANIZER']);
+		expect(guardNames(mine.handler)).toEqual(expect.arrayContaining(['RolesGuard', 'ActiveOrganizerGuard']));
+	});
 });

@@ -20,6 +20,7 @@ import { ViewModule } from './view/view.module';
 import { FollowModule } from './follow/follow.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { AiModule } from './ai/ai.module';
+import { PayoutModule } from './payout/payout.module';
 
 @Module({
 	imports: [
@@ -44,6 +45,7 @@ import { AiModule } from './ai/ai.module';
 		FollowModule,
 		ConversationModule,
 		AiModule,
+		PayoutModule,
 	],
 })
 export class ComponentsModule {}

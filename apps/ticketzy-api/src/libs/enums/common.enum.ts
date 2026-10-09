@@ -118,6 +118,12 @@ export enum Message {
 	AI_LOGIN_REQUIRED = 'Please log in to see your tickets.',
 	AI_TRANSLATE_LOCALES_REQUIRED = 'Choose at least one target language (en, ko, ru, uz)!',
 	AI_MODERATION_NOT_CHECKED = 'The AI check did not run for this event.',
+
+	PAYOUT_EVENT_NOT_FOUND = 'No event found for this payout!',
+	PAYOUT_NOT_DUE_YET = 'The payout date of this event has not been reached yet!',
+	PAYOUT_NOTHING_TO_PAY = 'There is nothing to pay out for this event!',
+	PAYOUT_ALREADY_PAID = 'This event has already been paid out!',
+	PAYOUT_INVALID_DATE_RANGE = 'The start of the payout date range must not be after its end!',
 }
 
 export enum Direction {
