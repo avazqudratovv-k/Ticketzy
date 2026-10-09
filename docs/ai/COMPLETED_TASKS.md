@@ -496,3 +496,6 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Tests: member guards (own, other admin, organizer, user, profile edits), commission clear (result, audit, notification, repeat, blank reason, non-organizer, rate after clear), admin orders (each filter, combined, range error, pipeline fields, pagination), resolver role audit.
 
 - `tsc` (api and batch), `npm run build` and `npx jest` (659 tests, 31 suites) pass.
+
+## Block ADMIN role assignment (decision #73)
+- `updateMemberByAdmin` refuses `memberType: ADMIN` with `CANNOT_ASSIGN_ADMIN_ROLE`, before any database call. Test added in `member.service.spec.ts` (other account, own account, with extra fields).

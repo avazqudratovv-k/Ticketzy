@@ -237,6 +237,8 @@ export class MemberService {
 	}
 
 	public async updateMemberByAdmin(adminId: ObjectId, input: MemberUpdate): Promise<Member> {
+		// admin accounts are created only by the server seed, never by promotion
+		if (input.memberType === MemberType.ADMIN) throw new BadRequestException(Message.CANNOT_ASSIGN_ADMIN_ROLE);
 		if (input.memberStatus || input.memberType) {
 			// an admin cannot lock themselves out or promote / demote themselves, and admin accounts are not touched by other admins
 			if (String(input._id) === String(adminId)) throw new BadRequestException(Message.CANNOT_CHANGE_OWN_ACCESS);

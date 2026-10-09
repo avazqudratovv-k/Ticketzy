@@ -209,6 +209,20 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		['another account', 'u1'],
+		['their own account', ADMIN],
+	])('refuses setting memberType to ADMIN on %s, before any database call', async (_name, id) => {
+		const { memberModel, service } = build({ _id: 'u1', memberType: MemberType.USER });
+
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: id as any, memberType: MemberType.ADMIN })).rejects.toThrow(Message.CANNOT_ASSIGN_ADMIN_ROLE);
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: id as any, memberType: MemberType.ADMIN, memberNick: 'x' })).rejects.toThrow(
+			Message.CANNOT_ASSIGN_ADMIN_ROLE,
+		);
+		expect(memberModel.findOne).not.toHaveBeenCalled();
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
 	it('still lets an admin change the status of a USER', async () => {
 		const { service } = build({ _id: 'u1', memberType: MemberType.USER }, { _id: 'u1', memberStatus: MemberStatus.SUSPENDED });
 
