@@ -1,6 +1,7 @@
 /**
  * npm run seed
  * Creates the first ADMIN from ADMIN_EMAIL and ADMIN_PASSWORD (.env) when no admin exists yet.
+ * Also creates a second ADMIN from ADMIN2_EMAIL, ADMIN2_PASSWORD (and optional ADMIN2_NICK) when that email is unused.
  * Admins can never be created through the API; running this again is safe.
  */
 import { config } from 'dotenv';
@@ -9,6 +10,7 @@ import { connect, connection, model } from 'mongoose';
 import MemberSchema from './libs/schemas/Member.model';
 import { MemberAuthType, MemberStatus, MemberType } from './libs/enums/member.enum';
 import { getMongoUriKey } from './libs/env.validation';
+import { ensureExtraAdmin } from './libs/admin-seed';
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -31,17 +33,18 @@ async function seed(): Promise<void> {
 
 	if (await memberModel.exists({ memberType: MemberType.ADMIN })) {
 		console.log('An admin already exists, nothing was changed.');
-		return;
+	} else {
+		await memberModel.create({
+			memberEmail: email,
+			memberPassword: await bcrypt.hash(password, await bcrypt.genSalt()),
+			memberType: MemberType.ADMIN,
+			memberStatus: MemberStatus.ACTIVE,
+			memberAuthType: MemberAuthType.EMAIL,
+		});
+		console.log(`Admin ${email} was created.`);
 	}
 
-	await memberModel.create({
-		memberEmail: email,
-		memberPassword: await bcrypt.hash(password, await bcrypt.genSalt()),
-		memberType: MemberType.ADMIN,
-		memberStatus: MemberStatus.ACTIVE,
-		memberAuthType: MemberAuthType.EMAIL,
-	});
-	console.log(`Admin ${email} was created.`);
+	await ensureExtraAdmin(memberModel);
 }
 
 seed()
