@@ -7,6 +7,9 @@ import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { Member } from '../../libs/dto/member/member';
 import { ConversationGuard } from '../auth/guards/conversation.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { MemberType } from '../../libs/enums/member.enum';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 
 /**
@@ -27,6 +30,18 @@ export class ConversationResolver {
 	): Promise<Conversation> {
 		this.logger.log('Mutation: startConversation');
 		return await this.conversationService.startConversation(member, eventId ? shapeIntoMongoObjectId(eventId) : undefined);
+	}
+
+	/** ADMIN only: RolesGuard (like the other *ByAdmin operations), checked again in the service */
+	@Roles(MemberType.ADMIN)
+	@UseGuards(RolesGuard)
+	@Mutation(() => Conversation)
+	public async startConversationWithOrganizerByAdmin(
+		@Args('organizerId') organizerId: string,
+		@AuthMember() admin: Member,
+	): Promise<Conversation> {
+		this.logger.log('Mutation: startConversationWithOrganizerByAdmin');
+		return await this.conversationService.startConversationWithOrganizer(admin, shapeIntoMongoObjectId(organizerId));
 	}
 
 	@UseGuards(ConversationGuard)

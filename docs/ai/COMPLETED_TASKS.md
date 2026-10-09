@@ -499,3 +499,8 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 
 ## Block ADMIN role assignment (decision #73)
 - `updateMemberByAdmin` refuses `memberType: ADMIN` with `CANNOT_ASSIGN_ADMIN_ROLE`, before any database call. Test added in `member.service.spec.ts` (other account, own account, with extra fields).
+
+## Admin starts a support conversation with an organizer (decision #74)
+- `startConversationWithOrganizerByAdmin(organizerId: String!): Conversation!` (ADMIN only, `RolesGuard`). Opens or returns the organizer's support conversation (idempotent); the opening admin becomes `adminId`; the organizer is notified (`NEW_MESSAGE`, group `CONVERSATION`) only on creation.
+- Errors: `CONVERSATION_TARGET_NOT_ORGANIZER` ("An admin can only start a conversation with an organizer!") for USER and ADMIN targets, `NO_DATA_FOUND` ("No data found!") for unknown or DELETE targets, `CONVERSATION_NOT_ALLOWED` ("You are not allowed to use this conversation!") for a caller that is not an active admin, `ONLY_SPECIFIC_ROLES_ALLOWED` from the guard.
+- Tests (`conversation.service.spec.ts`): create and notify, idempotent across admins, existing organizer-made conversation untouched, counters and replies, room delivery, each organizer status, USER / ADMIN / unknown / deleted targets, non-admin callers, notification failure, concurrent start. `admin-access.spec` covers the guard automatically. `tsc` (api and batch), `npm run build` and `npx jest` (677 tests, 31 suites) pass.

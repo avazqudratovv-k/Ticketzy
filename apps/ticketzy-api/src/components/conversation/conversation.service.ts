@@ -70,6 +70,42 @@ export class ConversationService {
 		}
 	}
 
+	/**
+	 * Admin side of the support conversation: opens it when the organizer has none, otherwise returns the existing one.
+	 * The admin who opens it is recorded as its admin; the organizer is notified only when it was created now.
+	 */
+	public async startConversationWithOrganizer(admin: Member, organizerId: ObjectId): Promise<Conversation> {
+		if (!admin) throw new ForbiddenException(Message.NOT_AUTHENTICATED);
+		if (admin.memberType !== MemberType.ADMIN || admin.memberStatus !== MemberStatus.ACTIVE) {
+			throw new ForbiddenException(Message.CONVERSATION_NOT_ALLOWED);
+		}
+
+		const target = await this.memberModel
+			.findOne({ _id: shapeIntoMongoObjectId(organizerId) })
+			.select('_id memberType memberStatus')
+			.lean()
+			.exec();
+		if (!target) throw new BadRequestException(Message.NO_DATA_FOUND);
+		if (target.memberType !== MemberType.ORGANIZER) throw new BadRequestException(Message.CONVERSATION_TARGET_NOT_ORGANIZER);
+		if (target.memberStatus === MemberStatus.DELETE) throw new BadRequestException(Message.NO_DATA_FOUND);
+
+		const filter: T = { organizerId: target._id, isSupport: true };
+		const existing = await this.conversationModel.findOne(filter).lean().exec();
+		if (existing) return await this.getConversation(admin, existing._id);
+
+		try {
+			const created = await this.conversationModel.create({ isSupport: true, organizerId: target._id, adminId: admin._id });
+			await this.notifyConversationOpened(admin, created._id, target._id as ObjectId);
+			return await this.getConversation(admin, created._id);
+		} catch (err) {
+			// the unique index decides a race: the other request created it and notified, return that one
+			if (err?.code !== 11000) throw err;
+			const winner = await this.conversationModel.findOne(filter).lean().exec();
+			if (!winner) throw err;
+			return await this.getConversation(admin, winner._id);
+		}
+	}
+
 	public async getMyConversations(member: Member, input: OrdinaryInquiry): Promise<Conversations> {
 		const match: T = {};
 		if (member.memberType === MemberType.ORGANIZER) {
@@ -217,6 +253,23 @@ export class ConversationService {
 
 		const current = await this.conversationModel.findOne({ _id: conversationId }).lean().exec();
 		return (current?.adminId as ObjectId) ?? adminId;
+	}
+
+	/** never throws: the conversation already exists, a failed notification must not fail the start */
+	private async notifyConversationOpened(admin: Member, conversationId: ObjectId, organizerId: ObjectId): Promise<void> {
+		try {
+			await this.notificationService.createNotification({
+				notificationType: NotificationType.NEW_MESSAGE,
+				notificationGroup: NotificationGroup.CONVERSATION,
+				notificationTitle: 'Support started a conversation with you',
+				notificationDesc: 'An admin opened a conversation with you.',
+				authorId: admin._id,
+				receiverId: organizerId,
+				conversationId,
+			});
+		} catch (err) {
+			this.logger.error(`Error, ConversationService.notifyConversationOpened: ${err.message}`);
+		}
 	}
 
 	/** never throws: the message is already saved, a failed notification must not fail the send */

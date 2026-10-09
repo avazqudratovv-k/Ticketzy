@@ -102,6 +102,7 @@ export enum Message {
 	CONVERSATION_SUPPORT_ONLY = 'Your account can only use the support conversation!',
 	CONVERSATION_EVENT_NOT_YOURS = 'You can only start a conversation about your own event!',
 	CONVERSATION_ORGANIZERS_ONLY = 'Only organizers can start a conversation!',
+	CONVERSATION_TARGET_NOT_ORGANIZER = 'An admin can only start a conversation with an organizer!',
 	MESSAGE_BODY_REQUIRED = 'The message cannot be empty!',
 	MESSAGE_BODY_TOO_LONG = 'A message can have at most 2000 characters!',
 	TOO_MANY_MESSAGES = 'You are sending messages too fast, please slow down!',

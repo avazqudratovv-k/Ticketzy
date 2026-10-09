@@ -559,3 +559,138 @@ describe('NotificationService queries', () => {
 		);
 	});
 });
+
+describe('startConversationWithOrganizer (admin)', () => {
+	it('creates the support conversation, records the admin and notifies the organizer once', async () => {
+		const { service, conversations, notifications, organizer, admin } = build();
+
+		const result: any = await service.startConversationWithOrganizer(admin, organizer._id);
+
+		expect(conversations.docs).toHaveLength(1);
+		expect(conversations.docs[0]).toMatchObject({ isSupport: true, organizerId: organizer._id, adminId: admin._id });
+		expect(String(result._id)).toBe(String(conversations.docs[0]._id));
+		expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+		expect(notifications.createNotification).toHaveBeenCalledWith(
+			expect.objectContaining({
+				notificationType: NotificationType.NEW_MESSAGE,
+				notificationGroup: NotificationGroup.CONVERSATION,
+				authorId: admin._id,
+				receiverId: organizer._id,
+				conversationId: conversations.docs[0]._id,
+			}),
+		);
+	});
+
+	it('is idempotent: a second call, also by another admin, returns the same conversation without a new notification', async () => {
+		const { service, conversations, notifications, members, organizer, admin } = build();
+		const otherAdmin = members.docs.filter((m) => m.memberType === MemberType.ADMIN && m.memberStatus === MemberStatus.ACTIVE)[1];
+
+		const first: any = await service.startConversationWithOrganizer(admin, organizer._id);
+		const second: any = await service.startConversationWithOrganizer(admin, organizer._id);
+		const third: any = await service.startConversationWithOrganizer(otherAdmin, organizer._id);
+
+		expect(conversations.docs).toHaveLength(1);
+		expect(String(second._id)).toBe(String(first._id));
+		expect(String(third._id)).toBe(String(first._id));
+		expect(conversations.docs[0].adminId).toBe(admin._id);
+		expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns the support conversation the organizer opened themselves, untouched and without a notification', async () => {
+		const { service, conversations, notifications, organizer, admin, seed } = build();
+		const { support } = await seed();
+		conversations.docs[0].unreadForAdmin = 3;
+
+		const result: any = await service.startConversationWithOrganizer(admin, organizer._id);
+
+		expect(String(result._id)).toBe(String(support._id));
+		expect(conversations.docs).toHaveLength(2);
+		expect(conversations.docs[0]).toMatchObject({ adminId: null, unreadForAdmin: 3, unreadForOrganizer: 0 });
+		expect(notifications.createNotification).not.toHaveBeenCalled();
+	});
+
+	it('starts with zero unread on both sides, and the organizer can read and answer it', async () => {
+		const { service, conversations, organizer, admin } = build();
+		const result: any = await service.startConversationWithOrganizer(admin, organizer._id);
+
+		expect(conversations.docs[0].unreadForOrganizer ?? 0).toBe(0);
+		expect(conversations.docs[0].unreadForAdmin ?? 0).toBe(0);
+		await expect(service.getConversation(organizer, result._id)).resolves.toBeDefined();
+		await service.sendMessage(organizer, result._id, 'thanks');
+		expect(conversations.docs[0].unreadForAdmin).toBe(1);
+	});
+
+	it('uses the existing rooms: only a joined socket hears later messages', async () => {
+		const { service, realtime, organizer, admin } = build();
+		const result: any = await service.startConversationWithOrganizer(admin, organizer._id);
+		const org = socket();
+		const stranger = socket();
+		realtime.register(org, { memberId: String(organizer._id), memberType: MemberType.ORGANIZER });
+		realtime.register(stranger, { memberId: String(oid()), memberType: MemberType.ORGANIZER });
+		realtime.join(org, String(result._id), true);
+
+		await service.sendMessage(admin, result._id, 'hi');
+
+		expect(sent(org).map((e: any) => e.event)).toEqual(expect.arrayContaining(['message', 'unread']));
+		expect(sent(stranger)).toEqual([]);
+		expect(sent(org).find((e: any) => e.event === 'unread').data).toMatchObject({ unreadCount: 1 });
+	});
+
+	it.each([MemberStatus.PENDING, MemberStatus.REJECTED, MemberStatus.SUSPENDED, MemberStatus.ACTIVE])('allows a %s organizer', async (status) => {
+		const { service, members, admin } = build();
+		const target = { ...member(MemberType.ORGANIZER, status) };
+		members.docs.push(target);
+		await expect(service.startConversationWithOrganizer(admin, target._id)).resolves.toBeDefined();
+	});
+
+	it('refuses a USER target', async () => {
+		const { service, conversations, notifications, members, admin } = build();
+		const user = member(MemberType.USER);
+		members.docs.push(user);
+		await expect(service.startConversationWithOrganizer(admin, user._id)).rejects.toThrow(Message.CONVERSATION_TARGET_NOT_ORGANIZER);
+		expect(conversations.docs).toHaveLength(0);
+		expect(notifications.createNotification).not.toHaveBeenCalled();
+	});
+
+	it('refuses an ADMIN target, including the caller', async () => {
+		const { service, members, admin } = build();
+		const other = members.docs.find((m) => m.memberType === MemberType.ADMIN && m._id !== admin._id);
+		await expect(service.startConversationWithOrganizer(admin, other._id)).rejects.toThrow(Message.CONVERSATION_TARGET_NOT_ORGANIZER);
+		await expect(service.startConversationWithOrganizer(admin, admin._id)).rejects.toThrow(Message.CONVERSATION_TARGET_NOT_ORGANIZER);
+	});
+
+	it('refuses an unknown member and a deleted organizer', async () => {
+		const { service, members, admin } = build();
+		const deleted = member(MemberType.ORGANIZER, MemberStatus.DELETE);
+		members.docs.push(deleted);
+		await expect(service.startConversationWithOrganizer(admin, oid() as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+		await expect(service.startConversationWithOrganizer(admin, deleted._id)).rejects.toThrow(Message.NO_DATA_FOUND);
+	});
+
+	it('refuses callers that are not an active admin', async () => {
+		const { service, conversations, organizer, members } = build();
+		const inactive = members.docs.find((m) => m.memberType === MemberType.ADMIN && m.memberStatus === MemberStatus.SUSPENDED);
+		await expect(service.startConversationWithOrganizer(organizer, organizer._id)).rejects.toThrow(Message.CONVERSATION_NOT_ALLOWED);
+		await expect(service.startConversationWithOrganizer(member(MemberType.USER), organizer._id)).rejects.toThrow(Message.CONVERSATION_NOT_ALLOWED);
+		await expect(service.startConversationWithOrganizer(inactive, organizer._id)).rejects.toThrow(Message.CONVERSATION_NOT_ALLOWED);
+		await expect(service.startConversationWithOrganizer(null as any, organizer._id)).rejects.toThrow(Message.NOT_AUTHENTICATED);
+		expect(conversations.docs).toHaveLength(0);
+	});
+
+	it('a failed notification does not fail the start', async () => {
+		const { service, notifications, organizer, admin } = build();
+		notifications.createNotification.mockRejectedValueOnce(new Error('down'));
+		await expect(service.startConversationWithOrganizer(admin, organizer._id)).resolves.toBeDefined();
+	});
+
+	it('a concurrent creation (unique index) returns the winner and does not notify twice', async () => {
+		const { service, conversations, notifications, organizer, admin } = build();
+		const [a, b]: any[] = await Promise.all([
+			service.startConversationWithOrganizer(admin, organizer._id),
+			service.startConversationWithOrganizer(admin, organizer._id),
+		]);
+		expect(conversations.docs).toHaveLength(1);
+		expect(String(a._id)).toBe(String(b._id));
+		expect(notifications.createNotification.mock.calls.length).toBeLessThanOrEqual(1);
+	});
+});
