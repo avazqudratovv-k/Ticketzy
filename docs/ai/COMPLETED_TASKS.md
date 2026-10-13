@@ -530,3 +530,11 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Tests: `libs/venue-conflicts.spec.ts`, and `venue double-booking` / `possibleVenueConflicts` blocks in `event.service.spec.ts`. The existing `eventModel` mock got a default `find`. Full suite 807 tests, both `tsc` checks and `npm run build` pass.
 - Dev database (read only, `MONGO_DEV` = Ticketzy_dev): 22 events, 14 with a blocking status, 6 venues. Rule 1 would flag 0 pairs, rule 2 would flag 0 pairs. One of the 14 spans more than 24 hours. Nothing was changed.
 - Not done: no atomic guard (check then write), no fuzzy name or distance matching, `MONGO_PROD` not checked.
+
+## AI assistant check and hardening (decisions #85 to #87)
+- `npm run ai:check` / `yarn ai:check`: shows which AI settings are set (never values), lists Gemini models that support `generateContent` (marks `GEMINI_MODEL`, suggests the closest when it is missing), sends one "Say hello" and prints OK with the time or the reason in plain words. Exit 0/1. Code: `src/ai-check.ts`, `libs/ai-check.ts`.
+- `AiClientService`: optional `GEMINI_FALLBACK_MODEL` (one try after the retry on 404/429/503/504/timeout), 429 now says "busy", failures are logged with the model and status, startup warning for a Gemini setup without key or model. Timeout (`AI_TIMEOUT_MS`) and the one retry already existed.
+- `.env.example` and a "Check the AI" section in `README.md`.
+- Tests: `libs/ai-check.spec.ts` (model not in list, 404, 400/403, 429, 503/504, timeout, no secrets) and fallback / 429 / 404 / 504-then-fallback / logging / startup warning cases in `ai.service.spec.ts`.
+- Not done: `ai:check` was not run against the real Google API from this session (it would use the key in `.env`, which was off limits); nothing committed.
+

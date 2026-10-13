@@ -45,6 +45,25 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Check the AI
+
+```bash
+$ npm run ai:check   # or: yarn ai:check
+```
+
+It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set, lists the Gemini models that support `generateContent` (your `GEMINI_MODEL` is marked), and sends one tiny "Say hello" request. Exit code 0 means it works, 1 means it does not.
+
+| Result | Meaning |
+| --- | --- |
+| `OK in 640 ms` | Key, model and network work. |
+| `GEMINI_MODEL "..." is not in the list` / `wrong model (404)` | The model name is wrong; use one of the IDs printed in the list (the closest ones are shown). |
+| `bad key or permission (400/403)` | The key is wrong, expired, restricted or has no access to the model. |
+| `quota (429)` | Too many requests or the free quota is used up; wait or check your Google plan. |
+| `Google is busy (503/504)` | The model is overloaded; try again, or set `GEMINI_FALLBACK_MODEL`. |
+| `timed out` | Google did not answer within `AI_TIMEOUT_MS` (default 15000). |
+
+When `AI_PROVIDER=gemini`, the API logs a warning at startup if `GEMINI_API_KEY` or `GEMINI_MODEL` is missing (it never calls Google at startup).
+
 ## Run tests
 
 ```bash

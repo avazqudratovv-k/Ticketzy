@@ -33,9 +33,13 @@ export interface AiConfig {
 	apiKey: string;
 	/** the model of the SELECTED provider only */
 	model: string;
+	/** GEMINI_FALLBACK_MODEL (gemini only): tried once when the main model fails; '' means no fallback */
+	fallbackModel: string;
 	timeoutMs: number;
 	rateLimitPerMinute: number;
 }
+
+const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 
 const parseBoundedInt = (name: string, raw: unknown, fallback: number, min: number, max: number): number => {
 	if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
@@ -63,15 +67,28 @@ export const getAiConfig = (env: Record<string, any> = process.env): AiConfig =>
 	if (!(provider in PROVIDER_ENV)) throw new Error('AI_PROVIDER must be anthropic or gemini');
 	const names = PROVIDER_ENV[provider];
 	const model = String(env[names.model] ?? '').trim() || names.defaultModel;
-	if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(model)) throw new Error(`${names.model} is not a valid model name`);
+	if (!MODEL_NAME_PATTERN.test(model)) throw new Error(`${names.model} is not a valid model name`);
+	const fallbackRaw = provider === 'gemini' ? String(env.GEMINI_FALLBACK_MODEL ?? '').trim() : '';
+	if (fallbackRaw && !MODEL_NAME_PATTERN.test(fallbackRaw)) throw new Error('GEMINI_FALLBACK_MODEL is not a valid model name');
 	return {
 		enabled: flag === 'true' || flag === '1',
 		provider,
 		apiKey: String(env[names.key] ?? '').trim(),
 		model,
+		fallbackModel: fallbackRaw === model ? '' : fallbackRaw,
 		timeoutMs: parseBoundedInt('AI_TIMEOUT_MS', env.AI_TIMEOUT_MS, DEFAULT_AI_TIMEOUT_MS, 1000, 120000),
 		rateLimitPerMinute: parseBoundedInt('AI_RATE_LIMIT_PER_MINUTE', env.AI_RATE_LIMIT_PER_MINUTE, DEFAULT_AI_RATE_LIMIT_PER_MINUTE, 1, 1000),
 	};
+};
+
+/** startup hints (never fatal) for AI_PROVIDER=gemini; no key or model value is ever included */
+export const getAiStartupWarnings = (env: Record<string, any> = process.env): string[] => {
+	if (String(env.AI_PROVIDER ?? '').trim().toLowerCase() !== 'gemini') return [];
+	const warnings: string[] = [];
+	if (!String(env.GEMINI_API_KEY ?? '').trim()) warnings.push('GEMINI_API_KEY is not set, so the AI features will not work');
+	if (!String(env.GEMINI_MODEL ?? '').trim()) warnings.push(`GEMINI_MODEL is not set, the default ${DEFAULT_GEMINI_MODEL} is used`);
+	if (warnings.length) warnings.push('Run `yarn ai:check` (or `npm run ai:check`) to test the AI setup');
+	return warnings;
 };
 
 /** ConfigModule `validate` hook: the app refuses to start when a required variable is missing or blank */

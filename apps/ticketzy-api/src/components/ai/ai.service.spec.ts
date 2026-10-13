@@ -11,6 +11,7 @@ import { MemberStatus } from '../../libs/enums/member.enum';
 import { AssistantRole } from '../../libs/dto/ai/ai.input';
 import { extractJson, parseModerationResult } from '../../libs/ai';
 import { AiProviderError } from './providers/ai-provider';
+import { getAiStartupWarnings } from '../../libs/env.validation';
 
 const exec = (value: any) => ({ exec: jest.fn().mockResolvedValue(value) });
 const lean = (value: any) => ({ lean: () => exec(value) });
@@ -37,7 +38,7 @@ const makeProvider = (): MockProvider => ({ name: 'mock', generateText: jest.fn(
 /** a client whose provider is a mock: the services never see a vendor SDK */
 const makeClient = (provider: MockProvider = makeProvider()): AiClientService => new AiClientService(() => provider as any);
 
-const ENV_KEYS = ['AI_ENABLED', 'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
+const ENV_KEYS = ['AI_ENABLED', 'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODEL', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
 let savedEnv: Record<string, string | undefined>;
 beforeEach(() => {
 	savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -126,6 +127,117 @@ describe('AiClientService: disabled AI and rate limit', () => {
 		} finally {
 			jest.useRealTimers();
 		}
+	});
+
+	it('says busy for a 429 (quota), without a retry', async () => {
+		const provider = makeProvider();
+		provider.generateText.mockRejectedValue(new AiProviderError('failed', 429));
+		await expect(makeClient(provider).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_BUSY);
+		expect(provider.generateText).toHaveBeenCalledTimes(1);
+	});
+
+	it('says "could not answer" for a 404 (wrong model) when there is no fallback', async () => {
+		const provider = makeProvider();
+		provider.generateText.mockRejectedValue(new AiProviderError('failed', 404));
+		await expect(makeClient(provider).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+		expect(provider.generateText).toHaveBeenCalledTimes(1);
+	});
+
+	describe('GEMINI_FALLBACK_MODEL', () => {
+		const geminiClient = (modelsSeen: string[], failFor: (model: string) => unknown) =>
+			new AiClientService((config) => {
+				modelsSeen.push(config.model);
+				return {
+					name: 'gemini',
+					generateText: jest.fn().mockImplementation(async () => {
+						const failure = failFor(config.model);
+						if (failure) throw failure;
+						return { text: 'ok from ' + config.model, model: config.model };
+					}),
+				} as any;
+			});
+		beforeEach(() => {
+			process.env.AI_PROVIDER = 'gemini';
+			process.env.GEMINI_API_KEY = 'g-test-key';
+			process.env.GEMINI_MODEL = 'main-model';
+			process.env.GEMINI_FALLBACK_MODEL = 'backup-model';
+		});
+
+		it('answers from the fallback model after the main model gives a 404', async () => {
+			const seen: string[] = [];
+			const client = geminiClient(seen, (model) => (model === 'main-model' ? new AiProviderError('failed', 404) : null));
+			await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).resolves.toMatchObject({ text: 'ok from backup-model' });
+			expect(seen).toEqual(['main-model', 'backup-model']);
+		});
+
+		it('retries the main model once on a 504 before using the fallback', async () => {
+			jest.useFakeTimers();
+			try {
+				const calls: string[] = [];
+				const client = new AiClientService((config) => ({
+					name: 'gemini',
+					generateText: jest.fn().mockImplementation(async () => {
+						calls.push(config.model);
+						if (config.model === 'main-model') throw new AiProviderError('failed', 504);
+						return { text: 'fallback answer', model: config.model };
+					}),
+				} as any));
+				const result = client.generateText({ system: 's', messages: [], maxTokens: 10 });
+				await jest.advanceTimersByTimeAsync(AI_RETRY_DELAY_MS);
+				await expect(result).resolves.toMatchObject({ text: 'fallback answer' });
+				expect(calls).toEqual(['main-model', 'main-model', 'backup-model']);
+			} finally {
+				jest.useRealTimers();
+			}
+		});
+
+		it('tries the fallback once only, then says busy for a 429 or "could not answer" for a 404', async () => {
+			const seen: string[] = [];
+			await expect(geminiClient(seen, () => new AiProviderError('failed', 429)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_BUSY);
+			expect(seen).toEqual(['main-model', 'backup-model']);
+
+			const seen404: string[] = [];
+			await expect(geminiClient(seen404, () => new AiProviderError('failed', 404)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+			expect(seen404).toEqual(['main-model', 'backup-model']);
+		});
+
+		it('does not use the fallback for other errors (400) or when it is unset', async () => {
+			const seen: string[] = [];
+			await expect(geminiClient(seen, () => new AiProviderError('failed', 400)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+			expect(seen).toEqual(['main-model']);
+
+			delete process.env.GEMINI_FALLBACK_MODEL;
+			const none: string[] = [];
+			await expect(geminiClient(none, () => new AiProviderError('failed', 404)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+			expect(none).toEqual(['main-model']);
+		});
+
+		it('logs the real status and the failing model, never the key', async () => {
+			const client = geminiClient([], () => new AiProviderError('failed', 404, 'ApiError'));
+			const logs: string[] = [];
+			jest.spyOn((client as any).logger, 'error').mockImplementation((message: any) => void logs.push(String(message)));
+			await client.generateText({ system: 's', messages: [], maxTokens: 10 }).catch(() => undefined);
+			expect(logs).toEqual([
+				'AI request failed: provider=gemini model=main-model failed ApiError status=404',
+				'AI request failed: provider=gemini model=backup-model failed ApiError status=404',
+			]);
+			expect(logs.join(' ')).not.toContain('g-test-key');
+		});
+	});
+
+	describe('startup warnings', () => {
+		it('warns (without values) for gemini with a missing key or model, and stays quiet otherwise', () => {
+			expect(getAiStartupWarnings({ AI_PROVIDER: 'gemini' }).join(' ')).toMatch(/GEMINI_API_KEY is not set[\s\S]*GEMINI_MODEL is not set[\s\S]*ai:check/);
+			expect(getAiStartupWarnings({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'k', GEMINI_MODEL: 'm' })).toEqual([]);
+			expect(getAiStartupWarnings({ AI_PROVIDER: 'anthropic' })).toEqual([]);
+			const warn = jest.fn();
+			process.env.AI_PROVIDER = 'gemini';
+			delete process.env.GEMINI_API_KEY;
+			const client = makeClient();
+			jest.spyOn((client as any).logger, 'warn').mockImplementation(warn);
+			client.onModuleInit();
+			expect(warn).toHaveBeenCalledTimes(3);
+		});
 	});
 
 	it('waits 1 second before the retry', () => {

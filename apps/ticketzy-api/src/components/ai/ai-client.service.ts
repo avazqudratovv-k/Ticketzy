@@ -1,7 +1,7 @@
-import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { Message } from '../../libs/enums/common.enum';
 import { RateLimiter } from '../../libs/rate-limiter';
-import { AiConfig, getAiConfig } from '../../libs/env.validation';
+import { AiConfig, getAiConfig, getAiStartupWarnings } from '../../libs/env.validation';
 import {
 	AiChatRequest,
 	AiChatResult,
@@ -16,8 +16,16 @@ import { AI_PROVIDER_FACTORY, AiProviderFactory } from './providers/create-ai-pr
 export const AI_RETRY_DELAY_MS = 1000;
 
 /** the vendor said 503/504 (overloaded, gateway timeout) or our own per-request timeout hit: worth one more try */
-const isBusyError = (err: unknown): boolean =>
+const isRetryableError = (err: unknown): boolean =>
 	err instanceof AiProviderError && (err.kind === 'timeout' || Number(err.status) === 503 || Number(err.status) === 504);
+
+/** the user is told "busy": a retryable error, or 429 (quota) */
+const isBusyError = (err: unknown): boolean => isRetryableError(err) || (err instanceof AiProviderError && Number(err.status) === 429);
+
+/** 404 (unknown model), 429, 503, 504 and a timeout: the configured fallback model gets one try */
+const FALLBACK_STATUSES = [404, 429, 503, 504];
+const canFallBack = (err: unknown): boolean =>
+	err instanceof AiProviderError && (err.kind === 'timeout' || FALLBACK_STATUSES.includes(Number(err.status)));
 
 /**
  * The only place the AI services reach a model vendor (the browser never does), through the AiProvider of AI_PROVIDER.
@@ -25,14 +33,18 @@ const isBusyError = (err: unknown): boolean =>
  * they answer with a clear message and the rest of the app keeps working. The key and the prompts are never logged.
  */
 @Injectable()
-export class AiClientService {
+export class AiClientService implements OnModuleInit {
 	private readonly logger = new Logger(AiClientService.name);
-	private provider: AiProvider | null = null;
-	private providerKey = '';
+	private readonly providers = new Map<string, AiProvider>();
 	private limiter: RateLimiter | null = null;
 	private limiterSize = 0;
 
 	constructor(@Inject(AI_PROVIDER_FACTORY) private readonly createProvider: AiProviderFactory) {}
+
+	/** only reads the environment (no call to the vendor) and only warns, it never stops the app */
+	public onModuleInit(): void {
+		for (const warning of getAiStartupWarnings()) this.logger.warn(warning);
+	}
 
 	public getConfig(): AiConfig {
 		return getAiConfig();
@@ -84,35 +96,61 @@ export class AiClientService {
 		try {
 			return await call();
 		} catch (err) {
-			if (!isBusyError(err)) throw err;
+			if (!isRetryableError(err)) throw err;
 			await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
 			return call();
 		}
 	}
 
-	/** one model call; every failure becomes a clear Message, with only the error type and status in the log */
+	/**
+	 * One model call. The main model gets one retry; when it still fails with 404/429/503/504/timeout and
+	 * GEMINI_FALLBACK_MODEL is set, the fallback model gets exactly one try. Every failure becomes a clear Message,
+	 * with only the error type, status and model name in the log (never the key or the prompt).
+	 */
 	private async run<T>(call: (provider: AiProvider) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
+		let failure: unknown;
 		try {
 			return await this.runWithRetry(() => call(this.getProvider(config)));
 		} catch (err) {
-			if (err instanceof AiProviderError) {
-				this.logger.error(`AI request failed: provider=${config.provider} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
-				if (err.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
-				if (isBusyError(err)) throw new ServiceUnavailableException(Message.AI_BUSY);
-				throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
+			failure = err;
+			this.logFailure(config, config.model, err);
+		}
+		if (config.fallbackModel && canFallBack(failure)) {
+			const fallback = { ...config, model: config.fallbackModel };
+			try {
+				const result = await call(this.getProvider(fallback));
+				this.logger.warn(`AI fallback model answered: provider=${config.provider} model=${fallback.model}`);
+				return result;
+			} catch (err) {
+				failure = err;
+				this.logFailure(config, fallback.model, err);
 			}
-			this.logger.error(`AI request failed: provider=${config.provider} ${err?.constructor?.name ?? 'Error'}`);
-			throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
+		}
+		if (failure instanceof AiProviderError) {
+			if (failure.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
+			if (isBusyError(failure)) throw new ServiceUnavailableException(Message.AI_BUSY);
+		}
+		throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
+	}
+
+	private logFailure(config: AiConfig, model: string, err: unknown): void {
+		if (err instanceof AiProviderError) {
+			this.logger.error(`AI request failed: provider=${config.provider} model=${model} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
+		} else {
+			this.logger.error(`AI request failed: provider=${config.provider} model=${model} ${(err as Error)?.constructor?.name ?? 'Error'}`);
 		}
 	}
 
 	private getProvider(config: AiConfig): AiProvider {
 		const key = `${config.provider}:${config.model}:${config.apiKey.length}:${config.apiKey.slice(-4)}:${config.timeoutMs}`;
-		if (!this.provider || this.providerKey !== key) {
-			this.provider = this.createProvider(config);
-			this.providerKey = key;
+		let provider = this.providers.get(key);
+		if (!provider) {
+			// a changed key or setting makes a new provider; keep the map small (main + fallback)
+			if (this.providers.size >= 4) this.providers.clear();
+			provider = this.createProvider(config);
+			this.providers.set(key, provider);
 		}
-		return this.provider;
+		return provider;
 	}
 }
