@@ -57,4 +57,5 @@ pids
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Images
-uploads
+uploads.claude/settings.local.json
+uploads/
