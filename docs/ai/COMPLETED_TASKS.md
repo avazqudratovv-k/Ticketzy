@@ -547,3 +547,10 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 ## Nestar backend comparison (decision #89)
 - New `docs/ai/NESTAR_COMPARISON.md`: summary table, details per point (layout, NestJS setup, GraphQL, Mongoose, auth, uploads, realtime, batch, logging, tests, tooling, docs), DIVERGED items with keep or realign and effort, overall verdict. Result: 0 SAME, 7 EXTENDED, 5 DIVERGED.
 - Nestar reference was `/Users/kenneth/nestar` (chosen by the owner); read only, no `.env` read, nothing committed. Static comparison only: no app started, no tests run.
+
+## Cleanup, risk and security audit (report only)
+- New `docs/ai/CLEANUP_AUDIT.md`: 12 sections (dead code and dependencies, exception classes, docs, authorization matrix of all 97 operations plus REST and WebSocket, authentication, input validation, data integrity and money, configuration, AI assistant, dependencies and secrets, tests with a minimal CI workflow, demo readiness). 86 numbered findings C3-1 to C3-86: 5 high, 36 medium, 45 low; sizes 74 small, 11 medium, 1 large. Ten to fix first are listed at the end of the file, with the points that could not be verified.
+- Checks run: both `tsc` checks, `npm run build` (refreshed the git-ignored `dist/`), `npx jest` (38 suites, 828 tests, pass; also with an empty environment), ESLint without `--fix` for counts, `npm audit` (81 total, 28 in production dependencies), `git log -G` secret patterns (0 hits).
+- Tests: none added. No application code, `package.json`, lockfile or config changed; no `.env*` file read; nothing committed.
+- Decision: none added (report only). Findings that need a decision before a fix: error-code policy (C3-11, C3-12), money unit (C3-53), hold and upload quotas (C3-34, C3-56), the `graphql-upload` / Nest / Apollo upgrade (C3-74).
+- Not done / risks: the API was never started and no database was touched, so the matrix and the leaks are read from the source, and the concurrency claims are unproved (C3-76); the frontend repo was not scanned for operations it uses; hosting behaviour (Render) is from general knowledge; `npm run lint` was skipped because it rewrites files.
