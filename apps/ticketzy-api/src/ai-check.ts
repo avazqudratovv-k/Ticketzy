@@ -1,5 +1,5 @@
 /**
- * npm run ai:check (or yarn ai:check)
+ * npm run ai:check
  * Tests the AI setup from .env: which settings are set (never their values), the models Google offers, and one tiny
  * "Say hello" request with the configured model. Exit code 0 when it works, 1 when it does not. Prints no secrets.
  */

@@ -2,6 +2,7 @@
 
 Ticketzy is the backend of a ticket selling platform: organizers publish events at venues with ticket types or reserved seats, buyers hold seats, pay (mock provider), receive QR tickets and can refund, and admins approve organizers and events, handle refunds and mark payouts. It started from the Nestar codebase (see `docs/ai/BACKEND_MIGRATION.md`).
 
+- Needs Node 22+ and MongoDB 5.0+ (payouts use `$dateAdd` with a time zone). CI is `.github/workflows/ci.yml` (both `tsc`, build, tests); there are no e2e tests (#99).
 - Stack: NestJS (monorepo), GraphQL code-first (Apollo), Mongoose and MongoDB, JWT, `graphql-upload`, a `ws` gateway for chat, a batch app (`@nestjs/schedule`) and Jest. Package manager: npm (`package-lock.json`).
 - Roles (`MemberType`): `USER` buys, `ORGANIZER` needs admin approval (PENDING until verified), `ADMIN` is created only by `npm run seed`. Roles are set only by the server (#23).
 - Only `USER` accounts can buy tickets: `assertBuyerAccount` (`libs/buyer.ts`) in `holdSeats`, `createCheckout` and `payOrder` (#80, #81).
@@ -16,6 +17,7 @@ npm run start:prod         # node dist/apps/ticketzy-api/main (needs build first
 npm run test               # Jest, whole suite
 npm run lint               # ESLint WITH --fix: it rewrites files (decision #6), run only when that is fine
 npm run ai:check           # checks the AI settings and sends one tiny request (uses the key in .env, a real call)
+npm run report:currency    # read-only report of ticket types that are not in KRW (#95), needs the database
 npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit
 npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 ```
@@ -32,8 +34,9 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Do not commit unless asked.
 - Never read `.env` or print secrets and API keys. Use `.env.example` for variable names.
 - No new dependencies without asking.
-- Every user-facing error goes through the `Message` enum (`libs/enums/common.enum.ts`).
-- Follow the existing role conventions: `@Roles(...)` with `RolesGuard`; organizer writes also use `ActiveOrganizerGuard`. Admin actions that change state write an audit entry (`AuditLogService.record`, `AuditAction`).
+- Every user-facing error goes through the `Message` enum (`libs/enums/common.enum.ts`). Raw errors (Mongo duplicate keys, cast errors, plain `Error`s) are mapped to safe `{ code, message }` in `formatGraphQLError` (`libs/error-mapping.ts`, #97); never put internal values in a message.
+- Follow the existing role conventions: `@Roles(...)` with `RolesGuard`; organizer writes also use `ActiveOrganizerGuard`. Admin actions that change state write an audit entry (`AuditLogService.record`, `AuditAction`; field names only, never values, #94).
+- Every list query takes `page` and `limit` through `PageField` / `LimitField` (`libs/dto/common/pagination.ts`): `limit` at most 100, `page` at most 10000 (#91). Do not add a bare `@Min(1)` limit.
 - Add or update focused tests when behavior changes; the full suite (`npm run test`), both `tsc` checks and `npm run build` must pass before reporting.
 
 ## Project Shape
@@ -41,15 +44,20 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Apps: `apps/ticketzy-api` and `apps/ticketzy-batch`. DTOs, enums and schemas live in `apps/ticketzy-api/src/libs`; modules in `src/components/<name>`.
 - Terms: the catalog entity is Event (with Venue, TicketType, Order, Ticket, EventSeat). The community board is gone; do not bring back old catalog terms.
 - Shared modules stay reusable: auth, member, like, view, comment (events only), follow (organizers only), socket.
+- The batch app (`apps/ticketzy-batch`) runs four jobs: ranks (events at minute 20, organizers at minute 40, computed then written in place, #96), order and seat-hold expiry (every minute), ending finished events (minute 30).
 - Ticket inventory changes are atomic (conditional `findOneAndUpdate`); there are no transactions (#17).
 
 ## Domain Rules (details in DECISIONS.md)
 
+- Member privacy: only the fields listed in #90 are public; `memberPhone`, `memberEmail`, warnings, blocks, `deletedAt` are for the member and admins, full name and address only for organizers. A new `Member` `@Field` must be classified in `member.privacy.spec.ts`.
+- Payments: `PAYMENT_MODE=simulated|disabled`, required in production (#92). No real provider exists; `payOrder` is the mock. Ticket types are KRW only, one currency per event (#95).
+- Uploads: multipart requests need a valid bearer token before they are parsed (`libs/upload-guard.ts`, #98). Admins cannot reset another admin's password (#93).
 - Payouts: one per event, due event end + 3 days in the venue timezone, status computed (never stored), a `Payout` document is created only when an admin marks it paid. `libs/payout.ts`, `components/payout` (#76 to #78).
 - Venue conflicts: overlapping events at the same venue record are refused; admins see `possibleVenueConflicts`. `libs/venue-conflicts.ts` (#83, #84).
 - Seat hold and order flow: `holdSeats` (conditional update per seat), `createCheckout`, `payOrder`, expiry in the batch job. `components/seat`, `components/order`, `components/payment` (#45 to #50).
 - Event seat fields: `EventSeat` documents generated at approval; `eventTotalSeats` and `eventSoldSeats` on `Event`. `libs/seat-counts.ts` (#43, #79).
 - Refunds: whole order, deadline the day before the event. `components/refund`, `libs/refund-policy.ts` (#54, #55).
+- Admin seed: `ADMIN_EMAIL`/`ADMIN_PASSWORD` and optional `ADMIN2_*` (`npm run seed`, #23, #75); `npm run seed:demo` for demo data (#62).
 - AI assistant: off unless `AI_ENABLED=true`; settings `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE`. `components/ai`, `libs/env.validation.ts` (#60, #61, #63, #85 to #87).
 
 ## Skills

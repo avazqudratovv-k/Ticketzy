@@ -6,6 +6,7 @@ import CommentSchema from '../../libs/schemas/Comment.model';
 import { AuthModule } from '../auth/auth.module';
 import { EventModule } from '../event/event.module';
 import { NotificationModule } from '../notification/notification.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { NotificationModule } from '../notification/notification.module';
     AuthModule,
     EventModule,
     NotificationModule,
+    AuditLogModule,
   ],
   providers: [CommentResolver, CommentService]
 })

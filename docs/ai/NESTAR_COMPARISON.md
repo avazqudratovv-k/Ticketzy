@@ -15,7 +15,7 @@ Labels: **SAME** (copied convention, nothing added), **EXTENDED** (Ticketzy adde
 | 5 | Auth | DIVERGED | Same guards, `@Roles`, `@AuthMember` and `request.body.authMember`; token payload, lifetime and per-request member reload changed (#25) |
 | 6 | Uploads | DIVERGED | Same `graphql-upload`, `imageUploader`, `uploads/<target>/`, `/uploads` static; client mimetype check replaced by magic bytes (#26) |
 | 7 | Realtime | DIVERGED | Same `ws` gateway and `WsAdapter`; global chat room with `?token=` replaced by per-conversation rooms and header/first-message auth (#58, #59) |
-| 8 | Batch jobs | EXTENDED | Same batch app shape (`@Cron` with names, `try/catch`, `lib/config.ts`); five jobs instead of three, some schedules changed |
+| 8 | Batch jobs | EXTENDED | Same batch app shape (`@Cron` with names, `try/catch`, `lib/config.ts`); four jobs instead of three, some schedules changed (the rollback job was removed, #96) |
 | 9 | Logging, interceptors, filters | DIVERGED | Same `LoggingInterceptor` file, now without request variables; `console.log` replaced by `Logger`; neither repo has exception filters |
 | 10 | Tests | EXTENDED | Same Jest config and `*.spec.ts` rule; Nestar has no unit tests, Ticketzy has 38 spec files |
 | 11 | Scripts, tooling, TypeScript | EXTENDED | `tsconfig`, `nest-cli.json`, ESLint and Prettier files are identical; Ticketzy adds seed and AI scripts and three dependencies |
@@ -39,7 +39,7 @@ Labels: **SAME** (copied convention, nothing added), **EXTENDED** (Ticketzy adde
 ### 3. GraphQL: EXTENDED
 - SAME: code-first; `@Resolver()` class calling one service; `@Args('input') input: XInput`; `@Mutation`/`@Query` with `(returns) => Type`; `@UseGuards` + `@Roles` on the handler; list results as `{ list, metaCounter: [{ total }] }` built by `$facet` (`$skip`/`$limit` inside the facet; Nestar 14 `metaCounter` uses, Ticketzy 27); `page`/`limit` inputs (`OrdinaryInquiry`); sorts are `@IsIn(availableXSorts)` whitelists in `libs/config.ts` plus `direction: Direction` (ASC = 1, DESC = -1), default `createdAt` DESC; `shapeIntoMongoObjectId` in the resolver; `lookupMember`-style `$lookup` helpers in `libs/config.ts`; `Message` enum in `libs/enums/common.enum.ts`; error body is `{ code, message }` in both.
 - EXTENDED: about 96 operations vs about 40 (counted by `@Query`/`@Mutation` in resolvers); `Message` enum grew from 17 to about 115 values (every user-facing error goes through it, rule in AGENTS.md); `@ResolveField` on `Event` for owner/admin-only fields; sort whitelists got an `_id` tie-break in places (#72c); new lookup helpers (`lookupEventWithVenue`, `lookupActiveOrganizer`); resolvers log with `Logger` (`this.logger.log('Mutation: ...')`) instead of `console.log('Mutation: ...')`.
-- Drift not in DECISIONS: exception classes. Nestar throws mostly `InternalServerErrorException` (39 of 55 throws). Ticketzy throws `BadRequestException` 126 times and `InternalServerErrorException` 55 times; clients see GraphQL status 200 either way. One `GraphQLError` is used for the login code (#64).
+- Drift not in DECISIONS: exception classes. Nestar throws mostly `InternalServerErrorException` (39 of 55 throws). Ticketzy throws `BadRequestException` 127 times and `InternalServerErrorException` 58 times (counted on 2026-10-13; 126 and 55 when this was first written); clients see GraphQL status 200 either way. One `GraphQLError` is used for the login code (#64).
 
 ### 4. Mongoose: EXTENDED (one DIVERGED sub-item)
 - SAME: `new Schema({...}, { timestamps: true, collection })` in `libs/schemas/X.model.ts`, `export default XSchema`; modules register `MongooseModule.forFeature([{ name: 'X', schema }])`; services use `@InjectModel('X') private readonly xModel: Model<X>`; reads end in `.lean().exec()`; lists are aggregations with `$match`, `$sort`, `$facet`, `$lookup`/`$unwind`; counters change through a `xStatsEditor` with `$inc`; `DatabaseModule` identical apart from logging.
@@ -66,18 +66,18 @@ Labels: **SAME** (copied convention, nothing added), **EXTENDED** (Ticketzy adde
 
 ### 8. Batch or scheduled jobs: EXTENDED
 - SAME: separate app `apps/<name>-batch` (`BatchModule`, `BatchController` with `@Cron(..., { name })`, `BatchService`, `lib/config.ts` job names, own `DatabaseModule`); `@Timeout(1000)` "BATCH SERVER READY"; each job wrapped in `try/catch` with `this.logger['context'] = NAME`; the `@Interval(1000)` test block is commented out in both; schemas are imported from the API app by absolute path (#4).
-- EXTENDED: five jobs instead of three (`batchRollback`, `batchTopEvents`, `batchTopOrganizers`, `batchExpireOrders`, `batchEndEvents`); module registers five schemas and uses `validateEnv()`; batch has a spec (`batch.service.spec.ts`).
-- Schedule drift: Nestar runs rollback, top properties and top agents every minute (`00/20/40 * * * * *`); Ticketzy runs them hourly (`00 00`, `20 00`, `40 00`), expiry every minute at second 10, event ending hourly at minute 30. Only the end-events job (#39) and expiry (#50) are in DECISIONS; the change of the ranking schedules is not recorded.
+- EXTENDED: four jobs instead of three (`batchTopEvents`, `batchTopOrganizers`, `batchExpireOrders`, `batchEndEvents`; `batchRollback` was removed by decision #96); module registers five schemas and uses `validateEnv()`; batch has a spec (`batch.service.spec.ts`).
+- Schedule drift: Nestar runs rollback, top properties and top agents every minute (`00/20/40 * * * * *`); Ticketzy runs the two top jobs hourly (`20 00`, `40 00`; the rollback at `00 00` was removed by #96), expiry every minute at second 10, event ending hourly at minute 30. Only the end-events job (#39) and expiry (#50) are in DECISIONS; the change of the ranking schedules is now recorded in #96.
 - The `batch.controller.ts` still has the Nestar `getHello` route.
 
 ### 9. Logging, interceptors, filters: DIVERGED
 - SAME: global `LoggingInterceptor` (same file name `Logging.interceptor.ts`, same REQUEST/RESPONSE log with timing); no `ExceptionFilter`, `APP_FILTER` or `APP_INTERCEPTOR` anywhere in either repo (checked by search); errors are shaped only in `formatError`.
-- DIVERGED: Ticketzy logs the operation name instead of the request body (variables carry passwords); `console.log` in guards, resolvers and database was replaced by `Logger` (49 files use `new Logger` vs 2 in Nestar; no `console.*` left outside seeds and `ai-check`); expected domain errors log as `warn` (#65d).
+- DIVERGED: Ticketzy logs the operation name instead of the request body (variables carry passwords); `console.log` in guards, resolvers and database was replaced by `Logger` (52 files use `new Logger` vs 2 in Nestar, counted on 2026-10-13; no `console.*` left outside seeds and `ai-check`); expected domain errors log as `warn` (#65d).
 - Reason: #65d is recorded; the interceptor change and the `Logger` migration have only a code comment, no decision number.
 
 ### 10. Tests: EXTENDED
 - SAME: Jest config in `package.json` (`testRegex .*\.spec\.ts$`, `ts-jest`, `roots: apps/`), `test/app.e2e-spec.ts` + `jest-e2e.json` in both apps (the Nest boilerplate "Hello World" e2e; both need a database; not run here).
-- EXTENDED: Nestar has 0 unit specs. Ticketzy has 38 spec files with about 639 `it`/`test` cases (counted by pattern, approximate), colocated with the code (`*.service.spec.ts`, `libs/*.spec.ts`, `guards.spec.ts`, `socket.gateway.spec.ts`, `batch.service.spec.ts`); style: pure functions tested directly, services with mocked Mongoose models, frozen clock for date logic (#70), a resolver scan test (`admin-access.spec.ts`).
+- EXTENDED: Nestar has 0 unit specs. Ticketzy has 47 spec files and 999 Jest tests (counted on 2026-10-13 from the Jest run after the C3 fixes; the first version said about 639 by a pattern count that missed `it.each`), colocated with the code (`*.service.spec.ts`, `libs/*.spec.ts`, `guards.spec.ts`, `socket.gateway.spec.ts`, `batch.service.spec.ts`); style: pure functions tested directly, services with mocked Mongoose models, frozen clock for date logic (#70), a resolver scan test (`admin-access.spec.ts`).
 - Not run: the suites were not executed for this report (report-only task).
 
 ### 11. Scripts, tooling, lint, TypeScript: EXTENDED
@@ -102,7 +102,7 @@ Labels: **SAME** (copied convention, nothing added), **EXTENDED** (Ticketzy adde
 | `LoggingInterceptor` no longer logs variables | no decision number | **Keep**, but record it. Passwords would otherwise reach the log | trivial: add a decision line |
 | `console.log` to `Logger` | no decision number | **Keep**, record it | trivial |
 | Ranking batch jobs hourly instead of every minute | no decision number | **Keep** the hourly schedule (every minute is demo-grade), record it | trivial |
-| Exception class mix (`BadRequest` 126 vs `InternalServerError` 55) | no decision number | **Realign** (inconsistent for no good reason): `NO_DATA_FOUND` and similar are thrown as `InternalServerErrorException` (Nestar habit) next to `BadRequestException`. Clients only see GraphQL 200 plus `code`, so this affects the `code` value only | medium: audit about 55 throw sites, check frontend code matching |
+| Exception class mix (`BadRequest` 127 vs `InternalServerError` 58) | no decision number | **Realign** (inconsistent for no good reason): `NO_DATA_FOUND` and similar are thrown as `InternalServerErrorException` (Nestar habit) next to `BadRequestException`. Clients only see GraphQL 200 plus `code`, so this affects the `code` value only | medium: audit about 55 throw sites, check frontend code matching |
 | `batch.controller.ts` keeps the `getHello` route and the commented `@Interval` block | Nestar leftover | **Realign** (remove) when touched next | trivial |
 
 ## 4. Overall judgement

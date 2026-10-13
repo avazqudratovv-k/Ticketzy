@@ -67,7 +67,7 @@ First, resolve the open questions in `DECISIONS.md` (full rename vs. keep intern
 | T1 | Start the API and compare schema introspection with the pre-rename schema (expect no diff) |
 | T2 | Smoke-test login, `getEvents` and image upload against a dev DB |
 | T3 | Add unit tests for the auth guards and the inventory decrement (concurrency) |
-| T4 | Replace the boilerplate e2e specs with real ones; the batch spec needs Mongo |
+| T4 | The boilerplate e2e specs were deleted (#99); a real smoke test and race tests need a test database (audit C3-76) |
 | T5 | Run the prettier formatting pass as one isolated commit, then keep `npm run lint` clean |
 
 ## Documentation

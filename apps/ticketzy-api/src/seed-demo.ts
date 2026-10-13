@@ -414,6 +414,7 @@ async function seedDemo(): Promise<void> {
 	// default hold is too short for a slow connection; both only apply to this process
 	process.env.AI_ENABLED = 'false';
 	process.env.SEAT_HOLD_SECONDS = '300';
+	process.env.PAYMENT_MODE = 'simulated'; // the demo buys through payOrder with the mock provider
 
 	console.log(`Seeding demo data into ${uriKey === 'MONGO_PROD' ? 'the PRODUCTION database' : 'the development database'}...`);
 	const app = await NestFactory.createApplicationContext(DemoSeedModule, { logger: ['error', 'warn'] });

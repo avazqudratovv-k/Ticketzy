@@ -10,6 +10,7 @@ import { RateLimiter } from '../../libs/rate-limiter';
 import { Message } from '../../libs/enums/common.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { NotificationGroup, NotificationStatus, NotificationType } from '../../libs/enums/notification.enum';
+import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 
 const oid = () => new ObjectId();
 const member = (memberType: MemberType, memberStatus = MemberStatus.ACTIVE) => ({ _id: oid(), memberType, memberStatus }) as any;
@@ -53,6 +54,7 @@ const build = () => {
 	const conversations = new ConversationModel();
 	const messages = new FakeModel();
 	const notifications = { createNotification: jest.fn().mockResolvedValue(undefined) };
+	const audit = { record: jest.fn().mockResolvedValue(undefined) };
 	const realtime = new ConversationRealtime();
 	const service = new ConversationService(
 		conversations as any,
@@ -61,6 +63,7 @@ const build = () => {
 		events as any,
 		notifications as unknown as NotificationService,
 		realtime,
+		audit as any,
 	);
 
 	/** the support conversation and an event conversation of `organizer`, created directly */
@@ -70,7 +73,7 @@ const build = () => {
 		return { support, event };
 	};
 	const row = (id: any) => conversations.docs.find((d) => String(d._id) === String(id));
-	return { service, conversations, messages, members, notifications, realtime, organizer, admin, eventId, otherEventId, seed, row };
+	return { service, conversations, messages, members, notifications, audit, realtime, organizer, admin, eventId, otherEventId, seed, row };
 };
 
 describe('ConversationService authorization', () => {
@@ -579,6 +582,29 @@ describe('startConversationWithOrganizer (admin)', () => {
 				conversationId: conversations.docs[0]._id,
 			}),
 		);
+	});
+
+	it('audits the creation once: not on a repeat call', async () => {
+		const { service, conversations, audit, organizer, admin } = build();
+
+		await service.startConversationWithOrganizer(admin, organizer._id);
+		await service.startConversationWithOrganizer(admin, organizer._id);
+
+		expect(audit.record).toHaveBeenCalledTimes(1);
+		expect(audit.record).toHaveBeenCalledWith({
+			actorId: admin._id,
+			action: AuditAction.SUPPORT_CONVERSATION_STARTED,
+			targetType: AuditTargetType.CONVERSATION,
+			targetId: conversations.docs[0]._id,
+			meta: { organizerId: organizer._id },
+		});
+	});
+
+	it('writes no audit entry when the start is refused', async () => {
+		const { service, audit, members, admin } = build();
+		const user = members.docs.find((m) => m.memberType === MemberType.USER) ?? { _id: 'nobody' };
+		await expect(service.startConversationWithOrganizer(admin, user._id)).rejects.toThrow();
+		expect(audit.record).not.toHaveBeenCalled();
 	});
 
 	it('is idempotent: a second call, also by another admin, returns the same conversation without a new notification', async () => {

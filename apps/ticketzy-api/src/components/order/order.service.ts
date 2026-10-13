@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { GraphQLError } from 'graphql';
 import { Model, ObjectId, Types } from 'mongoose';
 import { randomBytes } from 'crypto';
 import * as moment from 'moment';
@@ -15,7 +16,7 @@ import { OrderStatus, PaymentSimulation, TicketStatus } from '../../libs/enums/t
 import { T } from '../../libs/types/common';
 import { escapeRegExp, lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
-import { getSeatHoldSeconds } from '../../libs/env.validation';
+import { getPaymentMode, getSeatHoldSeconds } from '../../libs/env.validation';
 import { assertBuyerAccount } from '../../libs/buyer';
 import { buildQrToken } from '../../libs/qr-token';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
@@ -174,6 +175,10 @@ export class OrderService {
 	 * FAILURE: seats or stock are released and the order is FAILED.
 	 */
 	public async payOrder(memberId: ObjectId, orderId: ObjectId, simulate: PaymentSimulation): Promise<Order> {
+		// PAYMENT_MODE=disabled turns every payment off; `simulated` is the mock below (DECISIONS #92)
+		if (getPaymentMode() === 'disabled') {
+			throw new GraphQLError(Message.PAYMENTS_DISABLED, { extensions: { code: 'SERVICE_UNAVAILABLE' } });
+		}
 		const payer = await this.memberModel.findOne({ _id: memberId }).select('memberType').lean().exec();
 		assertBuyerAccount(payer?.memberType);
 		const order = await this.orderModel.findOne({ _id: orderId, buyerId: memberId }).lean().exec();

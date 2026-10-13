@@ -9,6 +9,7 @@ import MemberSchema from '../../libs/schemas/Member.model';
 import EventSchema from '../../libs/schemas/Event.model';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationModule } from '../notification/notification.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
 	imports: [
@@ -20,6 +21,7 @@ import { NotificationModule } from '../notification/notification.module';
 		]),
 		AuthModule,
 		NotificationModule,
+		AuditLogModule,
 	],
 	providers: [ConversationResolver, ConversationService, ConversationRealtime],
 	exports: [ConversationService, ConversationRealtime],

@@ -14,6 +14,7 @@ import { Member } from '../../libs/dto/member/member';
 import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 import { countTierSeats } from '../../libs/venue-layout';
+import { EVENT_CURRENCY } from '../../libs/currency';
 
 @Injectable()
 export class TicketTypeService {
@@ -30,6 +31,11 @@ export class TicketTypeService {
 	public async createTicketType(memberId: ObjectId, memberType: MemberType, input: TicketTypeInput): Promise<TicketType> {
 		const eventId = shapeIntoMongoObjectId(input.eventId);
 		const event = await this.assertCanManageEvent(eventId, memberId, memberType);
+		// one currency per event (KRW): the payout of an event adds its orders up as whole won
+		if (input.ticketCurrency !== EVENT_CURRENCY) throw new BadRequestException(Message.ONLY_KRW_TICKETS);
+		if (await this.ticketTypeModel.exists({ eventId, ticketCurrency: { $ne: EVENT_CURRENCY } })) {
+			throw new BadRequestException(Message.EVENT_HAS_OTHER_CURRENCY);
+		}
 		const totalQuantity = await this.resolveTotalQuantity(event, input.tierKey, input.totalQuantity);
 
 		try {
@@ -46,6 +52,11 @@ export class TicketTypeService {
 		const target = await this.ticketTypeModel.findById(input._id).lean().exec();
 		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 		const event = await this.assertCanManageEvent(target.eventId, memberId, memberType);
+		// a currency can only be set to KRW, and a type that already sold in another currency keeps it (its orders stay as they are)
+		if (input.ticketCurrency !== undefined) {
+			if (input.ticketCurrency !== EVENT_CURRENCY) throw new BadRequestException(Message.ONLY_KRW_TICKETS);
+			if (target.ticketCurrency !== EVENT_CURRENCY && target.soldQuantity > 0) throw new BadRequestException(Message.TICKET_CURRENCY_LOCKED);
+		}
 
 		const update: T = { ...input };
 		if (event.seatingType === SeatingType.RESERVED) {

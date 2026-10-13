@@ -10,6 +10,9 @@ import { EventSeat } from 'apps/ticketzy-api/src/libs/dto/event/event-seat';
 import { SeatStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
 import { OrderStatus, TicketTypeStatus } from 'apps/ticketzy-api/src/libs/enums/ticket.enum';
 import { Model } from 'mongoose';
+import { getEventRank, getOrganizerRank } from './lib/rank';
+
+const RANK_WRITE_CHUNK = 500;
 
 @Injectable()
 export class BatchService {
@@ -23,58 +26,42 @@ export class BatchService {
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
 	) {}
 
-	public async batchRollback(): Promise<void> {
-		await this.eventModel
-			.updateMany(
-				{
-					eventStatus: publicEventStatus,
-				},
-				{ eventRank: 0 },
-			)
-			.exec();
-
-		await this.memberModel
-			.updateMany(
-				{
-					memberStatus: MemberStatus.ACTIVE,
-					memberType: MemberType.ORGANIZER,
-				},
-				{ memberRank: 0 },
-			)
-			.exec();
-	}
-
+	/**
+	 * Ranks are computed first and written after, so a rank is never zero in between (DECISIONS #96; the old rollback job
+	 * zeroed every rank and the top jobs refilled them 20 and 40 minutes later). Only documents whose rank changed are written.
+	 */
 	public async batchTopEvents(): Promise<void> {
-		const events: Event[] = await this.eventModel
-			.find({
-				eventStatus: publicEventStatus,
-				eventRank: 0,
-			})
+		const events = await this.eventModel
+			.find({ eventStatus: publicEventStatus })
+			.select('_id eventLikes eventViews eventRank')
+			.lean()
 			.exec();
 
-		const promisedList = events.map(async (ele: Event) => {
-			const { _id, eventLikes, eventViews } = ele;
-			const rank = eventLikes * 2 + eventViews * 1;
-			return await this.eventModel.findByIdAndUpdate(_id, { eventRank: rank });
-		});
-		await Promise.all(promisedList);
+		const operations = events
+			.map((ele) => ({ _id: ele._id, rank: getEventRank(ele), current: ele.eventRank }))
+			.filter((item) => item.rank !== item.current)
+			.map((item) => ({ updateOne: { filter: { _id: item._id }, update: { $set: { eventRank: item.rank } } } }));
+		await this.writeInChunks(this.eventModel, operations);
 	}
 
 	public async batchTopOrganizers(): Promise<void> {
-		const organizers: Member[] = await this.memberModel
-			.find({
-				memberType: MemberType.ORGANIZER,
-				memberStatus: MemberStatus.ACTIVE,
-				memberRank: 0,
-			})
+		const organizers = await this.memberModel
+			.find({ memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE })
+			.select('_id memberEvents memberLikes memberViews memberRank')
+			.lean()
 			.exec();
 
-		const promisedList = organizers.map(async (ele: Member) => {
-			const { _id, memberEvents, memberLikes, memberViews } = ele;
-			const rank = memberEvents * 5 + memberLikes * 2 + memberViews * 1;
-			return await this.memberModel.findByIdAndUpdate(_id, { memberRank: rank });
-		});
-		await Promise.all(promisedList);
+		const operations = organizers
+			.map((ele) => ({ _id: ele._id, rank: getOrganizerRank(ele), current: ele.memberRank }))
+			.filter((item) => item.rank !== item.current)
+			.map((item) => ({ updateOne: { filter: { _id: item._id }, update: { $set: { memberRank: item.rank } } } }));
+		await this.writeInChunks(this.memberModel, operations);
+	}
+
+	private async writeInChunks(model: Model<any>, operations: any[]): Promise<void> {
+		for (let start = 0; start < operations.length; start += RANK_WRITE_CHUNK) {
+			await model.bulkWrite(operations.slice(start, start + RANK_WRITE_CHUNK), { ordered: false });
+		}
 	}
 
 	/**

@@ -1,4 +1,4 @@
-import { Args, Context, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
+import { Args, Context, Int, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { CommissionOverride, Member, Members } from '../../libs/dto/member/member';
@@ -28,9 +28,48 @@ export class MemberResolver {
 		return String(authMember._id) === String(member._id) || authMember.memberType === MemberType.ADMIN;
 	}
 
+	private isPublicOrganizerOrAllowed(member: Member, context: any): boolean {
+		return member.memberType === MemberType.ORGANIZER || this.isSelfOrAdmin(member, context);
+	}
+
 	@ResolveField(() => String, { nullable: true })
 	public memberEmail(@Parent() member: Member, @Context() context: any): string | null {
 		return member.memberEmail && this.isSelfOrAdmin(member, context) ? member.memberEmail : null;
+	}
+
+	/**
+	 * Personal data (DECISIONS #90): phone, warnings, blocks and the deletion date are for the member and admins only.
+	 * Full name and address are shown publicly only for ORGANIZER accounts, where they are the organization name and
+	 * address of the public organizer page; for buyers and admins they are private too.
+	 */
+	@ResolveField(() => String, { nullable: true })
+	public memberPhone(@Parent() member: Member, @Context() context: any): string | null {
+		return member.memberPhone && this.isSelfOrAdmin(member, context) ? member.memberPhone : null;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public memberFullName(@Parent() member: Member, @Context() context: any): string | null {
+		return member.memberFullName && this.isPublicOrganizerOrAllowed(member, context) ? member.memberFullName : null;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public memberAddress(@Parent() member: Member, @Context() context: any): string | null {
+		return member.memberAddress && this.isPublicOrganizerOrAllowed(member, context) ? member.memberAddress : null;
+	}
+
+	@ResolveField(() => Int, { nullable: true })
+	public memberWarnings(@Parent() member: Member, @Context() context: any): number | null {
+		return this.isSelfOrAdmin(member, context) ? (member.memberWarnings ?? 0) : null;
+	}
+
+	@ResolveField(() => Int, { nullable: true })
+	public memberBlocks(@Parent() member: Member, @Context() context: any): number | null {
+		return this.isSelfOrAdmin(member, context) ? (member.memberBlocks ?? 0) : null;
+	}
+
+	@ResolveField(() => Date, { nullable: true })
+	public deletedAt(@Parent() member: Member, @Context() context: any): Date | null {
+		return member.deletedAt && this.isSelfOrAdmin(member, context) ? member.deletedAt : null;
 	}
 
 	@ResolveField(() => String, { nullable: true })

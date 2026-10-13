@@ -2,6 +2,7 @@ import { Field, InputType, Int } from '@nestjs/graphql';
 import { IsNotEmpty, IsOptional, Min } from 'class-validator';
 import { ObjectId } from 'mongoose';
 import { NotificationGroup, NotificationStatus, NotificationType } from '../../enums/notification.enum';
+import { PageField, LimitField } from '../common/pagination';
 
 /** internal: what other services pass to NotificationService.createNotification (not exposed in GraphQL) */
 export interface NotificationCreate {
@@ -18,14 +19,10 @@ export interface NotificationCreate {
 
 @InputType()
 export class NotificationsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

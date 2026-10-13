@@ -416,17 +416,32 @@ export class EventService {
 	}
 
 	/** content edit by an admin: never changes the status (approving is its own operation) */
-	public async updateEventByAdmin(input: EventUpdate): Promise<Event> {
-		return await this.applyUpdate({ _id: input._id }, input, false);
+	public async updateEventByAdmin(adminId: ObjectId, input: EventUpdate): Promise<Event> {
+		const result = await this.applyUpdate({ _id: input._id }, input, false);
+		await this.auditLogService.record({
+			actorId: adminId,
+			action: AuditAction.EVENT_UPDATED_BY_ADMIN,
+			targetType: AuditTargetType.EVENT,
+			targetId: result._id,
+			meta: { changedFields: Object.keys(input).filter((key) => key !== '_id' && (input as any)[key] !== undefined) },
+		});
+		return result;
 	}
 
 	/** only a DRAFT can be removed: it was never public, so it has no orders */
-	public async removeEventByAdmin(eventId: ObjectId): Promise<Event> {
+	public async removeEventByAdmin(adminId: ObjectId, eventId: ObjectId): Promise<Event> {
 		const result = await this.eventModel.findOneAndDelete({ _id: eventId, eventStatus: EventStatus.DRAFT }).exec();
 		if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
 
 		await this.ticketTypeModel.deleteMany({ eventId: eventId }).exec();
 		await this.memberService.memberStatsEditor({ _id: result.organizerId, targetKey: 'memberEvents', modifier: -1 });
+		await this.auditLogService.record({
+			actorId: adminId,
+			action: AuditAction.EVENT_REMOVED_BY_ADMIN,
+			targetType: AuditTargetType.EVENT,
+			targetId: result._id,
+			meta: { organizerId: result.organizerId, eventTitle: result.eventTitle },
+		});
 		return result;
 	}
 

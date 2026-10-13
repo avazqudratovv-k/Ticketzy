@@ -34,6 +34,7 @@ export class Member {
 	@Field(() => String, { nullable: true })
 	memberEmail?: string;
 
+	/** only returned to the member themselves and to admins, see MemberResolver */
 	@Field(() => String, { nullable: true })
 	memberPhone?: string;
 
@@ -42,12 +43,14 @@ export class Member {
 
 	memberPassword?: string;
 
+	/** public for organizers (organization name), private for everyone else, see MemberResolver */
 	@Field(() => String, { nullable: true })
 	memberFullName?: string;
 
 	@Field(() => String)
 	memberImage: string;
 
+	/** public for organizers (organization address), private for everyone else, see MemberResolver */
 	@Field(() => String, { nullable: true })
 	memberAddress?: string;
 
@@ -86,12 +89,15 @@ export class Member {
 	@Field(() => CommissionOverride, { nullable: true })
 	commissionOverride?: CommissionOverride;
 
-	@Field(() => Int)
-	memberWarnings: number;
+	/** only returned to the member themselves and to admins, see MemberResolver */
+	@Field(() => Int, { nullable: true })
+	memberWarnings?: number;
 
-	@Field(() => Int)
-	memberBlocks: number;
+	/** only returned to the member themselves and to admins, see MemberResolver */
+	@Field(() => Int, { nullable: true })
+	memberBlocks?: number;
 
+	/** only returned to the member themselves and to admins, see MemberResolver */
 	@Field(() => Date, { nullable: true })
 	deletedAt?: Date;
 

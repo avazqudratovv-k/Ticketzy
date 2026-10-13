@@ -1,7 +1,7 @@
 import { Controller, Get, Logger } from '@nestjs/common';
 import { BatchService } from './batch.service';
 import { Cron, Interval, Timeout } from '@nestjs/schedule';
-import { BATCH_END_EVENTS, BATCH_EXPIRE_ORDERS, BATCH_ROLLBACK, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS } from './lib/config';
+import { BATCH_END_EVENTS, BATCH_EXPIRE_ORDERS, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS } from './lib/config';
 
 @Controller()
 export class BatchController {
@@ -14,18 +14,7 @@ export class BatchController {
     this.logger.debug('BATCH SERVER READY!');
   }
 
-  // ranking jobs run hourly: rollback first, then the two top jobs fill the ranks back in
-  @Cron('00 00 * * * *', { name: BATCH_ROLLBACK })
-  public async batchRollback() {
-    try {
-      this.logger['context'] = BATCH_ROLLBACK;
-      this.logger.debug('EXECUTED!');
-      await this.batchService.batchRollback();
-    } catch (err) {
-      this.logger.error(err);
-    }
-  }
-
+  // ranking jobs run hourly (events at minute 20, organizers at minute 40); they compute new ranks and write them in place, no zeroing step
   @Cron('20 00 * * * *', { name: BATCH_TOP_EVENTS })
   public async batchTopEvents() {
     try {

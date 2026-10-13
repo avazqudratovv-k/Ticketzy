@@ -1,0 +1,32 @@
+name: ci
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+    # fake CI values, not secrets; the unit tests need no database and no secrets (the MongoDB service is for later integration tests)
+    env:
+      MONGO_DEV: mongodb://localhost:27017/ticketzy_ci
+      SECRET_TOKEN: ci-only-secret-token-for-tests-0123456789
+      QR_SECRET: ci-only-qr-secret-for-tests-9876543210
+      PAYMENT_MODE: simulated
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit
+      - run: npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
+      - run: npm run build
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=critical
+        continue-on-error: true

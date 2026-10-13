@@ -5,6 +5,8 @@ import { LoggingInterceptor } from './libs/interceptor/Logging.interceptor';
 import { graphqlUploadExpress } from 'graphql-upload'
 import * as express from 'express';
 import { WsAdapter } from '@nestjs/platform-ws';
+import { AuthService } from './components/auth/auth.service';
+import { createUploadAuthMiddleware } from './libs/upload-guard';
 
 async function bootstrap() {
 	const app = await NestFactory.create(AppModule);
@@ -15,6 +17,8 @@ async function bootstrap() {
 	const origin = clientUrl.split(',').map((url) => url.trim()).filter(Boolean);
 	app.enableCors({ origin, credentials: true });
 
+	// multipart bodies are only parsed for members who are logged in (C3-72)
+	app.use(createUploadAuthMiddleware(app.get(AuthService, { strict: false })));
 	app.use(graphqlUploadExpress({maxFileSize: 15000000, maxFiles: 10}));
 	app.use('/uploads', express.static('./uploads'))
 

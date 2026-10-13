@@ -4,6 +4,7 @@ import { IsEmail, IsIn, IsNotEmpty, IsOptional, Length, Min, MinLength } from 'c
 import { MemberStatus, MemberType } from '../../enums/member.enum';
 import { availableOrganizerSorts, availableMemberSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
+import { PageField, LimitField } from '../common/pagination';
 
 const normalizeEmail = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim().toLowerCase() : value);
 
@@ -58,14 +59,10 @@ class OISearch {
 
 @InputType()
 export class OrganizersInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()
@@ -99,14 +96,10 @@ class MISearch {
 
 @InputType()
 export class MembersInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

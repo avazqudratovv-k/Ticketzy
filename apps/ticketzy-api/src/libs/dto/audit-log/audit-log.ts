@@ -27,6 +27,10 @@ export class AuditLogMeta {
 
 	@Field(() => Date, { nullable: true })
 	endsAt?: Date;
+
+	/** names of the fields an admin edit changed (never their values) */
+	@Field(() => [String], { nullable: true })
+	changedFields?: string[];
 }
 
 @ObjectType()

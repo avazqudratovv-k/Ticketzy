@@ -22,4 +22,4 @@ Skills live in `.agents/skills/<name>` and are linked into `.claude/skills/<name
 
 ## Older repo skills
 
-The root `SKILLS.md` and `skills/backend-migration`, `skills/product-logic` are the earlier Claude Code skills for the Nestar to Ticketzy migration. They are not in `.claude/skills`, so they are not loaded automatically.
+`skills/product-logic` is an older review checklist for the event API (not in `.claude/skills`, so it is not loaded automatically; its stale operation name `getOrganizerEvents` was corrected to `getMyEvents`). The root `SKILLS.md` (a duplicate index) and `skills/backend-migration` (a checklist for the finished Nestar to Ticketzy migration, every rule of it now in `AGENTS.md`) were removed on 2026-10-13 (audit C3-23); `git log` keeps them.

@@ -1,64 +1,115 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Ticketzy backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Ticketzy is the backend of a ticket selling platform. Organizers publish events at venues, with ticket types or reserved seats. Buyers hold seats, pay, receive QR tickets and can refund. Admins approve organizers and events, handle refunds and mark organizer payouts.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+- **Roles:** `USER` buys tickets. `ORGANIZER` creates venues, events and ticket types, and needs admin approval first (`PENDING` until verified). `ADMIN` approves organizers and events, refunds orders, marks payouts and reads the audit log. Roles are set only by the server; the only way to get an admin is `npm run seed`.
+- **Selling:** buyers hold seats (a short timer), check out and pay. Reserved-seating events use one conditional update per seat, general admission uses a conditional stock update, so nothing is oversold. Every ticket has a signed QR token; the organizer's gate scans it (`checkInTicket`).
+- **Refunds:** a buyer can refund a whole order until the end of the day before the event. Admins can refund later, and cancelling an event refunds every order.
+- **Payouts:** one payout per event, due three days after the event ends. An admin marks it paid; status is computed, never stored.
+- **Extras:** organizer and admin chat (GraphQL plus a WebSocket gateway), notifications, comments, likes, follows (organizers only), and an optional AI assistant (event search, moderation, translation).
 
-## Description
+> **Payments are a mock.** There is no real payment provider. With `PAYMENT_MODE=simulated` the buyer chooses whether a payment succeeds, so anyone can get valid QR tickets. That is fine for a demo and wrong for real money. Set `PAYMENT_MODE=disabled` to refuse every payment. See `docs/ai/DECISIONS.md` (#48, #92).
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Stack
+
+NestJS 10 (monorepo), GraphQL code-first (Apollo Server 4), Mongoose and MongoDB, JWT (bearer header, no cookies), `graphql-upload` for images, a `ws` gateway for chat, `@nestjs/schedule` for the batch app, Jest for tests, npm as the package manager (`package-lock.json`).
+
+Needs **Node 22 or newer** (developed on Node 24, the CI workflow uses Node 22) and **MongoDB 5.0 or newer** (the payout report uses `$dateAdd` with a time zone). Transactions are not used, so a single MongoDB without a replica set is enough.
+
+## Run it
+
+```bash
+npm install
+cp .env.example .env        # then fill in the required values (see below)
+npm run seed                # creates the first admin from ADMIN_EMAIL / ADMIN_PASSWORD
+npm run start:dev           # API in watch mode (port PORT_API, default 3000)
+npm run start:dev:batch     # batch app in watch mode (port PORT_BATCH)
+```
+
+`npm run seed:demo` fills a development database with demo accounts, venues, events, orders, a refund and chats (all demo accounts use the `@ticketzy.demo` email domain; the shared password is `DEMO_PASSWORD`, default `Demo1234!`). It refuses `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`.
+
+## Environment variables
+
+Names only; copy `.env.example` and set the values. The API and the batch app refuse to start when a required one is missing.
+
+| Name | Needed | What it is |
+| --- | --- | --- |
+| `MONGO_DEV` / `MONGO_PROD` | one of them (required) | MongoDB connection string. `MONGO_PROD` is used when `NODE_ENV=production`, otherwise `MONGO_DEV` |
+| `SECRET_TOKEN` | required (API) | secret that signs login tokens (long and random) |
+| `QR_SECRET` | required (API) | secret that signs ticket QR tokens (long, random, different from `SECRET_TOKEN`) |
+| `PAYMENT_MODE` | required in production, optional otherwise | `simulated` (mock provider) or `disabled`; unset means `simulated` outside production |
+| `CLIENT_URL` | optional | allowed browser origin(s), comma separated; development default is `http://localhost:3000` |
+| `PORT_API`, `PORT_BATCH` | optional | ports of the API and the batch app |
+| `SEAT_HOLD_SECONDS` | optional | how long a seat hold lasts (1 to 3600, default 30) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | for `npm run seed` | the first admin |
+| `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | optional, for `npm run seed` | a second admin |
+| `AI_ENABLED`, `AI_PROVIDER`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | optional | AI assistant settings; it stays off unless `AI_ENABLED=true` |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | optional | used when `AI_PROVIDER=anthropic` (default) |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | optional | used when `AI_PROVIDER=gemini` |
+| `DEMO_PASSWORD`, `ALLOW_DEMO_SEED` | optional, for `npm run seed:demo` | demo password and the production guard |
+| `NODE_ENV` | set by `npm run start:prod` | `production` turns off the GraphQL playground and introspection and picks `MONGO_PROD` |
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run start:dev` / `start:dev:batch` | API / batch app in watch mode |
+| `npm run build` | `nest build` (both apps, into `dist/`) |
+| `npm run start:prod` | runs `dist/apps/ticketzy-api/main` with `NODE_ENV=production` (build first) |
+| `npm run start:prod:batch` | runs the batch app; it does not set `NODE_ENV`, so set `NODE_ENV=production` on the host |
+| `npm run seed` / `seed:demo` | first admin / demo data |
+| `npm run report:currency` | read-only report of ticket types that are not in KRW (see `docs/ai/DECISIONS.md` #95) |
+| `npm run ai:check` | checks the AI settings and sends one tiny request (a real call with the key in `.env`) |
+| `npm run test` | the whole Jest suite (no database, no secrets needed) |
+| `npm run lint` | ESLint **with `--fix`**: it rewrites files, run it only when that is fine |
+
+Type checks: `npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit` and the same for `apps/ticketzy-batch`. The GitHub Actions workflow (`.github/workflows/ci.yml`) runs both, the build and the tests.
+
+## Run the tests
+
+```bash
+npm run test        # unit tests, every *.spec.ts under apps/
+npm run test:cov    # with coverage
+```
+
+There are no end-to-end tests yet. Services are tested against an in-memory fake model (`apps/ticketzy-api/test/fake-model.ts`) or Jest mocks, so the race conditions of real MongoDB are not covered (see `docs/ai/CLEANUP_AUDIT.md`, C3-76).
+
+## Folder map
+
+```
+apps/
+  ticketzy-api/
+    src/
+      main.ts, app.module.ts      bootstrap (CORS, uploads, WebSocket adapter) and the root module
+      components/<name>/          one folder per feature: resolver, service, module, specs
+                                  (ai, audit-log, auth, comment, conversation, event, follow, like, member,
+                                   notice, notification, order, organizer, payment, payout, refund, sales,
+                                   seat, ticket, ticket-type, venue, view)
+      libs/                       DTOs (dto/), enums, Mongoose schemas, pure rules (payout, refund policy,
+                                  commission, venue layout...), env validation, error mapping
+      socket/                     WebSocket gateway for chat
+      database/                   MongoDB connection module
+      seed.ts, seed-demo.ts       admin seed, demo seed
+    test/fake-model.ts            in-memory Mongoose model for tests
+  ticketzy-batch/                 hourly ranking, order and seat-hold expiry, ending finished events
+docs/ai/                          decisions, completed tasks, next steps, audits (see below)
+.agents/skills, .claude/skills    AI assistant skills (see docs/ai/SKILLS.md)
+```
 
 ## Working with AI tools
 
 This repo is built with AI coding assistants under written rules, so their work can be reviewed.
 
 - `AGENTS.md` is the main guide for any AI tool: stack, commands, working rules and domain rules. `CLAUDE.md` imports it and adds a few Claude Code notes.
-- `docs/ai/DECISIONS.md` is the numbered decisions log (what was decided, why, risks, alternatives); `docs/ai/COMPLETED_TASKS.md` records every finished task with the checks that were run.
+- `docs/ai/DECISIONS.md` is the numbered decisions log (what was decided, why, risks, alternatives); `docs/ai/COMPLETED_TASKS.md` records every finished task with the checks that were run. Start with `docs/ai/`.
 - Skills (NestJS, security, MongoDB and a repo workflow skill) live in `.agents/skills` and `.claude/skills`; `docs/ai/SKILLS.md` lists them and `skills-lock.json` pins their sources.
 - Decisions override skills: a skill is general advice, a decision is what this project chose.
 - AI tools do not commit unless asked, never read `.env`, and must pass the full test suite before reporting.
 
-## Project setup
-
-```bash
-$ npm install
-```
-
-## Compile and run the project
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
 ## Check the AI
 
 ```bash
-$ npm run ai:check   # or: yarn ai:check
+npm run ai:check
 ```
 
 It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set, lists the Gemini models that support `generateContent` (your `GEMINI_MODEL` is marked), and sends one tiny "Say hello" request. Exit code 0 means it works, 1 means it does not.
@@ -74,55 +125,6 @@ It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMIN
 
 When `AI_PROVIDER=gemini`, the API logs a warning at startup if `GEMINI_API_KEY` or `GEMINI_MODEL` is missing (it never calls Google at startup).
 
-## Run tests
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Private project (`UNLICENSED`). No license is granted.

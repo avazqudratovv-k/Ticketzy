@@ -1,17 +1,14 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { IsNotEmpty, IsOptional, Min } from 'class-validator';
 import { TicketTimeFilter } from '../../enums/ticket.enum';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 export class TicketsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

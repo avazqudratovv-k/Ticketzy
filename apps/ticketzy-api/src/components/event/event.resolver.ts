@@ -224,18 +224,18 @@ export class EventResolver {
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Mutation((returns) => Event)
-	public async updateEventByAdmin(@Args('input') input: EventUpdate): Promise<Event> {
+	public async updateEventByAdmin(@Args('input') input: EventUpdate, @AuthMember('_id') adminId: ObjectId): Promise<Event> {
 		this.logger.log('Mutation: updateEventByAdmin');
 		input._id = shapeIntoMongoObjectId(input._id);
-		return await this.eventService.updateEventByAdmin(input);
+		return await this.eventService.updateEventByAdmin(adminId, input);
 	}
 
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Mutation((returns) => Event)
-	public async removeEventByAdmin(@Args('eventId') input: string): Promise<Event> {
+	public async removeEventByAdmin(@Args('eventId') input: string, @AuthMember('_id') adminId: ObjectId): Promise<Event> {
 		this.logger.log('Mutation: removeEventByAdmin');
 		const eventId = shapeIntoMongoObjectId(input);
-		return await this.eventService.removeEventByAdmin(eventId);
+		return await this.eventService.removeEventByAdmin(adminId, eventId);
 	}
 }

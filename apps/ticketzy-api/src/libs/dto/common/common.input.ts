@@ -1,16 +1,13 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { IsNotEmpty, Min } from 'class-validator';
+import { PageField, LimitField } from './pagination';
 
 @InputType()
 export class OrdinaryInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 }
 

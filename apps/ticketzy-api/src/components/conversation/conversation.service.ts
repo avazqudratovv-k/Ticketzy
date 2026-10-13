@@ -19,6 +19,8 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 import { RateLimiter } from '../../libs/rate-limiter';
 import { T } from '../../libs/types/common';
 import { NotificationService } from '../notification/notification.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { ConversationRealtime } from './conversation.realtime';
 
 export const MESSAGE_MAX_LENGTH = 2000;
@@ -42,6 +44,7 @@ export class ConversationService {
 		@InjectModel('Event') private readonly eventModel: Model<any>,
 		private readonly notificationService: NotificationService,
 		private readonly realtime: ConversationRealtime,
+		private readonly auditLogService: AuditLogService,
 	) {}
 
 	public async startConversation(member: Member, eventId?: ObjectId): Promise<Conversation> {
@@ -95,6 +98,13 @@ export class ConversationService {
 
 		try {
 			const created = await this.conversationModel.create({ isSupport: true, organizerId: target._id, adminId: admin._id });
+			await this.auditLogService.record({
+				actorId: admin._id,
+				action: AuditAction.SUPPORT_CONVERSATION_STARTED,
+				targetType: AuditTargetType.CONVERSATION,
+				targetId: created._id,
+				meta: { organizerId: target._id },
+			});
 			await this.notifyConversationOpened(admin, created._id, target._id as ObjectId);
 			return await this.getConversation(admin, created._id);
 		} catch (err) {

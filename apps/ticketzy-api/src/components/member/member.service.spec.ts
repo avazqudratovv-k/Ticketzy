@@ -5,6 +5,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { EventStatus } from '../../libs/enums/event.enum';
 import { MemberAuthType, MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { LoginInput, MemberInput } from '../../libs/dto/member/member.input';
+import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 
 const query = (value: any) => ({ select: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
 
@@ -18,7 +19,7 @@ describe('MemberService signup and login', () => {
 	beforeEach(() => {
 		memberModel = { create: jest.fn(async (doc) => ({ _id: 'm1', ...doc })), findOne: jest.fn() };
 		authService = new AuthService({ signAsync: jest.fn().mockResolvedValue('token') } as any, {} as any);
-		service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any, {} as any);
 	});
 
 	it('signupUser creates an ACTIVE USER with a hashed password', async () => {
@@ -125,7 +126,7 @@ describe('MemberService public listings', () => {
 			aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }),
 		};
 		eventModel = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }) };
-		service = new MemberService(memberModel, {} as any, eventModel, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, eventModel, {} as any, {} as any, {} as any, {} as any);
 	});
 
 	it('an organizer profile counts APPROVED events only, not the memberEvents counter', async () => {
@@ -197,7 +198,10 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 			findOne: jest.fn().mockReturnValue(target(found)),
 			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(updated) }),
 		};
-		return { memberModel, service: new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any) };
+		const authService: any = { hashPassword: jest.fn(async (password: string) => `hash-of-${password}`), createToken: jest.fn().mockResolvedValue('token') };
+		const auditLogService: any = { record: jest.fn().mockResolvedValue(undefined) };
+		const service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any, auditLogService);
+		return { memberModel, auditLogService, authService, service };
 	};
 
 	it('refuses to change status or role of an organizer, and points to the organizer operations', async () => {
@@ -270,5 +274,80 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 
 		expect(memberModel.findOne).not.toHaveBeenCalled();
 		expect(memberModel.findOneAndUpdate).toHaveBeenCalledTimes(2);
+	});
+	describe('password reset and audit (DECISIONS #93)', () => {
+		it('refuses to set the password of another ADMIN, writes an audit entry for the attempt and changes nothing', async () => {
+			const { memberModel, auditLogService, authService, service } = build({ _id: 'admin-2', memberType: MemberType.ADMIN });
+
+			await expect(service.updateMemberByAdmin(ADMIN as any, { _id: 'admin-2' as any, memberPassword: 'newpassword1' })).rejects.toThrow(
+				Message.CANNOT_RESET_ADMIN_PASSWORD,
+			);
+
+			expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+			expect(authService.hashPassword).not.toHaveBeenCalled();
+			expect(auditLogService.record).toHaveBeenCalledTimes(1);
+			expect(auditLogService.record).toHaveBeenCalledWith({
+				actorId: ADMIN,
+				action: AuditAction.ADMIN_PASSWORD_RESET_BLOCKED,
+				targetType: AuditTargetType.MEMBER,
+				targetId: 'admin-2',
+				meta: { changedFields: ['memberPassword'] },
+			});
+			expect(JSON.stringify(auditLogService.record.mock.calls)).not.toContain('newpassword1');
+		});
+
+		it('also refuses a password hidden in a bigger edit of another ADMIN (nick plus password)', async () => {
+			const { memberModel, service } = build({ _id: 'admin-2', memberType: MemberType.ADMIN });
+			await expect(
+				service.updateMemberByAdmin(ADMIN as any, { _id: 'admin-2' as any, memberNick: 'sneaky', memberPassword: 'newpassword1' }),
+			).rejects.toThrow(Message.CANNOT_RESET_ADMIN_PASSWORD);
+			expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('still lets an admin set the password of a USER or an ORGANIZER, hashed, and audits it without the value', async () => {
+			for (const memberType of [MemberType.USER, MemberType.ORGANIZER]) {
+				const { memberModel, auditLogService, service } = build({ _id: 'x1', memberType }, { _id: 'x1' });
+				await service.updateMemberByAdmin(ADMIN as any, { _id: 'x1' as any, memberPassword: 'newpassword1' });
+				expect(memberModel.findOneAndUpdate.mock.calls[0][1].memberPassword).toBe('hash-of-newpassword1');
+				expect(auditLogService.record).toHaveBeenCalledWith(
+					expect.objectContaining({ action: AuditAction.MEMBER_UPDATED_BY_ADMIN, targetId: 'x1', meta: { changedFields: ['memberPassword'] } }),
+				);
+				expect(JSON.stringify(auditLogService.record.mock.calls)).not.toContain('newpassword1');
+			}
+		});
+
+		it('keeps self-service: an admin can still change their own password', async () => {
+			const { memberModel, auditLogService, service } = build({ _id: ADMIN, memberType: MemberType.ADMIN }, { _id: ADMIN });
+			await service.updateMemberByAdmin(ADMIN as any, { _id: ADMIN as any, memberPassword: 'newpassword1' });
+			expect(memberModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
+			expect(auditLogService.record).toHaveBeenCalledWith(expect.objectContaining({ action: AuditAction.MEMBER_UPDATED_BY_ADMIN }));
+
+			// and updateMember (the member's own mutation) hashes and applies it
+			await service.updateMember(ADMIN as any, { _id: ADMIN as any, memberPassword: 'another-password' });
+			expect(memberModel.findOneAndUpdate.mock.calls[1][1].memberPassword).toBe('hash-of-another-password');
+		});
+
+		it('writes an audit entry for an ordinary admin edit, with field names and the new status only', async () => {
+			const { auditLogService, service } = build({ _id: 'u1', memberType: MemberType.USER }, { _id: 'u1' });
+			await service.updateMemberByAdmin(ADMIN as any, { _id: 'u1' as any, memberStatus: MemberStatus.SUSPENDED, memberNick: 'private-nick' });
+			expect(auditLogService.record).toHaveBeenCalledWith({
+				actorId: ADMIN,
+				action: AuditAction.MEMBER_UPDATED_BY_ADMIN,
+				targetType: AuditTargetType.MEMBER,
+				targetId: 'u1',
+				meta: { changedFields: ['memberStatus', 'memberNick'], toStatus: MemberStatus.SUSPENDED },
+			});
+			expect(JSON.stringify(auditLogService.record.mock.calls)).not.toContain('private-nick');
+		});
+
+		it('writes no audit entry when the update fails or is refused', async () => {
+			const refused = build({ _id: 'o1', memberType: MemberType.ORGANIZER });
+			await expect(refused.service.updateMemberByAdmin(ADMIN as any, { _id: 'o1' as any, memberStatus: MemberStatus.SUSPENDED })).rejects.toThrow();
+			expect(refused.auditLogService.record).not.toHaveBeenCalled();
+
+			const failed = build(null, null);
+			await expect(failed.service.updateMemberByAdmin(ADMIN as any, { _id: 'zz' as any, memberNick: 'abc' })).rejects.toThrow(Message.UPDATE_FAILED);
+			expect(failed.auditLogService.record).not.toHaveBeenCalled();
+		});
 	});
 });

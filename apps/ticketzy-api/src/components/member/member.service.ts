@@ -14,6 +14,8 @@ import { ViewGroup } from '../../libs/enums/view.enum';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { LikeService } from '../like/like.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { Follower, Following, MeFollowed } from '../../libs/dto/follow/follow';
 import { Event } from '../../libs/dto/event/event';
 import { publicEventStatus } from '../../libs/enums/event.enum';
@@ -33,6 +35,7 @@ export class MemberService {
 		private authService: AuthService,
 		private viewService: ViewService,
 		private likeService: LikeService,
+		private auditLogService: AuditLogService,
 	) {}
 
 	/** the server decides role and status: users are active at once, organizers wait for admin approval */
@@ -239,18 +242,48 @@ export class MemberService {
 	public async updateMemberByAdmin(adminId: ObjectId, input: MemberUpdate): Promise<Member> {
 		// admin accounts are created only by the server seed, never by promotion
 		if (input.memberType === MemberType.ADMIN) throw new BadRequestException(Message.CANNOT_ASSIGN_ADMIN_ROLE);
-		if (input.memberStatus || input.memberType) {
-			// an admin cannot lock themselves out or promote / demote themselves, and admin accounts are not touched by other admins
-			if (String(input._id) === String(adminId)) throw new BadRequestException(Message.CANNOT_CHANGE_OWN_ACCESS);
+		const changesAccess = Boolean(input.memberStatus || input.memberType);
+		const isSelf = String(input._id) === String(adminId);
+		// an admin cannot lock themselves out or promote / demote themselves
+		if (changesAccess && isSelf) throw new BadRequestException(Message.CANNOT_CHANGE_OWN_ACCESS);
+		if (changesAccess || input.memberPassword) {
 			const target = await this.memberModel.findOne({ _id: input._id }).select('memberType').lean().exec();
-			if (target?.memberType === MemberType.ADMIN) throw new BadRequestException(Message.CANNOT_CHANGE_ADMIN_ACCESS);
-			// organizer status changes must go through verify / reject / suspend / reinstate so they are audited and notified
-			if (target?.memberType === MemberType.ORGANIZER) throw new BadRequestException(Message.USE_ORGANIZER_OPERATIONS);
+			// no admin takes over another admin's account by setting a password; the attempt is audited (DECISIONS #93)
+			if (input.memberPassword && !isSelf && target?.memberType === MemberType.ADMIN) {
+				await this.auditLogService.record({
+					actorId: adminId,
+					action: AuditAction.ADMIN_PASSWORD_RESET_BLOCKED,
+					targetType: AuditTargetType.MEMBER,
+					targetId: target._id,
+					meta: { changedFields: this.changedFields(input) },
+				});
+				throw new BadRequestException(Message.CANNOT_RESET_ADMIN_PASSWORD);
+			}
+			if (changesAccess) {
+				// admin accounts are not touched by other admins
+				if (target?.memberType === MemberType.ADMIN) throw new BadRequestException(Message.CANNOT_CHANGE_ADMIN_ACCESS);
+				// organizer status changes must go through verify / reject / suspend / reinstate so they are audited and notified
+				if (target?.memberType === MemberType.ORGANIZER) throw new BadRequestException(Message.USE_ORGANIZER_OPERATIONS);
+			}
 		}
+		const changedFields = this.changedFields(input);
 		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+
+		await this.auditLogService.record({
+			actorId: adminId,
+			action: AuditAction.MEMBER_UPDATED_BY_ADMIN,
+			targetType: AuditTargetType.MEMBER,
+			targetId: result._id,
+			meta: { changedFields, ...(input.memberStatus ? { toStatus: input.memberStatus } : {}) },
+		});
 		return result;
+	}
+
+	/** field names only: an audit entry never holds a password, a hash or personal values */
+	private changedFields(input: MemberUpdate): string[] {
+		return Object.keys(input).filter((key) => key !== '_id' && (input as any)[key] !== undefined);
 	}
 
 	public async memberStatsEditor(input: StatisticModifier): Promise<Member> {

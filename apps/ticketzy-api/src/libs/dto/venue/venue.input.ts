@@ -5,6 +5,7 @@ import { ObjectId } from 'mongoose';
 import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
 import { availableVenueSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 export class VenueSectionInput {
@@ -179,14 +180,10 @@ class VISearch {
 
 @InputType()
 export class VenuesInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

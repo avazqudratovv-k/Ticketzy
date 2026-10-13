@@ -4,6 +4,7 @@ import { ObjectId } from 'mongoose';
 import { CommentGroup } from '../../enums/comment.enum';
 import { Direction } from '../../enums/common.enum';
 import { availableCommentSorts } from '../../config';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 export class CommentInput {
@@ -32,14 +33,10 @@ class CISearch {
 
 @InputType()
 export class CommentsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

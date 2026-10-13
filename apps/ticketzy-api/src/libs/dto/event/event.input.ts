@@ -6,6 +6,7 @@ import { EventCategory, EventLocale, EventStatus, SeatingType } from '../../enum
 import { availableEventSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 import { PeriodsRange, PricesRange } from '../common/common.input';
+import { PageField, LimitField, MAX_ADMIN_EVENTS_LIMIT } from '../common/pagination';
 
 @InputType()
 export class EventTranslationInput {
@@ -110,14 +111,10 @@ class EISearch {
 
 @InputType()
 export class EventsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()
@@ -143,14 +140,10 @@ class AESearch {
 
 @InputType()
 export class OrganizerEventsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()
@@ -188,14 +181,10 @@ class EBASearch {
 
 @InputType()
 export class EventsByAdminInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField(MAX_ADMIN_EVENTS_LIMIT)
 	limit: number;
 
 	@IsOptional()

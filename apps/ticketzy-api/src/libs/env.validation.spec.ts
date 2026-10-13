@@ -1,4 +1,4 @@
-import { DEFAULT_SEAT_HOLD_SECONDS, getAiConfig, getSeatHoldSeconds, parseSeatHoldSeconds, validateEnv } from './env.validation';
+import { DEFAULT_SEAT_HOLD_SECONDS, getAiConfig, getPaymentMode, getSeatHoldSeconds, parsePaymentMode, parseSeatHoldSeconds, validateEnv } from './env.validation';
 
 describe('SEAT_HOLD_SECONDS', () => {
 	it('defaults to 30 when unset or blank', () => {
@@ -66,5 +66,38 @@ describe('AI settings', () => {
 			}
 		})();
 		expect(error?.message).not.toContain('SECRET-KEY');
+	});
+});
+
+describe('PAYMENT_MODE', () => {
+	it('defaults to simulated outside production', () => {
+		expect(parsePaymentMode({})).toBe('simulated');
+		expect(parsePaymentMode({ NODE_ENV: 'development', PAYMENT_MODE: '  ' })).toBe('simulated');
+		expect(getPaymentMode({ NODE_ENV: 'test' })).toBe('simulated');
+	});
+
+	it('accepts simulated and disabled, in any case', () => {
+		expect(parsePaymentMode({ PAYMENT_MODE: 'disabled' })).toBe('disabled');
+		expect(parsePaymentMode({ PAYMENT_MODE: ' Simulated ' })).toBe('simulated');
+		expect(parsePaymentMode({ NODE_ENV: 'production', PAYMENT_MODE: 'disabled' })).toBe('disabled');
+	});
+
+	it.each(['stripe', 'true', 'mock', '1'])('rejects %s', (value) => {
+		expect(() => parsePaymentMode({ PAYMENT_MODE: value })).toThrow('PAYMENT_MODE must be simulated or disabled');
+	});
+
+	it('has no default in production: it must be set explicitly', () => {
+		expect(() => parsePaymentMode({ NODE_ENV: 'production' })).toThrow('PAYMENT_MODE must be set');
+		expect(() => parsePaymentMode({ NODE_ENV: 'production', PAYMENT_MODE: '' })).toThrow('PAYMENT_MODE must be set');
+	});
+
+	it('is checked at startup by the API (checkPayment) and never contains a value in the error', () => {
+		const prod = { NODE_ENV: 'production', MONGO_PROD: 'mongodb://x', SECRET_TOKEN: 's', QR_SECRET: 'q' };
+		const validateApi = validateEnv(['SECRET_TOKEN', 'QR_SECRET'], { checkPayment: true });
+		expect(() => validateApi({ ...prod })).toThrow('PAYMENT_MODE');
+		expect(validateApi({ ...prod, PAYMENT_MODE: 'simulated' })).toMatchObject({ PAYMENT_MODE: 'simulated' });
+		expect(() => validateApi({ ...prod, PAYMENT_MODE: 'secretvalue' })).toThrow(/^(?!.*secretvalue)/);
+		// the batch app takes no payments, so it does not need the variable
+		expect(validateEnv()({ NODE_ENV: 'production', MONGO_PROD: 'mongodb://x' })).toBeDefined();
 	});
 });

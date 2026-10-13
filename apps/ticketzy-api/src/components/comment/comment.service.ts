@@ -11,6 +11,8 @@ import { CommentUpdate } from '../../libs/dto/comment/comment.update';
 import { Comments, Comment } from '../../libs/dto/comment/comment';
 import { lookupMember } from '../../libs/config';
 import { T } from '../../libs/types/common';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 
 
 @Injectable()
@@ -21,6 +23,7 @@ export class CommentService {
         @InjectModel('Comment') private readonly commentModel: Model<Comment>,
         private readonly eventService: EventService,
         private readonly notificationService: NotificationService,
+        private readonly auditLogService: AuditLogService,
     ) {}
 
     public async createComment(memberId: ObjectId, input: CommentInput): Promise<Comment> {
@@ -106,12 +109,19 @@ export class CommentService {
 
     /** ADMIN */
 
-    public async removeCommentByAdmin(input: ObjectId): Promise<Comment> {
+    public async removeCommentByAdmin(adminId: ObjectId, input: ObjectId): Promise<Comment> {
     const result = await this.commentModel.findByIdAndDelete(input).exec();
     if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
 
     // a soft-deleted comment was already counted down by updateComment
     if (result.commentStatus !== CommentStatus.DELETE) await this.decrementEventComments(result);
+    await this.auditLogService.record({
+        actorId: adminId,
+        action: AuditAction.COMMENT_REMOVED_BY_ADMIN,
+        targetType: AuditTargetType.COMMENT,
+        targetId: result._id,
+        meta: { eventId: result.commentRefId, authorId: result.memberId },
+    });
     return result;
     }
 

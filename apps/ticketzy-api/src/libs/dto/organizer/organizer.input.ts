@@ -5,6 +5,7 @@ import { ObjectId } from 'mongoose';
 import { Direction } from '../../enums/common.enum';
 import { MemberStatus } from '../../enums/member.enum';
 import { availableOrganizerSorts } from '../../config';
+import { PageField, LimitField } from '../common/pagination';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -22,14 +23,10 @@ class OASearch {
 
 @InputType()
 export class OrganizersByAdminInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

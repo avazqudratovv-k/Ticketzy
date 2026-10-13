@@ -11,13 +11,13 @@ import { T } from './libs/types/common';
 import { SocketModule } from './socket/socket.module';
 import { validateEnv } from './libs/env.validation';
 
-import { isExpectedDomainError } from './libs/expected-errors';
+import { formatGraphQLError } from './libs/error-mapping';
 
 const logger = new Logger('GraphQL');
 
 @Module({
 	imports: [
-		ConfigModule.forRoot({ validate: validateEnv(['SECRET_TOKEN', 'QR_SECRET']) }),
+		ConfigModule.forRoot({ validate: validateEnv(['SECRET_TOKEN', 'QR_SECRET'], { checkPayment: true }) }),
 		GraphQLModule.forRootAsync<ApolloDriverConfig>({
 			driver: ApolloDriver,
 			// read after ConfigModule has loaded .env; playground and introspection stay off in production
@@ -28,19 +28,7 @@ const logger = new Logger('GraphQL');
 					introspection: !isProduction,
 					uploads: false,
 					autoSchemaFile: true,
-					formatError: (error: T) => {
-						const graphQLFormattedError = {
-							code: error?.extensions.code,
-							message:
-								error?.extensions?.exception?.response?.message || error?.extensions?.response?.message || error?.message,
-						};
-						if (isExpectedDomainError(graphQLFormattedError)) {
-							logger.warn(`${graphQLFormattedError.code}: ${graphQLFormattedError.message}`);
-						} else {
-							logger.error(`GRAPHQL GLOBAL ERR: ${JSON.stringify(graphQLFormattedError)}`);
-						}
-						return graphQLFormattedError;
-					},
+					formatError: (error: T, originalError?: unknown) => formatGraphQLError(error, originalError, logger),
 				};
 			},
 		}),

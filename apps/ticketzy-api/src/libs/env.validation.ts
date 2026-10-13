@@ -19,6 +19,27 @@ export const parseSeatHoldSeconds = (raw: unknown): number => {
 /** how long a seat hold or an unpaid GENERAL order lasts; read at call time, after ConfigModule has loaded .env */
 export const getSeatHoldSeconds = (env: Record<string, any> = process.env): number => parseSeatHoldSeconds(env.SEAT_HOLD_SECONDS);
 
+export type PaymentMode = 'simulated' | 'disabled';
+const PAYMENT_MODES: PaymentMode[] = ['simulated', 'disabled'];
+
+/**
+ * PAYMENT_MODE decides what `payOrder` does (DECISIONS #92): `simulated` is the mock provider (the buyer picks the
+ * result), `disabled` refuses every payment. Outside production an unset value means `simulated`; in production there
+ * is no default, so a deployment cannot go live with fake payments by forgetting a variable.
+ */
+export const parsePaymentMode = (env: Record<string, any> = process.env): PaymentMode => {
+	const raw = String(env.PAYMENT_MODE ?? '').trim().toLowerCase();
+	if (!raw) {
+		if (env.NODE_ENV === 'production') throw new Error('PAYMENT_MODE must be set to simulated or disabled in production');
+		return 'simulated';
+	}
+	if (!PAYMENT_MODES.includes(raw as PaymentMode)) throw new Error('PAYMENT_MODE must be simulated or disabled');
+	return raw as PaymentMode;
+};
+
+/** read at call time, after ConfigModule has loaded .env */
+export const getPaymentMode = (env: Record<string, any> = process.env): PaymentMode => parsePaymentMode(env);
+
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'; // flash models have a free tier
 export const DEFAULT_AI_TIMEOUT_MS = 15000;
@@ -87,17 +108,19 @@ export const getAiStartupWarnings = (env: Record<string, any> = process.env): st
 	const warnings: string[] = [];
 	if (!String(env.GEMINI_API_KEY ?? '').trim()) warnings.push('GEMINI_API_KEY is not set, so the AI features will not work');
 	if (!String(env.GEMINI_MODEL ?? '').trim()) warnings.push(`GEMINI_MODEL is not set, the default ${DEFAULT_GEMINI_MODEL} is used`);
-	if (warnings.length) warnings.push('Run `yarn ai:check` (or `npm run ai:check`) to test the AI setup');
+	if (warnings.length) warnings.push('Run `npm run ai:check` to test the AI setup');
 	return warnings;
 };
 
 /** ConfigModule `validate` hook: the app refuses to start when a required variable is missing or blank */
 export const validateEnv =
-	(required: string[] = []) =>
+	(required: string[] = [], options: { checkPayment?: boolean } = {}) =>
 	(config: Record<string, any>): Record<string, any> => {
 		const missing = [getMongoUriKey(config.NODE_ENV), ...required].filter((key) => !String(config[key] ?? '').trim());
 		if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
 		parseSeatHoldSeconds(config.SEAT_HOLD_SECONDS);
 		getAiConfig(config);
+		// only the API takes payments; the batch app does not need the variable
+		if (options.checkPayment) parsePaymentMode(config);
 		return config;
 	};

@@ -3,17 +3,14 @@ import { IsDate, IsNotEmpty, IsOptional, MaxLength, Min } from 'class-validator'
 import { ObjectId } from 'mongoose';
 import { Direction } from '../../enums/common.enum';
 import { PayoutStatus } from '../../enums/payout.enum';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 export class PayoutsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

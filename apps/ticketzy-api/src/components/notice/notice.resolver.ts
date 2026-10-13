@@ -37,10 +37,10 @@ export class NoticeResolver {
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Mutation(() => Notice)
-	public async updateNotice(@Args('input') input: NoticeUpdate): Promise<Notice> {
+	public async updateNotice(@Args('input') input: NoticeUpdate, @AuthMember('_id') adminId: ObjectId): Promise<Notice> {
 		this.logger.log('Mutation: updateNotice');
 		input._id = shapeIntoMongoObjectId(input._id);
-		return await this.noticeService.updateNotice(input);
+		return await this.noticeService.updateNotice(adminId, input);
 	}
 
 	@Roles(MemberType.ADMIN)
@@ -54,8 +54,8 @@ export class NoticeResolver {
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Mutation(() => Notice)
-	public async removeNoticeByAdmin(@Args('noticeId') input: string): Promise<Notice> {
+	public async removeNoticeByAdmin(@Args('noticeId') input: string, @AuthMember('_id') adminId: ObjectId): Promise<Notice> {
 		this.logger.log('Mutation: removeNoticeByAdmin');
-		return await this.noticeService.removeNoticeByAdmin(shapeIntoMongoObjectId(input));
+		return await this.noticeService.removeNoticeByAdmin(adminId, shapeIntoMongoObjectId(input));
 	}
 }

@@ -4,6 +4,7 @@ import { ObjectId } from 'mongoose';
 import { AuditAction, AuditTargetType } from '../../enums/audit-log.enum';
 import { Direction } from '../../enums/common.enum';
 import { availableAuditLogSorts } from '../../config';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 class ALSearch {
@@ -26,14 +27,10 @@ class ALSearch {
 
 @InputType()
 export class AuditLogsInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

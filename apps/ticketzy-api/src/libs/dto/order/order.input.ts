@@ -5,6 +5,7 @@ import { ObjectId } from 'mongoose';
 import { OrderStatus } from '../../enums/ticket.enum';
 import { Direction } from '../../enums/common.enum';
 import { availableOrderSorts } from '../../config';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 export class OrderItemInput {
@@ -43,14 +44,10 @@ export class CheckoutInput {
 
 @InputType()
 export class OrdersInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsOptional()

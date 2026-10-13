@@ -244,7 +244,7 @@ describe('EventService', () => {
 
 			it('also applies to the admin edit', async () => {
 				eventModel.findOne.mockReturnValue(lean(draft({ startAt: h(24), endAt: h(27), saleEndAt: h(40) })));
-				await expect(service.updateEventByAdmin({ _id: 'e1', eventTitle: 'x' } as any)).rejects.toThrow(Message.SALES_END_AFTER_EVENT_END);
+				await expect(service.updateEventByAdmin('admin-1' as any, { _id: 'e1', eventTitle: 'x' } as any)).rejects.toThrow(Message.SALES_END_AFTER_EVENT_END);
 			});
 		});
 
@@ -408,7 +408,7 @@ describe('EventService', () => {
 			it('also applies to the admin edit', async () => {
 				eventModel.findOne.mockReturnValue(lean(draft({ _id: 'e1', venueId: 'a'.repeat(24), startAt: at(14), endAt: at(16) })));
 				store([stored({ venueId: 'a'.repeat(24) })]);
-				await expect(service.updateEventByAdmin({ _id: 'e1', startAt: at(9), endAt: at(11) } as any)).rejects.toThrow(/already booked/);
+				await expect(service.updateEventByAdmin('admin-1' as any, { _id: 'e1', startAt: at(9), endAt: at(11) } as any)).rejects.toThrow(/already booked/);
 			});
 		});
 
@@ -659,13 +659,54 @@ describe('EventService', () => {
 		it('admin content edit never changes the status of an APPROVED event', async () => {
 			eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED })));
 			eventModel.findOneAndUpdate.mockReturnValue(exec(draft()));
-			await service.updateEventByAdmin({ _id: 'e1', eventTitle: 'Fixed typo' } as any);
+			await service.updateEventByAdmin('admin-1' as any, { _id: 'e1', eventTitle: 'Fixed typo' } as any);
 			expect(eventModel.findOneAndUpdate.mock.calls[0][1]).toEqual({ eventTitle: 'Fixed typo' });
+		});
+
+		it('admin content edit writes an audit entry with the field names only, not the values', async () => {
+			eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED })));
+			eventModel.findOneAndUpdate.mockReturnValue(exec(draft()));
+			await service.updateEventByAdmin('admin-1' as any, { _id: 'e1', eventTitle: 'Secret new title', eventDesc: undefined } as any);
+			expect(auditLogService.record).toHaveBeenCalledTimes(1);
+			expect(auditLogService.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					actorId: 'admin-1',
+					action: AuditAction.EVENT_UPDATED_BY_ADMIN,
+					targetType: AuditTargetType.EVENT,
+					meta: { changedFields: ['eventTitle'] },
+				}),
+			);
+			expect(JSON.stringify(auditLogService.record.mock.calls)).not.toContain('Secret new title');
+		});
+
+		it('a refused admin edit writes no audit entry', async () => {
+			eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.CANCELLED })));
+			await expect(service.updateEventByAdmin('admin-1' as any, { _id: 'e1' } as any)).rejects.toThrow(Message.EVENT_NOT_EDITABLE);
+			expect(auditLogService.record).not.toHaveBeenCalled();
+		});
+
+		it('removeEventByAdmin deletes only a DRAFT and writes an audit entry', async () => {
+			eventModel.findOneAndDelete.mockReturnValue(exec(draft({ _id: 'e1', organizerId: 'org1', eventTitle: 'Gone' })));
+			await service.removeEventByAdmin('admin-1' as any, 'e1' as any);
+			expect(eventModel.findOneAndDelete.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.DRAFT });
+			expect(auditLogService.record).toHaveBeenCalledWith({
+				actorId: 'admin-1',
+				action: AuditAction.EVENT_REMOVED_BY_ADMIN,
+				targetType: AuditTargetType.EVENT,
+				targetId: 'e1',
+				meta: { organizerId: 'org1', eventTitle: 'Gone' },
+			});
+		});
+
+		it('removeEventByAdmin writes no audit entry when no DRAFT was deleted', async () => {
+			eventModel.findOneAndDelete.mockReturnValue(exec(null));
+			await expect(service.removeEventByAdmin('admin-1' as any, 'e1' as any)).rejects.toThrow(Message.REMOVE_FAILED);
+			expect(auditLogService.record).not.toHaveBeenCalled();
 		});
 
 		it('admin cannot edit a CANCELLED event', async () => {
 			eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.CANCELLED })));
-			await expect(service.updateEventByAdmin({ _id: 'e1' } as any)).rejects.toThrow(Message.EVENT_NOT_EDITABLE);
+			await expect(service.updateEventByAdmin('admin-1' as any, { _id: 'e1' } as any)).rejects.toThrow(Message.EVENT_NOT_EDITABLE);
 		});
 	});
 

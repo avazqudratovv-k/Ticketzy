@@ -116,7 +116,7 @@ describe('TicketTypeService quantity of RESERVED events', () => {
 		eventId: '64b7f0f2a1b2c3d4e5f60718',
 		ticketTypeName: 'VIP',
 		ticketPrice: 100,
-		ticketCurrency: 'USD',
+		ticketCurrency: 'KRW',
 		maxPerOrder: 4,
 		...over,
 	});
@@ -133,6 +133,7 @@ describe('TicketTypeService quantity of RESERVED events', () => {
 	beforeEach(() => {
 		ticketTypeModel = {
 			create: jest.fn().mockImplementation(async (doc) => doc),
+			exists: jest.fn().mockResolvedValue(null),
 			findById: jest.fn(),
 			findOneAndUpdate: jest.fn().mockReturnValue(query({ _id: 't1', eventId: 'e1' })),
 			aggregate: jest.fn().mockReturnValue(query([])),
@@ -198,6 +199,56 @@ describe('TicketTypeService quantity of RESERVED events', () => {
 		it('still lets the price change', async () => {
 			await service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketPrice: 120 } as any);
 			expect(ticketTypeModel.findOneAndUpdate.mock.calls[0][1]).toEqual({ _id: 't1', ticketPrice: 120 });
+		});
+	});
+
+	describe('one currency per event (KRW, DECISIONS #95)', () => {
+		it.each(['USD', 'EUR', 'UZS'])('refuses to create a ticket type priced in %s', async (currency) => {
+			await expect(
+				service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'vip', ticketCurrency: currency })),
+			).rejects.toThrow(Message.ONLY_KRW_TICKETS);
+			expect(ticketTypeModel.create).not.toHaveBeenCalled();
+		});
+
+		it('creates a KRW ticket type on an event without other-currency types', async () => {
+			await service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'vip' }));
+			expect(ticketTypeModel.exists).toHaveBeenCalledWith(expect.objectContaining({ ticketCurrency: { $ne: 'KRW' } }));
+			expect(ticketTypeModel.create).toHaveBeenCalledTimes(1);
+		});
+
+		it('refuses a new KRW type next to an existing other-currency type of the same event (old data) and changes nothing', async () => {
+			ticketTypeModel.exists.mockResolvedValue({ _id: 'old-usd-type' });
+			await expect(service.createTicketType('m1' as any, 'ORGANIZER' as any, input({ tierKey: 'vip' }))).rejects.toThrow(
+				Message.EVENT_HAS_OTHER_CURRENCY,
+			);
+			expect(ticketTypeModel.create).not.toHaveBeenCalled();
+		});
+
+		it('refuses an update to another currency, before touching the database', async () => {
+			ticketTypeModel.findById.mockReturnValue(leanQuery({ _id: 't1', eventId: 'e1', tierKey: 'vip', ticketCurrency: 'KRW' }));
+			await expect(
+				service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketCurrency: 'USD' } as any),
+			).rejects.toThrow(Message.ONLY_KRW_TICKETS);
+			expect(ticketTypeModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('lets an old other-currency type without sales be moved to KRW, and refuses it once it sold tickets', async () => {
+			ticketTypeModel.findById.mockReturnValue(leanQuery({ _id: 't1', eventId: 'e1', tierKey: 'vip', ticketCurrency: 'USD', soldQuantity: 0 }));
+			await service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketCurrency: 'KRW' } as any);
+			expect(ticketTypeModel.findOneAndUpdate.mock.calls[0][1]).toEqual({ _id: 't1', ticketCurrency: 'KRW' });
+
+			ticketTypeModel.findOneAndUpdate.mockClear();
+			ticketTypeModel.findById.mockReturnValue(leanQuery({ _id: 't1', eventId: 'e1', tierKey: 'vip', ticketCurrency: 'USD', soldQuantity: 3 }));
+			await expect(
+				service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketCurrency: 'KRW' } as any),
+			).rejects.toThrow(Message.TICKET_CURRENCY_LOCKED);
+			expect(ticketTypeModel.findOneAndUpdate).not.toHaveBeenCalled();
+		});
+
+		it('an update that leaves the currency alone is not blocked on an old other-currency type', async () => {
+			ticketTypeModel.findById.mockReturnValue(leanQuery({ _id: 't1', eventId: 'e1', tierKey: 'vip', ticketCurrency: 'USD', soldQuantity: 3 }));
+			await service.updateTicketType('m1' as any, 'ORGANIZER' as any, { _id: 't1', ticketPrice: 9 } as any);
+			expect(ticketTypeModel.findOneAndUpdate).toHaveBeenCalledTimes(1);
 		});
 	});
 });

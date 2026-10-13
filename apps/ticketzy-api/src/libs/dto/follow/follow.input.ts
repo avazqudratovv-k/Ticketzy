@@ -1,6 +1,7 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { IsNotEmpty, IsOptional, Min } from 'class-validator';
 import { ObjectId } from 'mongoose';
+import { PageField, LimitField } from '../common/pagination';
 
 @InputType()
 class FollowSearch {
@@ -15,14 +16,10 @@ class FollowSearch {
 
 @InputType()
 export class FollowInquiry {
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@PageField()
 	page: number;
 
-	@IsNotEmpty()
-	@Min(1)
-	@Field(() => Int)
+	@LimitField()
 	limit: number;
 
 	@IsNotEmpty()
