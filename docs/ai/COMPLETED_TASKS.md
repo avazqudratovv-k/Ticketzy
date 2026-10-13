@@ -543,3 +543,7 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - `.gitignore`: the lines `uploads` and `.claude/settings.local.json` were glued together (`uploads.claude/settings.local.json`); split them. `.gitattributes` already had the `.agents` and `.claude/skills` linguist-vendored lines.
 - No application code changed; tests were not run. Nothing committed.
 
+
+## Nestar backend comparison (decision #89)
+- New `docs/ai/NESTAR_COMPARISON.md`: summary table, details per point (layout, NestJS setup, GraphQL, Mongoose, auth, uploads, realtime, batch, logging, tests, tooling, docs), DIVERGED items with keep or realign and effort, overall verdict. Result: 0 SAME, 7 EXTENDED, 5 DIVERGED.
+- Nestar reference was `/Users/kenneth/nestar` (chosen by the owner); read only, no `.env` read, nothing committed. Static comparison only: no app started, no tests run.
