@@ -56,6 +56,10 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-# Images
-uploads.claude/settings.local.json
+# Images and uploaded files
+uploads
 uploads/
+
+# personal Claude Code settings
+.claude/settings.local.json
+

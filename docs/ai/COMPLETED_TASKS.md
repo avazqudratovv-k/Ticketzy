@@ -538,3 +538,8 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - Tests: `libs/ai-check.spec.ts` (model not in list, 404, 400/403, 429, 503/504, timeout, no secrets) and fallback / 429 / 404 / 504-then-fallback / logging / startup warning cases in `ai.service.spec.ts`.
 - Not done: `ai:check` was not run against the real Google API from this session (it would use the key in `.env`, which was off limits); nothing committed.
 
+## Project guide files and skills index (decision #88)
+- `AGENTS.md` rewritten (kept the existing rules, fixed `npx run build` to `npm run build`, added commands, working rules, domain rules with key files, skills pointer). New `CLAUDE.md` (`@AGENTS.md` + 2 notes). New `docs/ai/SKILLS.md` and repo skill `.claude/skills/ticketzy-backend-workflow/SKILL.md`. README got a "Working with AI tools" section.
+- `.gitignore`: the lines `uploads` and `.claude/settings.local.json` were glued together (`uploads.claude/settings.local.json`); split them. `.gitattributes` already had the `.agents` and `.claude/skills` linguist-vendored lines.
+- No application code changed; tests were not run. Nothing committed.
+

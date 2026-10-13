@@ -26,6 +26,16 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Working with AI tools
+
+This repo is built with AI coding assistants under written rules, so their work can be reviewed.
+
+- `AGENTS.md` is the main guide for any AI tool: stack, commands, working rules and domain rules. `CLAUDE.md` imports it and adds a few Claude Code notes.
+- `docs/ai/DECISIONS.md` is the numbered decisions log (what was decided, why, risks, alternatives); `docs/ai/COMPLETED_TASKS.md` records every finished task with the checks that were run.
+- Skills (NestJS, security, MongoDB and a repo workflow skill) live in `.agents/skills` and `.claude/skills`; `docs/ai/SKILLS.md` lists them and `skills-lock.json` pins their sources.
+- Decisions override skills: a skill is general advice, a decision is what this project chose.
+- AI tools do not commit unless asked, never read `.env`, and must pass the full test suite before reporting.
+
 ## Project setup
 
 ```bash
