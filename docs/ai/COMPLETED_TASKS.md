@@ -613,3 +613,20 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
   - Comments have no reply field in the schema, so replies are comments starting with `@nick`.
   - Leftover test data: no script in the repo mentions "ZZ Venue Clash Test"; the earlier live checks in this file say they deleted their test data by id. The dev database was not inspected. `check:demo` lists names that look like test data and changes nothing.
   - Nothing committed.
+
+## Demo seed first-run fix (decision #109)
+- **What changed:**
+  - Cause: on the first Atlas run `seed:demo` stopped after about 45 of 56 events with "The refund deadline of this order has passed!". The refund step gave a buyer refund to an event starting tomorrow (Seoul) after Seoul midnight; the real `requestRefund` correctly refused. The production check is untouched.
+  - `libs/demo-refunds.ts`: a buyer refund goes through `requestRefund` while the deadline is ahead (5 minute margin), else through the real `refundOrderByAdmin` (audited, `afterDeadline: true`).
+  - `libs/demo-errors.ts` (`withScenario`, `DemoSeedError`, scrubbing): failures read `event 46/56 key (STATUS) > sales > order 3/9 (buyer 12, regular): message`; `seed-demo.ts` repeats that the data stays and the next run removes it.
+  - `DemoSeeder` swaps the moderation of its own `EventService` for a counter: no more warnings, one summary line, the 1.5 s wait is gone.
+  - Speed: orders dated with one `bulkWrite` per collection and event, comments / admin trail / organizer follows and likes in small parallel groups, ranks in a `bulkWrite`. Seats, stock, holds, checkouts, payments and refunds stay sequential.
+  - Docs: README, `RUN_IN_PRODUCTION.md` (seed section), `DECISIONS.md` #109.
+- **Tests:** `libs/demo-errors.spec.ts` (path format, nesting, scrubbing, non-Error values), `libs/demo-refunds.spec.ts` (deadline boundary in Seoul time, margin), `demo-seeder.refunds.spec.ts` (the real `refunds` step with mocked services: buyer route before the deadline, admin route after it with the forced refund kept, failure message with the refund index, moderation swap).
+- **Checks:** `tsc` (api and batch), `npm run build` and `npm run test` pass: 61 suites, 1,174 tests. `npm run lint` not run (it rewrites files).
+- **Decision:** #109.
+- **Not done / risks:**
+  - Still **not run against a MongoDB** (none here, no `.env` read). The new flow is unit tested only; the `bulkWrite` and parallel changes need the real run to confirm.
+  - Expected run time is an estimate, not a measurement.
+  - Nothing committed.
+

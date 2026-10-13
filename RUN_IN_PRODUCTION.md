@@ -54,7 +54,8 @@ The API refuses to start, and prints every problem at once by variable **name**,
 2. Run `npm run seed` once for the admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`).
 3. Export the settings in your shell only (not in a file): `NODE_ENV=production`, `ALLOW_DEMO_SEED=true`, `DEMO_SEED_CONFIRM=MONGO_PROD`, the four `DEMO_*_PASSWORD` values, `MONGO_PROD`, `SECRET_TOKEN`, `QR_SECRET`. The Atlas user needs `readWrite` on that database.
 4. `npm run check:demo` first (read only) to see what is there, then `npm run seed:demo`; later `npm run reset:demo`.
-5. Seeded events are in the future: run the seed again to refresh the dates. The seed sets `SEAT_HOLD_SECONDS=300` and `PAYMENT_MODE=simulated` for its own process only. Unset the variables afterwards.
+5. A failed seed names the scenario that failed and leaves its data; just run `npm run seed:demo` again (it removes the earlier run first). Moderation is skipped during the seed (#109).
+6. Seeded events are in the future: run the seed again to refresh the dates. The seed sets `SEAT_HOLD_SECONDS=300` and `PAYMENT_MODE=simulated` for its own process only. Unset the variables afterwards.
 
 ## Render
 

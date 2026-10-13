@@ -47,6 +47,8 @@ DEMO_SEED_CONFIRM=MONGO_DEV npm run reset:demo
 npm run check:demo
 ```
 
+If a run fails, the message names the scenario (for example `event 46/56 <key> (APPROVED) > sales > order 3/9 ...`); the data created so far stays, and the next `seed:demo` removes it first (no `reset:demo` needed). The seed skips the AI moderation of submitted events and refunds events that start tomorrow through the admin refund once the buyer deadline has passed (#109).
+
 Against Atlas see `RUN_IN_PRODUCTION.md` ("Demo data on Atlas").
 
 ## Environment variables

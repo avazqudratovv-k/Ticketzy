@@ -53,6 +53,8 @@ import {
 	Rng,
 } from './libs/demo-plan';
 import { getPayoutDate } from './libs/payout';
+import { withScenario } from './libs/demo-errors';
+import { getRefundRoute } from './libs/demo-refunds';
 import { AuditAction } from './libs/enums/audit-log.enum';
 import { CommentGroup } from './libs/enums/comment.enum';
 import { EventStatus, SeatStatus, SeatingType } from './libs/enums/event.enum';
@@ -68,6 +70,7 @@ import { getDemoModels } from './demo-app';
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+const VENUE_TIMEZONE = 'Asia/Seoul'; // every demo venue
 const REFUND_REASONS = ['Change of plans, cannot attend.', 'Two of us are sick.', 'Bought the wrong date.', 'Found a cheaper option.'];
 
 const hashString = (text: string): number => [...text].reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0, 7);
@@ -104,6 +107,8 @@ export class DemoSeeder {
 	private created = new Map<string, any>();
 	/** when an organizer's commission last dropped to a lower tier: later orders must be sold after it */
 	private tierFloor = new Map<OrganizerKey, number>();
+	private moderationSkipped = 0;
+	private refundCounts = { buyer: 0, admin: 0, adminAfterDeadline: 0 };
 
 	private readonly eventService: EventService;
 	private readonly ticketTypeService: TicketTypeService;
@@ -145,30 +150,46 @@ export class DemoSeeder {
 		this.batch = new BatchService(this.models.event, this.models.member, this.models.order, this.models.ticketType, this.models.eventSeat);
 		// a seeded conversation sends many messages in a second; the limit is per process and does not apply to this one
 		(this.conversationService as any).sendLimiter = { tryConsume: () => true };
+		this.skipModeration();
+	}
+
+	/**
+	 * Submitting an event starts the AI moderation in the background. A seed has no AI (and 56 "not checked" warnings tell
+	 * nothing), so this one seeder instance swaps the moderation of its own EventService for a counter; the production service
+	 * is untouched (DECISIONS #109). One summary line is logged at the end.
+	 */
+	private skipModeration(): void {
+		(this.eventService as any).aiModerationService = {
+			moderateEvent: async () => {
+				this.moderationSkipped++;
+				return { checked: false, flags: [] };
+			},
+		};
 	}
 
 	public async run(passwords: Record<DemoPasswordKey, string>): Promise<void> {
 		this.admin = await this.models.member.findOne({ memberType: MemberType.ADMIN, memberStatus: MemberStatus.ACTIVE }).sort({ createdAt: 1 }).lean().exec();
 		if (!this.admin) throw new Error('No admin exists yet. Run `npm run seed` first (it needs ADMIN_EMAIL and ADMIN_PASSWORD).');
 
-		await this.createAccounts(passwords);
-		await this.createVenues();
+		await withScenario('accounts', () => this.createAccounts(passwords));
+		await withScenario('venues', () => this.createVenues());
 		const plan = buildDemoPlan(this.now);
 		let done = 0;
 		for (const event of plan.events) {
-			await this.processEvent(event);
+			await withScenario(`event ${done + 1}/${plan.events.length} ${event.key} (${event.status})`, () => this.processEvent(event));
 			done++;
 			if (done % 8 === 0 || done === plan.events.length) this.log(`  events ${done}/${plan.events.length}`);
 		}
-		await this.payouts(plan.events);
-		await this.followAndLike();
-		await this.chats(plan.events);
-		await this.extraNotifications(plan.events);
-		// the moderation check that submit starts runs in the background; let it finish before its trail is dated
-		await new Promise((resolve) => setTimeout(resolve, 1500));
-		await this.dateTheAdminTrail(plan.events);
-		await this.writeRanks();
-		await this.markOldNotificationsRead();
+		const { buyer, admin, adminAfterDeadline } = this.refundCounts;
+		this.log(`  refunds: ${buyer} by buyers, ${admin} by an admin (${adminAfterDeadline} of them because the refund deadline had passed)`);
+		this.log(`  AI moderation skipped for ${this.moderationSkipped} submitted event(s) (the seed has no AI)`);
+		await withScenario('payouts', () => this.payouts(plan.events));
+		await withScenario('organizer follows and likes', () => this.followAndLike());
+		await withScenario('chats', () => this.chats(plan.events));
+		await withScenario('extra notifications', () => this.extraNotifications(plan.events));
+		await withScenario('dating the admin trail', () => this.dateTheAdminTrail(plan.events));
+		await withScenario('ranks', () => this.writeRanks());
+		await withScenario('old notifications', () => this.markOldNotificationsRead());
 	}
 
 	/** MANIFEST: a root document is written here before it is created, so a run that dies half way is still cleaned up by reset */
@@ -278,7 +299,7 @@ export class DemoSeeder {
 		const eventId = new Types.ObjectId();
 		await this.track('Event', [eventId]);
 
-		const event: any = await this.eventService.createEvent({
+		const event: any = await withScenario('create event', () => this.eventService.createEvent({
 			_id: eventId,
 			eventCategory: plan.category,
 			seatingType: plan.seating,
@@ -291,13 +312,13 @@ export class DemoSeeder {
 			endAt: new Date(plan.endAt.getTime() + shift),
 			saleStartAt: plan.saleStartAt,
 			organizerId: organizer._id,
-		} as any);
+		} as any));
 
 		this.created.set(plan.key, event);
 		const ticketTypes: any[] = [];
 		for (const type of plan.ticketTypes) {
 			ticketTypes.push(
-				await this.ticketTypeService.createTicketType(organizer._id, MemberType.ORGANIZER, {
+				await withScenario(`ticket type "${type.name}"`, () => this.ticketTypeService.createTicketType(organizer._id, MemberType.ORGANIZER, {
 					eventId,
 					ticketTypeName: type.name,
 					ticketPrice: type.price,
@@ -305,25 +326,25 @@ export class DemoSeeder {
 					tierKey: type.tierKey,
 					totalQuantity: type.quantity,
 					maxPerOrder: type.maxPerOrder,
-				} as any),
+				} as any)),
 			);
 		}
 		if (plan.status === EventStatus.DRAFT) return;
 
-		await this.eventService.submitEventForApproval(organizer._id, eventId as any);
+		await withScenario('submit', () => this.eventService.submitEventForApproval(organizer._id, eventId as any));
 		if (plan.status === EventStatus.PENDING) return;
 		if (plan.status === EventStatus.REJECTED) {
-			await this.eventService.rejectEventByAdmin(this.admin._id, { eventId, reason: plan.reason } as any);
+			await withScenario('reject', () => this.eventService.rejectEventByAdmin(this.admin._id, { eventId, reason: plan.reason } as any));
 			return;
 		}
-		await this.eventService.approveEventByAdmin(this.admin._id, eventId as any); // RESERVED events get their seats here
+		await withScenario('approve', () => this.eventService.approveEventByAdmin(this.admin._id, eventId as any)); // RESERVED events get their seats here
 
 		const built: Built = { plan, event, ticketTypes: await this.models.ticketType.find({ eventId }).lean().exec() };
 		this.built.set(plan.key, built);
-		const placed = plan.noSales ? [] : await this.sell(built);
-		await this.social(built);
-		if (plan.status === EventStatus.CANCELLED) await this.cancel(built, placed);
-		if (plan.status === EventStatus.ENDED) await this.finish(built, placed);
+		const placed = plan.noSales ? [] : await withScenario('sales', () => this.sell(built));
+		await withScenario('views, likes and comments', () => this.social(built));
+		if (plan.status === EventStatus.CANCELLED) await withScenario('cancel and refund all', () => this.cancel(built, placed));
+		if (plan.status === EventStatus.ENDED) await withScenario('check-in and end', () => this.finish(built, placed));
 	}
 
 	/** SALES */
@@ -378,16 +399,18 @@ export class DemoSeeder {
 		const [from, to] = this.salesWindow(plan);
 		const times = specs.map(() => at(rng, from, to)).sort((a, b) => a.getTime() - b.getTime());
 		const placed: Placed[] = [];
-		for (const [index, spec] of shuffled(rng, specs).entries()) {
+		const ordered = shuffled(rng, specs);
+		// the orders of one event share its seats and stock: they are placed one after the other
+		for (const [index, spec] of ordered.entries()) {
 			const buyer = this.buyers[spec.buyerIndex];
-			const result = await this.placeOrder(buyer, event, spec, plan);
+			const result = await withScenario(`order ${index + 1}/${ordered.length} (buyer ${spec.buyerIndex}, ${spec.forced ?? 'regular'})`, () => this.placeOrder(buyer, event, spec, plan));
 			result.at = times[index];
 			result.checkIn = !!spec.checkIn;
 			result.toRefund = spec.forced === 'refunded';
 			result.protectedOrder = spec.buyerIndex === 0 && (spec.forced === 'paid' || !!spec.checkIn);
-			await this.dateOrder(result, rng);
 			placed.push(result);
 		}
+		await withScenario('date the orders', () => this.dateOrders(placed, rng));
 
 		if (!plan.fill && plan.status !== EventStatus.CANCELLED) await this.refunds(built, placed, rng);
 		return placed;
@@ -412,16 +435,23 @@ export class DemoSeeder {
 		return { ...base, outcome: 'paid' };
 	}
 
-	/** the order, its tickets, payment and notifications get the time of the sale */
-	private async dateOrder(placed: Placed, rng: Rng): Promise<void> {
-		const paidAt = placed.at;
-		const createdAt = new Date(paidAt.getTime() - randomInt(rng, 1, 9) * MINUTE);
-		const filter = { orderId: placed.orderId };
+	/** the orders, their tickets, payments and notifications get the time of the sale: one bulk write per collection and event */
+	private async dateOrders(placed: Placed[], rng: Rng): Promise<void> {
+		if (!placed.length) return;
+		const dated = placed.map((item) => ({ item, paidAt: item.at, createdAt: new Date(item.at.getTime() - randomInt(rng, 1, 9) * MINUTE) }));
+		const opts = { timestamps: false } as any;
+		const byTime = (field: string) =>
+			dated.map(({ item, paidAt }) => ({ updateMany: { filter: { [field]: item.orderId }, update: { $set: { createdAt: paidAt, updatedAt: paidAt } } } }));
 		await Promise.all([
-			this.models.order.updateOne({ _id: placed.orderId }, { $set: { createdAt, updatedAt: paidAt, ...(placed.outcome === 'paid' ? { paidAt } : {}) } }, { timestamps: false } as any).exec(),
-			this.setTimes(this.models.ticket, filter, paidAt),
-			this.setTimes(this.models.payment, filter, paidAt),
-			this.setTimes(this.models.notification, filter, paidAt),
+			this.models.order.bulkWrite(
+				dated.map(({ item, paidAt, createdAt }) => ({
+					updateOne: { filter: { _id: item.orderId }, update: { $set: { createdAt, updatedAt: paidAt, ...(item.outcome === 'paid' ? { paidAt } : {}) } } },
+				})),
+				opts,
+			),
+			this.models.ticket.bulkWrite(byTime('orderId'), opts),
+			this.models.payment.bulkWrite(byTime('orderId'), opts),
+			this.models.notification.bulkWrite(byTime('orderId'), opts),
 		]);
 	}
 
@@ -442,13 +472,26 @@ export class DemoSeeder {
 
 		const limit = Math.min(this.now.getTime() - 10 * MINUTE, plan.shiftDays ? plan.startAt.getTime() - DAY : Infinity);
 		const when = (item: Placed) => new Date(Math.min(limit, item.at.getTime() + randomInt(rng, 2, 120) * HOUR));
-		for (const item of [...byBuyer, ...chosen]) {
-			await this.refundService.requestRefund(item.buyerId, item.orderId, REFUND_REASONS[randomInt(rng, 0, REFUND_REASONS.length - 1)]);
-			await this.dateRefund(item.orderId, when(item));
-		}
-		for (const item of byAdmin) {
-			await this.refundService.refundOrderByAdmin(this.admin._id, { orderId: item.orderId, reason: 'Refunded after a support request.' } as any);
-			await this.dateRefund(item.orderId, when(item));
+		// A buyer is bound to the real refund deadline. An event that starts tomorrow (Seoul) is past it from midnight, so a
+		// refund the plan gives to the buyer is then done by an admin, which the policy allows after the deadline (#109).
+		const route = getRefundRoute(built.event.startAt, VENUE_TIMEZONE, new Date());
+		const asBuyer = [...byBuyer, ...chosen];
+		const jobs: { item: Placed; byAdmin: boolean; label: string }[] = [
+			...asBuyer.map((item) => ({ item, byAdmin: route === 'admin', label: route === 'admin' ? 'admin, buyer deadline passed' : 'buyer' })),
+			...byAdmin.map((item) => ({ item, byAdmin: true, label: 'admin' })),
+		];
+		for (const [index, job] of jobs.entries()) {
+			await withScenario(`refund ${index + 1}/${jobs.length} (${job.label})`, async () => {
+				if (job.byAdmin) {
+					await this.refundService.refundOrderByAdmin(this.admin._id, { orderId: job.item.orderId, reason: 'Refunded after a support request.' } as any);
+					this.refundCounts.admin++;
+					if (job.label !== 'admin') this.refundCounts.adminAfterDeadline++;
+				} else {
+					await this.refundService.requestRefund(job.item.buyerId, job.item.orderId, REFUND_REASONS[randomInt(rng, 0, REFUND_REASONS.length - 1)]);
+					this.refundCounts.buyer++;
+				}
+				await this.dateRefund(job.item.orderId, when(job.item));
+			});
 		}
 	}
 
@@ -482,15 +525,18 @@ export class DemoSeeder {
 		await this.inChunks(likers, 10, (liker) => this.eventService.likeTargetEvent(liker._id, event._id));
 
 		const commenters = viewers.slice(0, Math.max(1, Math.round(plan.popularity * 3)));
-		for (const commenter of commenters) {
+		// the texts and the dice are drawn first, in order, so the data does not depend on which request finishes first
+		const talk = commenters.map((commenter) => {
 			const locale = this.localeOf(commenter);
-			const text = DEMO_COMMENTS[randomInt(rng, 0, DEMO_COMMENTS.length - 1)][locale];
+			return { commenter, locale, text: DEMO_COMMENTS[randomInt(rng, 0, DEMO_COMMENTS.length - 1)][locale], reply: rng() < 0.5 };
+		});
+		await this.inChunks(talk, 4, async ({ commenter, locale, text, reply }) => {
 			await this.commentService.createComment(commenter._id, { commentGroup: CommentGroup.EVENT, commentContent: text, commentRefId: event._id } as any);
 			// comments have no reply field, so the organizer answers with a comment that names the author
-			if (rng() < 0.5) {
+			if (reply) {
 				await this.commentService.createComment(organizer._id, { commentGroup: CommentGroup.EVENT, commentContent: `@${commenter.memberNick} ${DEMO_REPLIES[locale]}`, commentRefId: event._id } as any);
 			}
-		}
+		});
 
 		const ids = { $in: [event._id] };
 		await this.spreadTimes(this.models.view, { viewGroup: ViewGroup.EVENT, viewRefId: ids }, from, to);
@@ -570,13 +616,20 @@ export class DemoSeeder {
 	private async followAndLike(): Promise<void> {
 		const active = DEMO_ORGANIZERS.filter((item) => item.outcome === 'verify').map((item) => this.organizers[item.key]);
 		const rng = createRng(77);
-		for (const [index, buyer] of this.buyers.entries()) {
-			for (const organizer of shuffled(rng, active).slice(0, 1 + (index % 4))) {
+		// the dice are drawn first, in order; each buyer then acts alone (one buyer's three calls stay in sequence)
+		const actions = this.buyers.map((buyer, index) => ({
+			buyer,
+			targets: shuffled(rng, active)
+				.slice(0, 1 + (index % 4))
+				.map((organizer) => ({ organizer, follow: rng() < 0.6, like: rng() < 0.35 })),
+		}));
+		await this.inChunks(actions, 5, async ({ buyer, targets }) => {
+			for (const { organizer, follow, like } of targets) {
 				await this.memberService.getMember(buyer._id, organizer._id); // records the view and counts it
-				if (rng() < 0.6) await this.followService.subscribe(buyer._id, organizer._id);
-				if (rng() < 0.35) await this.memberService.likeTargetMember(buyer._id, organizer._id);
+				if (follow) await this.followService.subscribe(buyer._id, organizer._id);
+				if (like) await this.memberService.likeTargetMember(buyer._id, organizer._id);
 			}
-		}
+		});
 		const ids = active.map((organizer) => organizer._id);
 		const from = new Date(this.now.getTime() - 380 * DAY);
 		const to = new Date(this.now.getTime() - HOUR);
@@ -691,29 +744,33 @@ export class DemoSeeder {
 	/** DATES OF THE ADMIN TRAIL: audit entries and notifications the admin flows wrote "now" are moved to when they would have happened */
 
 	private async dateTheAdminTrail(events: PlanEvent[]): Promise<void> {
-		for (const plan of events) {
+		// events are independent documents: eight at a time
+		await this.inChunks(events, 8, async (plan) => {
 			const eventId = this.created.get(plan.key)?._id;
-			if (!eventId) continue;
+			if (!eventId) return;
 			const trail: [AuditAction, NotificationType | null, Date][] = [
 				[AuditAction.EVENT_APPROVED, NotificationType.EVENT_APPROVED, plan.approvedAt],
 				[AuditAction.EVENT_REJECTED, NotificationType.EVENT_REJECTED, plan.decidedAt ?? plan.approvedAt],
 				[AuditAction.EVENT_CANCELLED, NotificationType.EVENT_CANCELLED, plan.decidedAt ?? plan.approvedAt],
 				[AuditAction.EVENT_REFUNDS_PROCESSED, null, new Date((plan.decidedAt ?? plan.approvedAt).getTime() + 5 * MINUTE)],
-				[AuditAction.EVENT_MODERATION_RUN, null, new Date(plan.createdAt.getTime() + 5 * MINUTE)],
 			];
-			for (const [action, notification, when] of trail) {
-				await this.setTimes(this.models.auditLog, { targetId: eventId, action }, when);
-				if (notification) await this.setTimes(this.models.notification, { eventId, notificationType: notification }, when);
-			}
-			await this.models.event.updateOne({ _id: eventId }, { $set: { createdAt: plan.createdAt } }, { timestamps: false } as any).exec();
-			await this.setTimes(this.models.ticketType, { eventId }, plan.createdAt);
-		}
-		for (const account of DEMO_ORGANIZERS) {
+			await Promise.all([
+				...trail.flatMap(([action, notification, when]) => [
+					this.setTimes(this.models.auditLog, { targetId: eventId, action }, when),
+					...(notification ? [this.setTimes(this.models.notification, { eventId, notificationType: notification }, when)] : []),
+				]),
+				this.models.event.updateOne({ _id: eventId }, { $set: { createdAt: plan.createdAt } }, { timestamps: false } as any).exec(),
+				this.setTimes(this.models.ticketType, { eventId }, plan.createdAt),
+			]);
+		});
+		const joinedAt = new Date(this.now.getTime() - 399 * DAY);
+		await this.inChunks(DEMO_ORGANIZERS, 5, async (account) => {
 			const member = this.organizers[account.key];
-			const when = new Date(this.now.getTime() - 399 * DAY);
-			await this.setTimes(this.models.auditLog, { targetId: member._id }, when);
-			await this.setTimes(this.models.notification, { receiverId: member._id, notificationType: { $in: [NotificationType.ORGANIZER_VERIFIED, NotificationType.ORGANIZER_REJECTED] } }, when);
-		}
+			await Promise.all([
+				this.setTimes(this.models.auditLog, { targetId: member._id }, joinedAt),
+				this.setTimes(this.models.notification, { receiverId: member._id, notificationType: { $in: [NotificationType.ORGANIZER_VERIFIED, NotificationType.ORGANIZER_REJECTED] } }, joinedAt),
+			]);
+		});
 		// admin trail of the rejection chat: the admin opened it nineteen days ago
 		await this.setTimes(this.models.auditLog, { action: AuditAction.SUPPORT_CONVERSATION_STARTED, actorId: this.admin._id, 'meta.organizerId': this.organizers.rejected._id }, new Date(this.now.getTime() - 19 * DAY));
 	}
@@ -722,9 +779,9 @@ export class DemoSeeder {
 
 	private async writeRanks(): Promise<void> {
 		const events: any[] = await this.models.event.find({ _id: { $in: [...this.built.values()].map((item) => item.event._id) }, eventStatus: EventStatus.APPROVED }).lean().exec();
-		for (const event of events) await this.models.event.updateOne({ _id: event._id }, { $set: { eventRank: getEventRank(event) } }, { timestamps: false } as any).exec();
+		if (events.length) await this.models.event.bulkWrite(events.map((event) => ({ updateOne: { filter: { _id: event._id }, update: { $set: { eventRank: getEventRank(event) } } } })), { timestamps: false } as any);
 		const organizers: any[] = await this.models.member.find({ _id: { $in: Object.values(this.organizers).map((member: any) => member._id) }, memberStatus: MemberStatus.ACTIVE }).lean().exec();
-		for (const organizer of organizers) await this.models.member.updateOne({ _id: organizer._id }, { $set: { memberRank: getOrganizerRank(organizer) } }, { timestamps: false } as any).exec();
+		if (organizers.length) await this.models.member.bulkWrite(organizers.map((organizer) => ({ updateOne: { filter: { _id: organizer._id }, update: { $set: { memberRank: getOrganizerRank(organizer) } } } })), { timestamps: false } as any);
 	}
 
 	/** older notifications were read long ago; the recent ones stay unread so the badge shows a number */

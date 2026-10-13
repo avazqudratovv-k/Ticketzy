@@ -6,6 +6,7 @@
  * Needs an existing admin (`npm run seed`) and four passwords from the environment. Prints counts only.
  */
 import { config } from 'dotenv';
+import { DemoSeedError } from './libs/demo-errors';
 import { evaluateDemoConsistency, formatFindings, getInvariantFailures } from './libs/demo-consistency';
 import { assertDemoCommandAllowed, assertNoForeignData, readDemoPasswords } from './libs/demo-guards';
 import { countForeignData, removeDemoData } from './libs/demo-manifest';
@@ -56,5 +57,7 @@ async function seedDemo(): Promise<void> {
 
 seedDemo().catch((err) => {
 	console.error(`Demo seed failed: ${err.message}`);
+	// a failed seed leaves what it created; the next run removes it first (only what the manifest tracks)
+	if (err instanceof DemoSeedError) console.error('The data created so far stays in place. Run `npm run seed:demo` again: it removes the earlier run first.');
 	process.exit(1);
 });
