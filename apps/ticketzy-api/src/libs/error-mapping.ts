@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { unwrapResolverError } from '@apollo/server/errors';
 import { GraphQLError } from 'graphql';
 import { Message } from './enums/common.enum';
+import { CodedException } from './coded-exception';
 import { isExpectedDomainError } from './expected-errors';
 import { T } from './types/common';
 
@@ -9,6 +10,8 @@ import { T } from './types/common';
 export interface SafeGraphQLError {
 	code: string;
 	message: string;
+	/** only on RATE_LIMITED: whole seconds until the client may try again */
+	retryAfterSeconds?: number;
 }
 
 export interface MappedRawError extends SafeGraphQLError {
@@ -29,7 +32,7 @@ const nameOf = (err: any): string => String(err?.name ?? err?.constructor?.name 
 const isDuplicateKey = (err: any): boolean => err?.code === 11000 || err?.code === 11001;
 
 const isUnavailable = (err: any): boolean =>
-	/^(MongoNetwork|MongoServerSelection|MongoNotConnected|MongoTopologyClosed|MongoPoolClosed|MongoWaitQueueTimeout)/.test(nameOf(err)) ||
+	/^(MongoNetwork|MongoServerSelection|MongooseServerSelection|MongoNotConnected|MongoTopologyClosed|MongoPoolClosed|MongoWaitQueueTimeout)/.test(nameOf(err)) ||
 	/buffering timed out|ECONNREFUSED|ENOTFOUND|topology was destroyed|connection .* closed/i.test(String(err?.message ?? ''));
 
 const isBadInput = (err: any): boolean =>
@@ -81,14 +84,38 @@ export const mapRawError = (raw: unknown): MappedRawError | null => {
 	return null;
 };
 
+/**
+ * class-validator says "limit must not be greater than 100" in an array of texts, and Nest's Apollo driver hides the array
+ * behind "Bad Request Exception" (it only keeps it in `extensions.originalError`). For the two list arguments every
+ * client sends, the first such text becomes one clear sentence with the maximum; any other validation text gives null.
+ */
+export const mapValidationMessage = (message: unknown): string | null => {
+	for (const text of Array.isArray(message) ? message : [message]) {
+		if (typeof text !== 'string') continue;
+		const limit = /(?:^|\.)limit must not be greater than (\d+)/.exec(text);
+		if (limit) return Message.LIMIT_TOO_HIGH.replace('{max}', limit[1]);
+		const page = /(?:^|\.)page must not be greater than (\d+)/.exec(text);
+		if (page) return Message.PAGE_TOO_HIGH.replace('{max}', page[1]);
+	}
+	return null;
+};
+
 /** the `formatError` hook of the GraphQL module: the client always gets `{ code, message }` and nothing internal */
 export const formatGraphQLError = (
 	error: T,
 	originalError: unknown,
 	logger: { warn: (message: string) => void; error: (message: string) => void },
 ): SafeGraphQLError => {
+	const original = unwrapResolverError(originalError);
+	// errors with their own code (RATE_LIMITED, the AI caps): the code, the text and the retry hint, nothing else
+	if (original instanceof CodedException) {
+		const coded: SafeGraphQLError = { code: original.code, message: original.message };
+		if (original.retryAfterSeconds !== undefined) coded.retryAfterSeconds = original.retryAfterSeconds;
+		logger.warn(`${original.code}${original.retryAfterSeconds !== undefined ? ` (retry in ${original.retryAfterSeconds}s)` : ''}`);
+		return coded;
+	}
 	// raw database and runtime errors become a safe code and message; the detail stays in the server log (C3-61)
-	const mapped = mapRawError(unwrapResolverError(originalError));
+	const mapped = mapRawError(original);
 	if (mapped) {
 		const line = `${mapped.code} (${mapped.detail})`;
 		if (mapped.level === 'warn') logger.warn(line);
@@ -96,9 +123,11 @@ export const formatGraphQLError = (
 		return { code: mapped.code, message: mapped.message };
 	}
 
-	const graphQLFormattedError = {
+	const graphQLFormattedError: SafeGraphQLError = {
 		code: error?.extensions.code,
-		message: error?.extensions?.exception?.response?.message || error?.extensions?.response?.message || error?.message,
+		message:
+			mapValidationMessage(error?.extensions?.originalError?.message ?? error?.extensions?.exception?.response?.message) ??
+			(error?.extensions?.exception?.response?.message || error?.extensions?.response?.message || error?.message),
 	};
 	if (isExpectedDomainError(graphQLFormattedError)) {
 		logger.warn(`${graphQLFormattedError.code}: ${graphQLFormattedError.message}`);

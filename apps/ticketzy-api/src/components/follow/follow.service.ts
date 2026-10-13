@@ -65,7 +65,7 @@ export class FollowService {
     const { page, limit, search } = input;
     if (!search?.followerId) throw new InternalServerErrorException(Message.BAD_REQUEST);
     const match: T = { followerId: search?.followerId };
-    this.logger.log(`match: ${JSON.stringify(match)}`);
+    this.logger.debug(`match built (${Object.keys(match).join(", ")})`);
 
     const result = await this.followModel
         .aggregate([
@@ -100,7 +100,7 @@ export class FollowService {
     if (!search?.followingId) throw new InternalServerErrorException(Message.BAD_REQUEST);
 
     const match: T = { followingId: search?.followingId };
-    this.logger.log(`match: ${JSON.stringify(match)}`);
+    this.logger.debug(`match built (${Object.keys(match).join(", ")})`);
 
     const result = await this.followModel
         .aggregate([

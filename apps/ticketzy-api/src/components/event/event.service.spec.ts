@@ -903,6 +903,22 @@ describe('EventService', () => {
 		});
 	});
 
+	describe('getEventsByAdmin with no events (DECISIONS #101)', () => {
+		it('returns an empty list instead of NO_DATA_FOUND, also for a page past the end', async () => {
+			eventModel.aggregate.mockReturnValue(exec([{ list: [], metaCounter: [] }]));
+			await expect(service.getEventsByAdmin({ page: 3, limit: 20, search: {} } as any)).resolves.toEqual({ list: [], metaCounter: [] });
+			eventModel.aggregate.mockReturnValue(exec([]));
+			await expect(service.getEventsByAdmin({ page: 1, limit: 20, search: {} } as any)).resolves.toEqual({ list: [], metaCounter: [] });
+		});
+
+		it('does not look up seat counts or venue conflicts for an empty page', async () => {
+			eventModel.aggregate.mockReturnValue(exec([{ list: [], metaCounter: [] }]));
+			ticketTypeModel.aggregate = jest.fn();
+			await service.getEventsByAdmin({ page: 1, limit: 20, search: {} } as any);
+			expect(ticketTypeModel.aggregate).not.toHaveBeenCalled();
+		});
+	});
+
 	describe('seat totals on event lists and details', () => {
 		const ids = Array.from({ length: 25 }, (_, i) => `e${i}`);
 		const page = () => ids.map((_id) => ({ _id, eventTitle: _id }));

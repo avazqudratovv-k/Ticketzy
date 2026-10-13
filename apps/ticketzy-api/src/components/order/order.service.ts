@@ -356,7 +356,26 @@ export class OrderService {
 		return order;
 	}
 
+	/**
+	 * The buyer's own abandoned checkouts become EXPIRED (and give their seats or stock back) when the buyer looks at their
+	 * orders, so an old PENDING_PAYMENT never shows up after its time even when the batch app is asleep (DECISIONS #102).
+	 * Same conditional update as `payOrder` uses, so repeating it is harmless; a failure here never fails the read.
+	 */
+	private async expireStaleOrdersOf(memberId: ObjectId): Promise<void> {
+		try {
+			const stale = await this.orderModel
+				.find({ buyerId: memberId, orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: { $lte: new Date() } })
+				.limit(20)
+				.lean()
+				.exec();
+			for (const order of stale) await this.expireOrder(order);
+		} catch (err) {
+			this.logger.warn(`Stale order sweep failed: ${(err as Error)?.message ?? 'error'}`);
+		}
+	}
+
 	public async getOrder(memberId: ObjectId, orderId: ObjectId): Promise<Order> {
+		await this.expireStaleOrdersOf(memberId);
 		const result = await this.orderModel
 			.aggregate([
 				{ $match: { _id: shapeIntoMongoObjectId(orderId), buyerId: shapeIntoMongoObjectId(memberId) } },
@@ -369,6 +388,7 @@ export class OrderService {
 	}
 
 	public async getMyOrders(memberId: ObjectId, input: OrdersInquiry): Promise<Orders> {
+		await this.expireStaleOrdersOf(memberId);
 		const match: T = { buyerId: shapeIntoMongoObjectId(memberId) };
 		if (input.orderStatus) match.orderStatus = input.orderStatus;
 		return await this.listOrders(match, input);

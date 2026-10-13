@@ -11,6 +11,7 @@ import { SeatStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
 import { OrderStatus, TicketTypeStatus } from 'apps/ticketzy-api/src/libs/enums/ticket.enum';
 import { Model } from 'mongoose';
 import { getEventRank, getOrganizerRank } from './lib/rank';
+import { expireStaleOrders, releaseExpiredSeatHolds } from 'apps/ticketzy-api/src/libs/order-expiry';
 
 const RANK_WRITE_CHUNK = 500;
 
@@ -66,69 +67,14 @@ export class BatchService {
 
 	/**
 	 * PENDING_PAYMENT orders past expiresAt become EXPIRED and give their seats or stock back, then every seat whose
-	 * hold has run out goes back to AVAILABLE. The status flip is a conditional update, so an order is only ever
-	 * released once even if a buyer pays or cancels at the same moment.
+	 * hold has run out goes back to AVAILABLE. The code is shared with the API (`libs/order-expiry.ts`), which runs it
+	 * lazily when this app is asleep (DECISIONS #102); the status flip is a conditional update, so an order is only ever
+	 * released once even if the API, this job, a buyer paying or a cancel happen at the same moment.
 	 */
 	public async batchExpireOrders(): Promise<void> {
-		const expired = await this.orderModel
-			.find({ orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: { $lte: new Date() } })
-			.limit(200)
-			.lean()
-			.exec();
-
-		for (const candidate of expired) {
-			const order = await this.orderModel
-				.findOneAndUpdate(
-					{ _id: candidate._id, orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: { $lte: new Date() } },
-					{ orderStatus: OrderStatus.EXPIRED },
-					{ new: true },
-				)
-				.exec();
-			if (!order) continue;
-
-			if (order.seatIds?.length) {
-				// only the buyer's own holds that have run out: a newer hold of the same seats is left alone
-				await this.eventSeatModel
-					.updateMany(
-						{ _id: { $in: order.seatIds }, heldBy: order.buyerId, seatStatus: SeatStatus.HELD, heldUntil: { $lte: new Date() } },
-						{ seatStatus: SeatStatus.AVAILABLE, $unset: { heldBy: 1, heldUntil: 1 } },
-					)
-					.exec();
-				continue;
-			}
-
-			for (const item of order.items) {
-				const ticketType = await this.ticketTypeModel
-					.findOneAndUpdate(
-						{ _id: item.ticketTypeId, soldQuantity: { $gte: item.quantity } },
-						{ $inc: { soldQuantity: -item.quantity } },
-						{ new: true },
-					)
-					.exec();
-				if (!ticketType) continue;
-
-				await this.ticketTypeModel
-					.updateOne(
-						{
-							_id: ticketType._id,
-							ticketTypeStatus: TicketTypeStatus.SOLD_OUT,
-							$expr: { $lt: ['$soldQuantity', '$totalQuantity'] },
-						},
-						{ ticketTypeStatus: TicketTypeStatus.ACTIVE },
-					)
-					.exec();
-			}
-		}
-		if (expired.length) this.logger.debug(`Checked ${expired.length} expired order(s)`);
-
-		// holds that never became an order (the buyer left, or the order lived shorter than the hold)
-		const released = await this.eventSeatModel
-			.updateMany(
-				{ seatStatus: SeatStatus.HELD, heldUntil: { $lte: new Date() } },
-				{ seatStatus: SeatStatus.AVAILABLE, $unset: { heldBy: 1, heldUntil: 1 } },
-			)
-			.exec();
-		if (released.modifiedCount) this.logger.debug(`Released ${released.modifiedCount} expired seat hold(s)`);
+		const models = { orderModel: this.orderModel, ticketTypeModel: this.ticketTypeModel, eventSeatModel: this.eventSeatModel };
+		await expireStaleOrders(models);
+		await releaseExpiredSeatHolds(models);
 	}
 
 	/**

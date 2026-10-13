@@ -128,6 +128,12 @@ export enum Message {
 	AI_LOGIN_REQUIRED = 'Please log in to see your tickets.',
 	AI_TRANSLATE_LOCALES_REQUIRED = 'Choose at least one target language (en, ko, ru, uz)!',
 	AI_MODERATION_NOT_CHECKED = 'The AI check did not run for this event.',
+	AI_DAILY_CAP_REACHED = 'The AI assistant has reached its limit for today, please try again tomorrow!',
+	AI_USER_DAILY_LIMIT = 'You have used all your AI requests for today, please try again tomorrow!',
+
+	RATE_LIMITED = 'Too many requests, please try again in {seconds} seconds!',
+	LIMIT_TOO_HIGH = 'You asked for too many items at once, the maximum is {max} per page!',
+	PAGE_TOO_HIGH = 'That page number is too high, the maximum is {max}!',
 
 	PAYOUT_EVENT_NOT_FOUND = 'No event found for this payout!',
 	PAYOUT_NOT_DUE_YET = 'The payout date of this event has not been reached yet!',

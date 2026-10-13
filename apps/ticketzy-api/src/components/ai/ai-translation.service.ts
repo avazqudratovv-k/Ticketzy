@@ -35,7 +35,7 @@ export class AiTranslationService {
 		const event = await this.eventModel.findOne({ _id: eventId, organizerId: memberId }).lean().exec();
 		if (!event) throw new BadRequestException(Message.NO_DATA_FOUND);
 
-		this.aiClient.begin(`member:${memberId}`);
+		await this.aiClient.reserve(`member:${memberId}`);
 		const description = event.eventDesc?.trim() ? clip(event.eventDesc, 2000) : undefined;
 		const response = await this.aiClient.generateJson({
 			system: TRANSLATION_SYSTEM_PROMPT,

@@ -112,15 +112,188 @@ export const getAiStartupWarnings = (env: Record<string, any> = process.env): st
 	return warnings;
 };
 
-/** ConfigModule `validate` hook: the app refuses to start when a required variable is missing or blank */
+export const MIN_SECRET_LENGTH = 32;
+
+/** words that mark a copied example or a lazy secret; matched case-insensitively anywhere in the value */
+const WEAK_SECRET_FRAGMENTS = ['changeme', 'change-me', 'change_me', 'replace', 'example', 'placeholder', 'default', 'your-', 'your_', 'password', 'secret', 'token', 'qwerty', '123456', 'abcdef', 'xxxx', 'todo', 'test'];
+
+/**
+ * Why a secret is not acceptable in production, or null when it is fine. The text names the rule, never the value.
+ * `SECRET_TOKEN=a` boots in development, but a short or guessable JWT secret can be brute forced offline (C3-39).
+ */
+export const getWeakSecretReason = (value: unknown): string | null => {
+	const text = String(value ?? '').trim();
+	if (text.length < MIN_SECRET_LENGTH) return `must be at least ${MIN_SECRET_LENGTH} characters`;
+	const lower = text.toLowerCase();
+	if (WEAK_SECRET_FRAGMENTS.some((fragment) => lower.includes(fragment))) return 'looks like a placeholder or a guessable word, use random characters';
+	if (new Set(lower).size < 10) return 'has too few different characters, use random characters';
+	return null;
+};
+
+export const DEFAULT_PORT = 3000;
+
+/** PORT (the host sets it), then PORT_API, then 3000; the batch app uses `PORT_BATCH` as its second choice */
+export const getListenPort = (env: Record<string, any> = process.env, fallbackName: 'PORT_API' | 'PORT_BATCH' = 'PORT_API'): number => {
+	for (const name of ['PORT', fallbackName]) {
+		const raw = String(env[name] ?? '').trim();
+		if (!raw) continue;
+		if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 65535) throw new Error(`${name} must be a whole number from 1 to 65535`);
+		return Number(raw);
+	}
+	return DEFAULT_PORT;
+};
+
+/**
+ * CORS_ORIGINS is a comma-separated list of exact origins (scheme + host + optional port, no path, no wildcard).
+ * CLIENT_URL is the older name and is only read when CORS_ORIGINS is empty. Outside production an empty list means the
+ * local Next.js app. A bad entry is reported by position, never by value.
+ */
+export const parseCorsOrigins = (env: Record<string, any> = process.env): string[] => {
+	const name = String(env.CORS_ORIGINS ?? '').trim() ? 'CORS_ORIGINS' : 'CLIENT_URL';
+	const raw = String(env[name] ?? '').trim();
+	if (!raw) return env.NODE_ENV === 'production' ? [] : ['http://localhost:3000'];
+	const origins = raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+	origins.forEach((origin, index) => {
+		if (origin.includes('*')) throw new Error(`${name} entry ${index + 1} has a wildcard; list exact origins`);
+		let url: URL;
+		try {
+			url = new URL(origin);
+		} catch {
+			throw new Error(`${name} entry ${index + 1} is not a valid origin like https://example.com`);
+		}
+		const isOrigin = (url.protocol === 'https:' || url.protocol === 'http:') && origin === url.origin;
+		if (!isOrigin) throw new Error(`${name} entry ${index + 1} must be an origin (scheme, host, optional port) without a path or trailing slash`);
+		const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+		if (env.NODE_ENV === 'production' && url.protocol !== 'https:' && !isLocal) throw new Error(`${name} entry ${index + 1} must use https in production`);
+	});
+	return [...new Set(origins)];
+};
+
+export const DEFAULT_AI_DAILY_CAP = 400;
+export const DEFAULT_AI_PER_KEY_DAILY_CAP = 30;
+
+/** AI_DAILY_CAP: model calls per UTC day for the whole app (0 switches the AI off); AI_PER_KEY_DAILY_CAP: assistant operations per member or IP per UTC day */
+export const getAiCaps = (env: Record<string, any> = process.env): { dailyCap: number; perKeyDailyCap: number } => ({
+	dailyCap: parseBoundedInt('AI_DAILY_CAP', env.AI_DAILY_CAP, DEFAULT_AI_DAILY_CAP, 0, 1_000_000),
+	perKeyDailyCap: parseBoundedInt('AI_PER_KEY_DAILY_CAP', env.AI_PER_KEY_DAILY_CAP, DEFAULT_AI_PER_KEY_DAILY_CAP, 0, 100_000),
+});
+
+export const DEFAULT_UPLOAD_MAX_FILE_MB = 15;
+export const DEFAULT_UPLOAD_MAX_FILES = 10;
+
+/** UPLOAD_MAX_FILE_MB (1 to 50) and UPLOAD_MAX_FILES (1 to 20) feed `graphqlUploadExpress` */
+export const getUploadLimits = (env: Record<string, any> = process.env): { maxFileSize: number; maxFiles: number } => ({
+	maxFileSize: parseBoundedInt('UPLOAD_MAX_FILE_MB', env.UPLOAD_MAX_FILE_MB, DEFAULT_UPLOAD_MAX_FILE_MB, 1, 50) * 1_000_000,
+	maxFiles: parseBoundedInt('UPLOAD_MAX_FILES', env.UPLOAD_MAX_FILES, DEFAULT_UPLOAD_MAX_FILES, 1, 20),
+});
+
+const LOG_LEVELS = ['error', 'warn', 'log', 'debug', 'verbose'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+/** LOG_LEVEL picks the least important level that is printed; default `warn` in production and `debug` otherwise */
+export const getLogLevels = (env: Record<string, any> = process.env): LogLevel[] => {
+	const raw = String(env.LOG_LEVEL ?? '').trim().toLowerCase();
+	if (raw && !LOG_LEVELS.includes(raw as LogLevel)) throw new Error(`LOG_LEVEL must be one of ${LOG_LEVELS.join(', ')}`);
+	const level = (raw || (env.NODE_ENV === 'production' ? 'warn' : 'verbose')) as LogLevel;
+	return LOG_LEVELS.slice(0, LOG_LEVELS.indexOf(level) + 1);
+};
+
+/** MONGO_AUTO_INDEX=false stops Mongoose from building indexes at startup (default true, so a new database gets its unique indexes) */
+export const getMongoAutoIndex = (env: Record<string, any> = process.env): boolean => {
+	const raw = String(env.MONGO_AUTO_INDEX ?? '').trim().toLowerCase();
+	if (raw && !['true', 'false', '1', '0'].includes(raw)) throw new Error('MONGO_AUTO_INDEX must be true or false');
+	return raw !== 'false' && raw !== '0';
+};
+
+export interface RateLimitConfig {
+	/** GraphQL requests per client IP per minute, all operations together */
+	generalPerMinute: number;
+	/** login attempts per client IP per 15 minutes (per email: twice as many) */
+	loginPer15Min: number;
+	/** sign-ups (user and organizer) per client IP per hour */
+	signupPerHour: number;
+	/** password changes and resets per member and per client IP per 15 minutes */
+	passwordPer15Min: number;
+}
+
+export const DEFAULT_RATE_LIMITS: RateLimitConfig = { generalPerMinute: 300, loginPer15Min: 10, signupPerHour: 5, passwordPer15Min: 5 };
+
+/** RATE_LIMIT_GENERAL_PER_MINUTE, RATE_LIMIT_LOGIN_PER_15_MIN, RATE_LIMIT_SIGNUP_PER_HOUR, RATE_LIMIT_PASSWORD_PER_15_MIN; all optional */
+export const getRateLimitConfig = (env: Record<string, any> = process.env): RateLimitConfig => ({
+	generalPerMinute: parseBoundedInt('RATE_LIMIT_GENERAL_PER_MINUTE', env.RATE_LIMIT_GENERAL_PER_MINUTE, DEFAULT_RATE_LIMITS.generalPerMinute, 1, 100_000),
+	loginPer15Min: parseBoundedInt('RATE_LIMIT_LOGIN_PER_15_MIN', env.RATE_LIMIT_LOGIN_PER_15_MIN, DEFAULT_RATE_LIMITS.loginPer15Min, 1, 1000),
+	signupPerHour: parseBoundedInt('RATE_LIMIT_SIGNUP_PER_HOUR', env.RATE_LIMIT_SIGNUP_PER_HOUR, DEFAULT_RATE_LIMITS.signupPerHour, 1, 1000),
+	passwordPer15Min: parseBoundedInt('RATE_LIMIT_PASSWORD_PER_15_MIN', env.RATE_LIMIT_PASSWORD_PER_15_MIN, DEFAULT_RATE_LIMITS.passwordPer15Min, 1, 1000),
+});
+
+/** TRUST_PROXY_HOPS: how many proxies sit in front of the API (Render: 1). 0 outside production unless set; more than 5 is a mistake */
+export const getTrustProxyHops = (env: Record<string, any> = process.env): number =>
+	parseBoundedInt('TRUST_PROXY_HOPS', env.TRUST_PROXY_HOPS, env.NODE_ENV === 'production' ? 1 : 0, 0, 5);
+
+const SECRET_NAMES = ['SECRET_TOKEN', 'QR_SECRET'];
+
+const isMongoUri = (value: unknown): boolean => /^mongodb(\+srv)?:\/\//i.test(String(value ?? '').trim());
+
+/** run one check and turn its Error into a line of the report (the report never holds a value) */
+const collect = (problems: string[], check: () => unknown): void => {
+	try {
+		check();
+	} catch (err) {
+		problems.push((err as Error).message);
+	}
+};
+
+/**
+ * ConfigModule `validate` hook: the app refuses to start when a required variable is missing or invalid.
+ * Every problem is collected and reported at once, by variable NAME only, never by value.
+ * Outside production the checks are the light ones (presence, ranges). In production the API (`web: true`) also needs
+ * CORS_ORIGINS, a Mongo URI that looks like one, and secrets that are long, not placeholders and different from each other.
+ */
 export const validateEnv =
-	(required: string[] = [], options: { checkPayment?: boolean } = {}) =>
+	(required: string[] = [], options: { checkPayment?: boolean; web?: boolean } = {}) =>
 	(config: Record<string, any>): Record<string, any> => {
-		const missing = [getMongoUriKey(config.NODE_ENV), ...required].filter((key) => !String(config[key] ?? '').trim());
-		if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-		parseSeatHoldSeconds(config.SEAT_HOLD_SECONDS);
-		getAiConfig(config);
-		// only the API takes payments; the batch app does not need the variable
-		if (options.checkPayment) parsePaymentMode(config);
+		const isProduction = config.NODE_ENV === 'production';
+		const problems: string[] = [];
+
+		const mongoKey = getMongoUriKey(config.NODE_ENV);
+		const missing = [mongoKey, ...required].filter((key) => !String(config[key] ?? '').trim());
+		if (options.web && isProduction && !String(config.CORS_ORIGINS ?? config.CLIENT_URL ?? '').trim()) missing.push('CORS_ORIGINS');
+		if (missing.length) problems.push(`Missing required environment variables: ${missing.join(', ')}`);
+
+		if (config.NODE_ENV !== undefined && !['production', 'development', 'test'].includes(String(config.NODE_ENV))) {
+			problems.push('NODE_ENV must be production, development or test');
+		}
+		// Render sets RENDER on its services; a dev-mode server there would use the dev database and show the playground
+		if (config.RENDER && !isProduction) problems.push('NODE_ENV must be production on Render');
+
+		if (isProduction) {
+			if (String(config[mongoKey] ?? '').trim() && !isMongoUri(config[mongoKey])) problems.push(`${mongoKey} must start with mongodb:// or mongodb+srv://`);
+			if (options.web) {
+				for (const name of SECRET_NAMES.filter((secret) => required.includes(secret) && String(config[secret] ?? '').trim())) {
+					const reason = getWeakSecretReason(config[name]);
+					if (reason) problems.push(`${name} ${reason}`);
+				}
+				if (config.SECRET_TOKEN && config.QR_SECRET && String(config.SECRET_TOKEN).trim() === String(config.QR_SECRET).trim()) {
+					problems.push('QR_SECRET must be different from SECRET_TOKEN');
+				}
+			}
+		}
+
+		collect(problems, () => parseSeatHoldSeconds(config.SEAT_HOLD_SECONDS));
+		collect(problems, () => getAiConfig(config));
+		collect(problems, () => getListenPort(config, options.web ? 'PORT_API' : 'PORT_BATCH'));
+		collect(problems, () => getLogLevels(config));
+		collect(problems, () => getMongoAutoIndex(config));
+		// only the API takes payments, serves browsers, takes uploads and counts requests; the batch app needs none of that
+		if (options.checkPayment) collect(problems, () => parsePaymentMode(config));
+		if (options.web) {
+			collect(problems, () => parseCorsOrigins(config));
+			collect(problems, () => getAiCaps(config));
+			collect(problems, () => getUploadLimits(config));
+			collect(problems, () => getRateLimitConfig(config));
+			collect(problems, () => getTrustProxyHops(config));
+		}
+
+		if (problems.length) throw new Error(`Invalid environment configuration:\n - ${problems.join('\n - ')}`);
 		return config;
 	};

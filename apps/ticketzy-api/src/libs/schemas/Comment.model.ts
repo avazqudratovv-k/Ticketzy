@@ -33,4 +33,7 @@ const CommentSchema = new Schema(
 	{ timestamps: true, collection: 'comments' },
 );
 
+// getComments: one event's ACTIVE comments, newest first
+CommentSchema.index({ commentRefId: 1, commentGroup: 1, commentStatus: 1, createdAt: -1 });
+
 export default CommentSchema;

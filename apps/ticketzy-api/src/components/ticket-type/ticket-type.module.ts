@@ -7,6 +7,7 @@ import EventSchema from '../../libs/schemas/Event.model';
 import VenueSchema from '../../libs/schemas/Venue.model';
 import EventSeatSchema from '../../libs/schemas/EventSeat.model';
 import MemberSchema from '../../libs/schemas/Member.model';
+import OrderSchema from '../../libs/schemas/Order.model';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
 			{ name: 'Member', schema: MemberSchema },
 			{ name: 'Venue', schema: VenueSchema },
 			{ name: 'EventSeat', schema: EventSeatSchema },
+			{ name: 'Order', schema: OrderSchema },
 		]),
 		AuthModule,
 	],

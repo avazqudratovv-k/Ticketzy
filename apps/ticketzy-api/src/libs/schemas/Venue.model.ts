@@ -82,5 +82,7 @@ const VenueSchema = new Schema(
 );
 
 VenueSchema.index({ venueCity: 1, venueName: 1, venueAddress: 1 }, { unique: true });
+// getVenues: ACTIVE venues filtered by city
+VenueSchema.index({ venueStatus: 1, venueCity: 1 });
 
 export default VenueSchema;

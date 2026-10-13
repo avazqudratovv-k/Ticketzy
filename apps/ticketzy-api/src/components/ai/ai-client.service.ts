@@ -1,7 +1,10 @@
 import { BadRequestException, HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { Message } from '../../libs/enums/common.enum';
 import { RateLimiter } from '../../libs/rate-limiter';
-import { AiConfig, getAiConfig, getAiStartupWarnings } from '../../libs/env.validation';
+import { AiConfig, getAiCaps, getAiConfig, getAiStartupWarnings } from '../../libs/env.validation';
+import { createRateLimitedError } from '../../libs/rate-limit';
+import { CodedException } from '../../libs/coded-exception';
+import { AiUsageService, secondsUntilUtcMidnight } from './ai-usage.service';
 import {
 	AiChatRequest,
 	AiChatResult,
@@ -39,7 +42,13 @@ export class AiClientService implements OnModuleInit {
 	private limiter: RateLimiter | null = null;
 	private limiterSize = 0;
 
-	constructor(@Inject(AI_PROVIDER_FACTORY) private readonly createProvider: AiProviderFactory) {}
+	private lastCapRefusalLog = 0;
+
+	/** `usage` is injected by Nest; only unit tests build the client without it, and then there are no daily caps */
+	constructor(
+		@Inject(AI_PROVIDER_FACTORY) private readonly createProvider: AiProviderFactory,
+		private readonly usage?: AiUsageService,
+	) {}
 
 	/** only reads the environment (no call to the vendor) and only warns, it never stops the app */
 	public onModuleInit(): void {
@@ -78,6 +87,54 @@ export class AiClientService implements OnModuleInit {
 		return config;
 	}
 
+	/**
+	 * `begin` plus the daily limit of one member or IP (AI_PER_KEY_DAILY_CAP), counted in MongoDB. Call this once per AI
+	 * operation. Fails closed: when the counter cannot be read the operation is refused, never let through.
+	 */
+	public async reserve(key: string): Promise<AiConfig> {
+		const config = this.begin(key);
+		if (!this.usage) return config;
+		const { perKeyDailyCap } = getAiCaps();
+		const result = await this.countOrFailClosed(`key:${key}`, perKeyDailyCap);
+		if (!result.allowed) {
+			this.logCapRefusal(`per-caller daily limit reached (${perKeyDailyCap}/day)`);
+			throw createRateLimitedError(secondsUntilUtcMidnight(new Date()), Message.AI_USER_DAILY_LIMIT);
+		}
+		return config;
+	}
+
+	/** one model call of the whole app against AI_DAILY_CAP; a retry or the fallback model counts as a call too */
+	private async chargeModelCall(): Promise<void> {
+		if (!this.usage) return;
+		const { dailyCap } = getAiCaps();
+		const result = await this.countOrFailClosed('global', dailyCap);
+		if (!result.allowed) {
+			this.logCapRefusal(`daily cap reached (${dailyCap} model calls); refused until 00:00 UTC`);
+			throw new CodedException(Message.AI_DAILY_CAP_REACHED, 'AI_DAILY_CAP_REACHED', 429);
+		}
+		// counts only, never a prompt: one line at 80 percent and one at the cap
+		if (result.count === Math.ceil(dailyCap * 0.8) || result.count === dailyCap) {
+			this.logger.warn(`AI daily usage: ${result.count}/${dailyCap} model calls (UTC day)`);
+		}
+	}
+
+	private async countOrFailClosed(usageKey: string, cap: number) {
+		try {
+			return await this.usage.consume(usageKey, cap);
+		} catch (err) {
+			this.logger.error(`AI usage counter unavailable, refusing the request: ${(err as Error)?.constructor?.name ?? 'Error'}`);
+			throw new CodedException(Message.SERVICE_TEMPORARILY_UNAVAILABLE, 'SERVICE_UNAVAILABLE', 503);
+		}
+	}
+
+	/** at most one refusal line per minute, so a flood does not flood the log */
+	private logCapRefusal(text: string): void {
+		const now = Date.now();
+		if (now - this.lastCapRefusalLog < 60_000) return;
+		this.lastCapRefusalLog = now;
+		this.logger.warn(`AI request refused: ${text}`);
+	}
+
 	public generateText(request: AiTextRequest): Promise<AiTextResult> {
 		return this.run((provider) => provider.generateText(request));
 	}
@@ -110,19 +167,26 @@ export class AiClientService implements OnModuleInit {
 	private async run<T>(call: (provider: AiProvider) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
 		let failure: unknown;
+		// every attempt at the vendor, including the retry and the fallback model, is one model call against the daily cap
+		const metered = async (provider: AiProvider): Promise<T> => {
+			await this.chargeModelCall();
+			return call(provider);
+		};
 		try {
-			return await this.runWithRetry(() => call(this.getProvider(config)));
+			return await this.runWithRetry(() => metered(this.getProvider(config)));
 		} catch (err) {
+			if (err instanceof CodedException) throw err;
 			failure = err;
 			this.logFailure(config, config.model, err);
 		}
 		if (config.fallbackModel && canFallBack(failure)) {
 			const fallback = { ...config, model: config.fallbackModel };
 			try {
-				const result = await call(this.getProvider(fallback));
+				const result = await metered(this.getProvider(fallback));
 				this.logger.warn(`AI fallback model answered: provider=${config.provider} model=${fallback.model}`);
 				return result;
 			} catch (err) {
+				if (err instanceof CodedException) throw err;
 				failure = err;
 				this.logFailure(config, fallback.model, err);
 			}

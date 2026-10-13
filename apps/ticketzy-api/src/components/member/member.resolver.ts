@@ -14,6 +14,7 @@ import { saveVerifiedImage, shapeIntoMongoObjectId, validUploadTargets } from '.
 import { WithoutGuard } from '../auth/guards/without.guard';
 import { GraphQLUpload, FileUpload } from 'graphql-upload';
 import { Message } from '../../libs/enums/common.enum';
+import { enforceLoginLimit, enforcePasswordLimit, enforceSignupLimit } from '../../libs/rate-limit';
 
 @Resolver(() => Member)
 export class MemberResolver {
@@ -83,20 +84,23 @@ export class MemberResolver {
 	}
 
 	@Mutation(() => Member)
-	public async signupUser(@Args('input') input: MemberInput): Promise<Member> {
+	public async signupUser(@Args('input') input: MemberInput, @Context() context: any): Promise<Member> {
 		this.logger.log('Mutation: signupUser');
+		enforceSignupLimit(context?.req);
 		return await this.memberService.signupUser(input);
 	}
 
 	@Mutation(() => Member)
-	public async signupOrganizer(@Args('input') input: MemberInput): Promise<Member> {
+	public async signupOrganizer(@Args('input') input: MemberInput, @Context() context: any): Promise<Member> {
 		this.logger.log('Mutation: signupOrganizer');
+		enforceSignupLimit(context?.req);
 		return await this.memberService.signupOrganizer(input);
 	}
 
 	@Mutation(() => Member)
-	public async login(@Args('input') input: LoginInput): Promise<Member> {
+	public async login(@Args('input') input: LoginInput, @Context() context: any): Promise<Member> {
 		this.logger.log('Mutation: login');
+		enforceLoginLimit(context?.req, input.memberEmail);
 		return await this.memberService.login(input);
 	}
 
@@ -120,8 +124,10 @@ export class MemberResolver {
 	public async updateMember(
 		@Args('input') input: MemberUpdate,
 		@AuthMember('_id') memberId: ObjectId,
+		@Context() context: any,
 	): Promise<Member> {
 		this.logger.log('Mutation: updateMember');
+		if (input.memberPassword) enforcePasswordLimit(context?.req, memberId);
 		delete input._id;
 		return await this.memberService.updateMember(memberId, input);
 	}
@@ -166,8 +172,13 @@ export class MemberResolver {
 	@Roles(MemberType.ADMIN)
 	@UseGuards(RolesGuard)
 	@Mutation(() => Member)
-	public async updateMemberByAdmin(@Args('input') input: MemberUpdate, @AuthMember('_id') adminId: ObjectId): Promise<Member> {
+	public async updateMemberByAdmin(
+		@Args('input') input: MemberUpdate,
+		@AuthMember('_id') adminId: ObjectId,
+		@Context() context: any,
+	): Promise<Member> {
 		this.logger.log('Mutation: updateMemberByAdmin');
+		if (input.memberPassword) enforcePasswordLimit(context?.req, adminId);
 		return await this.memberService.updateMemberByAdmin(adminId, input);
 	}
 

@@ -147,5 +147,11 @@ const EventSchema = new Schema(
 
 EventSchema.index({ organizerId: 1, venueId: 1, eventTitle: 1, startAt: 1 }, { unique: true });
 EventSchema.index({ eventCategory: 1, eventStatus: 1, startAt: 1 });
+// public lists and the admin status filter sort by newest first; most other sorts (rank, likes, views) scan the ACTIVE set after the status match
+EventSchema.index({ eventStatus: 1, createdAt: -1 });
+// batchEndEvents: APPROVED events whose endAt has passed
+EventSchema.index({ eventStatus: 1, endAt: 1 });
+// venue clash checks (assertVenueFree, possibleVenueConflicts) look at one venue's events by time
+EventSchema.index({ venueId: 1, startAt: 1 });
 
 export default EventSchema;

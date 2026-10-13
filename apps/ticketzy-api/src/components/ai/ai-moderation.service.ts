@@ -64,7 +64,7 @@ export class AiModerationService {
 			const event = await this.eventModel.findById(eventId).lean().exec();
 			if (!event) throw new BadRequestException(Message.NO_DATA_FOUND);
 
-			this.aiClient.begin(rateKey ?? `member:${event.organizerId}`);
+			await this.aiClient.reserve(rateKey ?? `member:${event.organizerId}`);
 			const payload = await this.buildPayload(event);
 			const response = await this.aiClient.generateJson({
 				system: MODERATION_SYSTEM_PROMPT,

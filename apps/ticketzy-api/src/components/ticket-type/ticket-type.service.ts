@@ -15,6 +15,7 @@ import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 import { countTierSeats } from '../../libs/venue-layout';
 import { EVENT_CURRENCY } from '../../libs/currency';
+import { expireStaleOrders } from '../../libs/order-expiry';
 
 @Injectable()
 export class TicketTypeService {
@@ -26,7 +27,27 @@ export class TicketTypeService {
 		@InjectModel('Member') private readonly memberModel: Model<Member>,
 		@InjectModel('Venue') private readonly venueModel: Model<Venue>,
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
+		// the stale-order sweep below; only unit tests of other methods build the service without it
+		@InjectModel('Order') private readonly orderModel?: Model<any>,
 	) {}
+
+	/**
+	 * Gives back the stock of abandoned orders (PENDING_PAYMENT past expiresAt) without waiting for the batch app, which
+	 * may be asleep (DECISIONS #102). Idempotent, never throws: a failed sweep must not fail the read or the purchase.
+	 */
+	private async sweepStaleOrders(scope: { eventId?: ObjectId; ticketTypeId?: ObjectId }): Promise<number> {
+		if (!this.orderModel) return 0;
+		try {
+			return await expireStaleOrders(
+				{ orderModel: this.orderModel, ticketTypeModel: this.ticketTypeModel, eventSeatModel: this.eventSeatModel },
+				scope,
+				50,
+			);
+		} catch (err) {
+			this.logger.warn(`Stale order sweep failed: ${(err as Error)?.message ?? 'error'}`);
+			return 0;
+		}
+	}
 
 	public async createTicketType(memberId: ObjectId, memberType: MemberType, input: TicketTypeInput): Promise<TicketType> {
 		const eventId = shapeIntoMongoObjectId(input.eventId);
@@ -86,6 +107,8 @@ export class TicketTypeService {
 			event && (await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE }));
 		if (!organizerActive) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+		// abandoned checkouts of this event give their stock back before the numbers are shown
+		await this.sweepStaleOrders({ eventId });
 		return await this.ticketTypeModel.find({ eventId: eventId }).sort({ ticketPrice: 1 }).exec();
 	}
 
@@ -117,6 +140,14 @@ export class TicketTypeService {
 	 * Returns null when the reservation is not possible.
 	 */
 	public async reserve(ticketTypeId: ObjectId, quantity: number): Promise<TicketType | null> {
+		const reserved = await this.tryReserve(ticketTypeId, quantity);
+		if (reserved) return reserved;
+		// short of stock: abandoned checkouts of this ticket type may be holding it (the batch app may be asleep), free them and try once more
+		if (!(await this.sweepStaleOrders({ ticketTypeId }))) return null;
+		return await this.tryReserve(ticketTypeId, quantity);
+	}
+
+	private async tryReserve(ticketTypeId: ObjectId, quantity: number): Promise<TicketType | null> {
 		const now = new Date();
 		const result = await this.ticketTypeModel
 			.findOneAndUpdate(

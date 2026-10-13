@@ -138,4 +138,7 @@ const MemberSchema = new Schema(
 	{ timestamps: true, collection: 'members' },
 );
 
+// organizer lists (getOrganizers, getOrganizersByAdmin, the rank job) filter by type and status
+MemberSchema.index({ memberType: 1, memberStatus: 1, createdAt: -1 });
+
 export default MemberSchema;

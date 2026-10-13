@@ -34,4 +34,7 @@ const NoticeSchema = new Schema(
 	{ timestamps: true, collection: 'notices' },
 );
 
+// the public notice list: ACTIVE notices, newest first
+NoticeSchema.index({ noticeStatus: 1, createdAt: -1 });
+
 export default NoticeSchema;

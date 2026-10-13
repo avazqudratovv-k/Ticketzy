@@ -35,4 +35,7 @@ const PaymentSchema = new Schema(
 	{ timestamps: true, collection: 'payments' },
 );
 
+// refunds and deleteRecords look a payment up by its order
+PaymentSchema.index({ orderId: 1, paymentStatus: 1 });
+
 export default PaymentSchema;

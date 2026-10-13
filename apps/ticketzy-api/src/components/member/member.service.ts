@@ -168,7 +168,7 @@ export class MemberService {
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		if (text) match.memberNick = { $regex: new RegExp(escapeRegExp(text), 'i') };
-		this.logger.log(`match: ${JSON.stringify(match)}`);
+		this.logger.debug(`match built (${Object.keys(match).join(", ")})`);
 
 		const result = await this.memberModel
 			.aggregate([
@@ -220,7 +220,7 @@ export class MemberService {
 		if (memberStatus) match.memberStatus = memberStatus;
 		if (memberType) match.memberType = memberType;
 		if (text) match.memberNick = { $regex: new RegExp(escapeRegExp(text), 'i') };
-		this.logger.log(`match: ${JSON.stringify(match)}`);
+		this.logger.debug(`match built (${Object.keys(match).join(", ")})`);
 
 		const result = await this.memberModel
 			.aggregate([

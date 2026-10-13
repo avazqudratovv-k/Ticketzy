@@ -57,7 +57,7 @@ export class AiAssistantService {
 	 * The model can call at most MAX_TOOL_ROUNDS rounds of tools; after that it has to answer without tools.
 	 */
 	public async askAssistant(authMember: Member | null, rateKey: string, input: AskAssistantInput): Promise<AssistantAnswer> {
-		this.aiClient.begin(rateKey);
+		await this.aiClient.reserve(rateKey);
 
 		const message = clip(input.message, MAX_ASSISTANT_MESSAGE_LENGTH).trim();
 		const messages: AiMessage[] = [...sanitizeHistory(input.history), { role: 'user', text: message }];

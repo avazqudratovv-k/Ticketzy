@@ -1,12 +1,16 @@
 import { Module, Logger } from '@nestjs/common';
 import { InjectConnection, MongooseModule } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { getMongoUriKey } from 'apps/ticketzy-api/src/libs/env.validation';
+import { buildMongoOptions } from 'apps/ticketzy-api/src/libs/mongo-options';
 
 @Module({
 	imports: [
 		MongooseModule.forRootAsync({
 			useFactory: () => ({
-				uri: process.env.NODE_ENV === 'production' ? process.env.MONGO_PROD : process.env.MONGO_DEV,
+				uri: process.env[getMongoUriKey()],
+				// the API owns the indexes; the batch app never builds them
+				...buildMongoOptions({ autoIndex: false }),
 			}),
 		}),
 	],

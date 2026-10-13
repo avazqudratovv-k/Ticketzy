@@ -2,7 +2,7 @@
 
 Ticketzy is the backend of a ticket selling platform: organizers publish events at venues with ticket types or reserved seats, buyers hold seats, pay (mock provider), receive QR tickets and can refund, and admins approve organizers and events, handle refunds and mark payouts. It started from the Nestar codebase (see `docs/ai/BACKEND_MIGRATION.md`).
 
-- Needs Node 22+ and MongoDB 5.0+ (payouts use `$dateAdd` with a time zone). CI is `.github/workflows/ci.yml` (both `tsc`, build, tests); there are no e2e tests (#99).
+- Needs Node 22+ and MongoDB 5.0+ (payouts use `$dateAdd` with a time zone). CI is `.github/workflows/ci.yml` (both `tsc`, build, tests); there are no e2e tests (#99). Deploying (Render, Atlas, Vercel): `RUN_IN_PRODUCTION.md`.
 - Stack: NestJS (monorepo), GraphQL code-first (Apollo), Mongoose and MongoDB, JWT, `graphql-upload`, a `ws` gateway for chat, a batch app (`@nestjs/schedule`) and Jest. Package manager: npm (`package-lock.json`).
 - Roles (`MemberType`): `USER` buys, `ORGANIZER` needs admin approval (PENDING until verified), `ADMIN` is created only by `npm run seed`. Roles are set only by the server (#23).
 - Only `USER` accounts can buy tickets: `assertBuyerAccount` (`libs/buyer.ts`) in `holdSeats`, `createCheckout` and `payOrder` (#80, #81).
@@ -44,7 +44,7 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Apps: `apps/ticketzy-api` and `apps/ticketzy-batch`. DTOs, enums and schemas live in `apps/ticketzy-api/src/libs`; modules in `src/components/<name>`.
 - Terms: the catalog entity is Event (with Venue, TicketType, Order, Ticket, EventSeat). The community board is gone; do not bring back old catalog terms.
 - Shared modules stay reusable: auth, member, like, view, comment (events only), follow (organizers only), socket.
-- The batch app (`apps/ticketzy-batch`) runs four jobs: ranks (events at minute 20, organizers at minute 40, computed then written in place, #96), order and seat-hold expiry (every minute), ending finished events (minute 30).
+- The batch app (`apps/ticketzy-batch`) runs four jobs: ranks (events at minute 20, organizers at minute 40, computed then written in place, #96), order and seat-hold expiry (every minute, shared code in `libs/order-expiry.ts`; the API runs the same code lazily because the batch process may be asleep, #102), ending finished events (minute 30).
 - Ticket inventory changes are atomic (conditional `findOneAndUpdate`); there are no transactions (#17).
 
 ## Domain Rules (details in DECISIONS.md)
@@ -59,6 +59,14 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Refunds: whole order, deadline the day before the event. `components/refund`, `libs/refund-policy.ts` (#54, #55).
 - Admin seed: `ADMIN_EMAIL`/`ADMIN_PASSWORD` and optional `ADMIN2_*` (`npm run seed`, #23, #75); `npm run seed:demo` for demo data (#62).
 - AI assistant: off unless `AI_ENABLED=true`; settings `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE`. `components/ai`, `libs/env.validation.ts` (#60, #61, #63, #85 to #87).
+
+## Production
+
+- Config is checked at startup by `validateEnv` (`libs/env.validation.ts`, #103): in production a missing or weak value stops the API and the error lists variable **names** only. A new variable gets a parser there, an entry in `RUN_IN_PRODUCTION.md` and a test. `.env.example` is not edited by AI tasks unless the owner says so.
+- Ports and proxy: `PORT` first (#100); the API trusts `TRUST_PROXY_HOPS` proxies. HTTP hardening is `helmet` + `CORS_ORIGINS` (exact origins, no cookies, #106); `GET /health` (liveness) and `GET /ready` (MongoDB state) are public and tiny.
+- Rate limits are in memory (`libs/rate-limit.ts`, #104): `login`, `signupUser`, `signupOrganizer` and password changes count in the resolver; the general per-IP limit is a middleware on `/graphql`. Refusals throw `CodedException` (`RATE_LIMITED` with `retryAfterSeconds`). The AI daily caps live in MongoDB (`AiUsageService`, #105) and fail closed.
+- Errors with their own code use `CodedException` (an `HttpException`, so Nest logs no stack for it); `formatGraphQLError` is the only place that shapes what a client sees.
+- Never log variables, tokens, passwords, prompts or response bodies; production logs `warn` and `error` only.
 
 ## Skills
 

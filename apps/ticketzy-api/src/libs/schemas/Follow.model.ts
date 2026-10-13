@@ -16,5 +16,7 @@ const FollowSchema = new Schema(
 );
 
 FollowSchema.index({ followingId: 1, followerId: 1 }, { unique: true });
+// the followings list of one member (the unique index above serves the followers list)
+FollowSchema.index({ followerId: 1, createdAt: -1 });
 
 export default FollowSchema;

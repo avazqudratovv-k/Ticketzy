@@ -47,8 +47,17 @@ export const matches = (doc: any, filter: any): boolean =>
 	Object.entries(filter ?? {}).every(([key, condition]: [string, any]) => {
 		if (key === '$or') return condition.some((part: any) => matches(doc, part));
 		if (key === '$and') return condition.every((part: any) => matches(doc, part));
+		// 'items.ticketTypeId': the field of any element of an array (or of a nested object)
+		if (key.includes('.')) return pathValues(doc, key.split('.')).some((value) => matchesCondition(value, condition));
 		return matchesCondition(doc[key], condition);
 	});
+
+const pathValues = (value: any, path: string[]): any[] => {
+	if (!path.length) return [value];
+	if (Array.isArray(value)) return value.flatMap((item) => pathValues(item, path));
+	if (value === undefined || value === null) return [undefined];
+	return pathValues(value[path[0]], path.slice(1));
+};
 
 const applyUpdate = (doc: any, update: any): void => {
 	for (const [key, value] of Object.entries(update ?? {}) as [string, any][]) {

@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import * as WebSocket from 'ws';
 import { AuthService } from '../components/auth/auth.service';
@@ -32,7 +32,7 @@ const TYPING_WINDOW_MS = 10_000;
  * Messages are sent with the GraphQL mutation sendMessage, the service publishes them to the room.
  */
 @WebSocketGateway({ transports: ['websocket'], secure: false })
-export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
 	private readonly logger = new Logger('SocketEventsGateway');
 	private readonly authTimers = new Map<WebSocket, NodeJS.Timeout>();
 	private readonly typingLimiter = new RateLimiter(TYPING_LIMIT, TYPING_WINDOW_MS);
@@ -55,6 +55,12 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 			client,
 			setTimeout(() => this.reject(client, Message.NOT_AUTHENTICATED, CLOSE_AUTH_TIMEOUT), AUTH_TIMEOUT_MS),
 		);
+	}
+
+	/** shutdown (SIGTERM): the 10 second auth timers must not keep the process alive */
+	public onModuleDestroy(): void {
+		for (const timer of this.authTimers.values()) clearTimeout(timer);
+		this.authTimers.clear();
 	}
 
 	public handleDisconnect(client: WebSocket): void {

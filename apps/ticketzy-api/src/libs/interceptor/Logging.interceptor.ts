@@ -11,27 +11,20 @@ export class LoggingInterceptor implements NestInterceptor {
 		const recordTime = Date.now();
 		const requestType = context.getType<GqlContextType>();
 
-		if (requestType === 'http') {
-			// Develop if needed!
-		} else if (requestType === 'graphql') {
+		if (requestType === 'graphql') {
 			/** (1) Print Request */
 			const gqlContext = GqlExecutionContext.create(context);
-			// variables are not logged: they carry passwords on login and signup
+			// neither variables nor responses are logged: they carry passwords on login and signup and the profile data of members
 			this.logger.log(`${gqlContext.getContext().req.body?.operationName ?? 'anonymous operation'}`, `REQUEST`);
 
-			/** (2) Error handling via GraphQl */
-
-			/** (3) No Errors, giving Response below */
+			/** (2) No Errors, giving Response below: only the time it took */
 			return next.handle().pipe(
-				tap((context) => {
-					const responseTime = Date.now() - recordTime;
-					this.logger.log(`${this.stringfy(context)} - ${responseTime}ms \n\n`, 'RESPONSE');
+				tap(() => {
+					this.logger.log(`${Date.now() - recordTime}ms`, 'RESPONSE');
 				}),
 			);
 		}
-	}
-
-	private stringfy(context: ExecutionContext): string {
-		return JSON.stringify(context).slice(0, 75);
+		// plain HTTP routes (/, /health, /ready) pass through untouched
+		return next.handle();
 	}
 }

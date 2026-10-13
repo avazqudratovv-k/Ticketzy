@@ -59,6 +59,8 @@ const TicketSchema = new Schema(
 );
 
 TicketSchema.index({ ownerId: 1, createdAt: -1 });
+// refunds read the tickets of one order
+TicketSchema.index({ orderId: 1 });
 TicketSchema.index({ eventId: 1, ticketStatus: 1 });
 
 export default TicketSchema;

@@ -185,7 +185,7 @@ export class EventService {
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		await this.shapeMatchQuery(match, input);
-		this.logger.log(`match: ${JSON.stringify(match)}`);
+		this.logger.debug(`match built (${Object.keys(match).join(", ")})`);
 
 		const result = await this.eventModel
 			.aggregate([
@@ -408,11 +408,13 @@ export class EventService {
 			])
 			.exec();
 
-		if (!result[0] || !result[0].list.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		// an empty list (or a page past the end) is an empty result, not an error (DECISIONS #101)
+		const page = result[0] ?? { list: [], metaCounter: [] };
+		if (!page.list.length) return page;
 
-		await this.addSeatCounts(result[0].list);
-		await attachPossibleVenueConflicts(result[0].list, this.venueModel, this.eventModel); // two queries for the whole page
-		return result[0];
+		await this.addSeatCounts(page.list);
+		await attachPossibleVenueConflicts(page.list, this.venueModel, this.eventModel); // two queries for the whole page
+		return page;
 	}
 
 	/** content edit by an admin: never changes the status (approving is its own operation) */

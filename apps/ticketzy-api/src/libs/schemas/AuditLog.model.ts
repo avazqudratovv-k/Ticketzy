@@ -36,5 +36,8 @@ const AuditLogSchema = new Schema(
 );
 
 AuditLogSchema.index({ createdAt: -1 });
+// getAuditLogsByAdmin filtered by target or by actor
+AuditLogSchema.index({ targetId: 1, createdAt: -1 });
+AuditLogSchema.index({ actorId: 1, createdAt: -1 });
 
 export default AuditLogSchema;

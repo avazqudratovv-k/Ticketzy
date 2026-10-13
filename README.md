@@ -22,7 +22,7 @@ Needs **Node 22 or newer** (developed on Node 24, the CI workflow uses Node 22) 
 npm install
 cp .env.example .env        # then fill in the required values (see below)
 npm run seed                # creates the first admin from ADMIN_EMAIL / ADMIN_PASSWORD
-npm run start:dev           # API in watch mode (port PORT_API, default 3000)
+npm run start:dev           # API in watch mode (port PORT, then PORT_API, default 3000)
 npm run start:dev:batch     # batch app in watch mode (port PORT_BATCH)
 ```
 
@@ -30,7 +30,7 @@ npm run start:dev:batch     # batch app in watch mode (port PORT_BATCH)
 
 ## Environment variables
 
-Names only; copy `.env.example` and set the values. The API and the batch app refuse to start when a required one is missing.
+Names only; copy `.env.example` and set the values (`.env.example` does not list the production names added in #100 to #107 yet; `RUN_IN_PRODUCTION.md` has the full list). The API and the batch app refuse to start when a required one is missing, and in production they say which ones.
 
 | Name | Needed | What it is |
 | --- | --- | --- |
@@ -38,8 +38,13 @@ Names only; copy `.env.example` and set the values. The API and the batch app re
 | `SECRET_TOKEN` | required (API) | secret that signs login tokens (long and random) |
 | `QR_SECRET` | required (API) | secret that signs ticket QR tokens (long, random, different from `SECRET_TOKEN`) |
 | `PAYMENT_MODE` | required in production, optional otherwise | `simulated` (mock provider) or `disabled`; unset means `simulated` outside production |
-| `CLIENT_URL` | optional | allowed browser origin(s), comma separated; development default is `http://localhost:3000` |
-| `PORT_API`, `PORT_BATCH` | optional | ports of the API and the batch app |
+| `CORS_ORIGINS` | required in production | exact browser origin(s), comma separated, no wildcard; development default is `http://localhost:3000`. `CLIENT_URL` is the older name, read only when this is empty |
+| `PORT` | optional | port to listen on (the host sets it); falls back to `PORT_API` / `PORT_BATCH`, then 3000 |
+| `TRUST_PROXY_HOPS` | optional | proxies in front of the API (default 1 in production) so rate limits see the real client IP |
+| `RATE_LIMIT_GENERAL_PER_MINUTE`, `RATE_LIMIT_LOGIN_PER_15_MIN`, `RATE_LIMIT_SIGNUP_PER_HOUR`, `RATE_LIMIT_PASSWORD_PER_15_MIN` | optional | request limits per client IP (defaults 300, 10, 5, 5); in memory, one instance |
+| `AI_DAILY_CAP`, `AI_PER_KEY_DAILY_CAP` | optional | AI model calls per UTC day for the whole app (default 400) and AI operations per member or IP per day (default 30), kept in MongoDB |
+| `UPLOAD_MAX_FILE_MB`, `UPLOAD_MAX_FILES` | optional | image upload limits (default 15 and 10) |
+| `LOG_LEVEL`, `MONGO_AUTO_INDEX` | optional | log level (default `warn` in production); `false` stops building indexes at startup |
 | `SEAT_HOLD_SECONDS` | optional | how long a seat hold lasts (1 to 3600, default 30) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | for `npm run seed` | the first admin |
 | `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | optional, for `npm run seed` | a second admin |
@@ -47,7 +52,11 @@ Names only; copy `.env.example` and set the values. The API and the batch app re
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | optional | used when `AI_PROVIDER=anthropic` (default) |
 | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | optional | used when `AI_PROVIDER=gemini` |
 | `DEMO_PASSWORD`, `ALLOW_DEMO_SEED` | optional, for `npm run seed:demo` | demo password and the production guard |
-| `NODE_ENV` | set by `npm run start:prod` | `production` turns off the GraphQL playground and introspection and picks `MONGO_PROD` |
+| `NODE_ENV` | set by `npm run start:prod` and `start:prod:batch` | `production` turns off the GraphQL playground and introspection, picks `MONGO_PROD` and makes startup check the secrets (32+ random characters) and `CORS_ORIGINS` |
+
+## Deploying
+
+See [RUN_IN_PRODUCTION.md](RUN_IN_PRODUCTION.md): required variables, Render build and start commands, the Atlas checklist, health checks (`GET /health` is liveness, `GET /ready` checks MongoDB), CORS, cold starts, the batch process, secret rotation and a pre-deploy checklist.
 
 ## Scripts
 
@@ -56,7 +65,7 @@ Names only; copy `.env.example` and set the values. The API and the batch app re
 | `npm run start:dev` / `start:dev:batch` | API / batch app in watch mode |
 | `npm run build` | `nest build` (both apps, into `dist/`) |
 | `npm run start:prod` | runs `dist/apps/ticketzy-api/main` with `NODE_ENV=production` (build first) |
-| `npm run start:prod:batch` | runs the batch app; it does not set `NODE_ENV`, so set `NODE_ENV=production` on the host |
+| `npm run start:prod:batch` | runs the batch app with `NODE_ENV=production` (build first) |
 | `npm run seed` / `seed:demo` | first admin / demo data |
 | `npm run report:currency` | read-only report of ticket types that are not in KRW (see `docs/ai/DECISIONS.md` #95) |
 | `npm run ai:check` | checks the AI settings and sends one tiny request (a real call with the key in `.env`) |
