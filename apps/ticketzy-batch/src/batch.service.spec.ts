@@ -33,6 +33,14 @@ describe('BatchService.batchEndEvents', () => {
 		expect(filter.endAt.$lte).toBeInstanceOf(Date);
 	});
 
+	it('can be limited to given events (the demo seed never ends anyone else\'s event)', async () => {
+		eventModel.find.mockReturnValue(finder([]));
+		await service.batchEndEvents(['e1']);
+		expect(eventModel.find.mock.calls[0][0]._id).toEqual({ $in: ['e1'] });
+		await service.batchEndEvents();
+		expect(eventModel.find.mock.calls[1][0]._id).toBeUndefined();
+	});
+
 	it('moves each due event to ENDED with a conditional update and counts it for the organizer', async () => {
 		eventModel.find.mockReturnValue(finder([{ _id: 'e1' }, { _id: 'e2' }]));
 		eventModel.findOneAndUpdate

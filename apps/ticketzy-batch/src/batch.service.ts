@@ -80,11 +80,12 @@ export class BatchService {
 	/**
 	 * APPROVED events whose endAt has passed become ENDED, and the organizer's completedEvents goes up by one.
 	 * The status flip is a conditional update, so an event is only counted once even if two batch runs overlap.
+	 * `onlyEventIds` limits the run to those events; the demo seed uses it so that it never ends someone else's event.
 	 */
-	public async batchEndEvents(): Promise<void> {
+	public async batchEndEvents(onlyEventIds?: unknown[]): Promise<void> {
 		const { from, to } = eventTransitions.end;
 		const due = await this.eventModel
-			.find({ eventStatus: { $in: from }, endAt: { $lte: new Date() } })
+			.find({ eventStatus: { $in: from }, endAt: { $lte: new Date() }, ...(onlyEventIds ? { _id: { $in: onlyEventIds } } : {}) })
 			.select('_id')
 			.limit(500)
 			.lean()

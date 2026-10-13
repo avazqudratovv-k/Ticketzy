@@ -26,7 +26,28 @@ npm run start:dev           # API in watch mode (port PORT, then PORT_API, defau
 npm run start:dev:batch     # batch app in watch mode (port PORT_BATCH)
 ```
 
-`npm run seed:demo` fills a development database with demo accounts, venues, events, orders, a refund and chats (all demo accounts use the `@ticketzy.demo` email domain; the shared password is `DEMO_PASSWORD`, default `Demo1234!`). It refuses `NODE_ENV=production` unless `ALLOW_DEMO_SEED=true`.
+### Demo data
+
+Three commands (decisions #62 and #108). The data is fictional and its dates are relative to the moment you run it, so **run `seed:demo` again to refresh it**; it removes its earlier run first.
+
+| Command | What it does |
+|---|---|
+| `npm run seed:demo` | creates 10 organizer accounts, 50 buyers, 10 venues, 56 events (concerts, football, comedy, other, in en/ko/ru/uz), several hundred orders with tickets, refunds, check-ins and payouts, likes, follows, views, comments, chats, notifications and audit entries, through the real services, then runs the consistency check. Prints counts only |
+| `npm run reset:demo` | removes exactly the records the seed tracked, and what hangs off them. Other data is never touched |
+| `npm run check:demo` | read only: compares every counter with its records, and lists probable QA or test data that is not part of the seed (it only reports) |
+
+Safety rules: the seed and the reset do nothing unless `DEMO_SEED_CONFIRM` is set to the name of the database variable in use (`MONGO_DEV`, or `MONGO_PROD`); with `NODE_ENV=production` they also need `ALLOW_DEMO_SEED=true`; a database that holds data the seed did not create (ADMIN accounts excepted) is refused unless `DEMO_SEED_ALLOW_NON_DEMO_DB=true`. It needs an existing admin (`npm run seed`) and four strong passwords (12+ characters, three kinds of characters, no common words): `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD`. A missing or weak one stops the run with its name.
+
+Accounts (all `@ticketzy.demo`): `buyer@` (buyer), `organizer@` (approved organizer with 21 finished events, over 150 paid orders and every payout status), `pending@` (waiting for approval), `rejected@` (rejected, with a reason), seven more approved organizers and 49 more buyers (they share the buyer and organizer passwords). The admin is the one `npm run seed` created.
+
+```bash
+# local database, passwords exported in your shell (never in a file you commit)
+DEMO_SEED_CONFIRM=MONGO_DEV npm run seed:demo
+DEMO_SEED_CONFIRM=MONGO_DEV npm run reset:demo
+npm run check:demo
+```
+
+Against Atlas see `RUN_IN_PRODUCTION.md` ("Demo data on Atlas").
 
 ## Environment variables
 
@@ -51,7 +72,8 @@ Names only; copy `.env.example` and set the values (`.env.example` does not list
 | `AI_ENABLED`, `AI_PROVIDER`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | optional | AI assistant settings; it stays off unless `AI_ENABLED=true` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | optional | used when `AI_PROVIDER=anthropic` (default) |
 | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | optional | used when `AI_PROVIDER=gemini` |
-| `DEMO_PASSWORD`, `ALLOW_DEMO_SEED` | optional, for `npm run seed:demo` | demo password and the production guard |
+| `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | for `seed:demo` | strong passwords of the demo accounts |
+| `DEMO_SEED_CONFIRM`, `DEMO_SEED_ALLOW_NON_DEMO_DB`, `ALLOW_DEMO_SEED` | for `seed:demo` and `reset:demo` | confirmation, non-empty database flag, production flag |
 | `NODE_ENV` | set by `npm run start:prod` and `start:prod:batch` | `production` turns off the GraphQL playground and introspection, picks `MONGO_PROD` and makes startup check the secrets (32+ random characters) and `CORS_ORIGINS` |
 
 ## Deploying
@@ -66,7 +88,8 @@ See [RUN_IN_PRODUCTION.md](RUN_IN_PRODUCTION.md): required variables, Render bui
 | `npm run build` | `nest build` (both apps, into `dist/`) |
 | `npm run start:prod` | runs `dist/apps/ticketzy-api/main` with `NODE_ENV=production` (build first) |
 | `npm run start:prod:batch` | runs the batch app with `NODE_ENV=production` (build first) |
-| `npm run seed` / `seed:demo` | first admin / demo data |
+| `npm run seed` | first admin |
+| `npm run seed:demo` / `reset:demo` / `check:demo` | demo data / remove it / consistency report (see "Demo data") |
 | `npm run report:currency` | read-only report of ticket types that are not in KRW (see `docs/ai/DECISIONS.md` #95) |
 | `npm run ai:check` | checks the AI settings and sends one tiny request (a real call with the key in `.env`) |
 | `npm run test` | the whole Jest suite (no database, no secrets needed) |

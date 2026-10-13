@@ -39,9 +39,22 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `LOG_LEVEL` | `warn` in production | `error`, `warn`, `log`, `debug` or `verbose` |
 | `MONGO_AUTO_INDEX` | `true` | `false` stops the API building indexes at startup (set it after the first deploy if cold starts matter) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | none | only for `npm run seed` (the admin accounts); remove `ADMIN_PASSWORD` from the host afterwards |
-| `DEMO_PASSWORD`, `ALLOW_DEMO_SEED` | none | only for `npm run seed:demo`; the seed refuses production unless `ALLOW_DEMO_SEED=true` |
+| `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | none | only for `npm run seed:demo`: strong passwords (12+ characters, three kinds, no common words) of the demo accounts; remove them from the host afterwards |
+| `DEMO_SEED_CONFIRM` | none | only for `seed:demo` and `reset:demo`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use |
+| `DEMO_SEED_ALLOW_NON_DEMO_DB` | `false` | `true` lets the demo commands run against a database that already holds data the seed did not create |
+| `ALLOW_DEMO_SEED` | `false` | the demo commands refuse `NODE_ENV=production` unless this is `true` |
 
-`.env.example` does not list the names added by this task yet (editing env files was out of scope): add them from the tables above.
+`.env.example` lists every name above as a placeholder (names only).
+
+## Demo data on Atlas
+
+`seed:demo`, `reset:demo` and `check:demo` run from your own machine against Atlas; they are not part of the deployed service. The seed writes several thousand documents (the seat maps alone are thousands) through the real services and needs a few minutes over the internet.
+
+1. Use an **empty** database (a new Atlas database name in `MONGO_PROD`), or accept the risk with `DEMO_SEED_ALLOW_NON_DEMO_DB=true`: only records tracked in the `demo_seed_records` collection are ever removed, but a name clash with existing data stops the seed.
+2. Run `npm run seed` once for the admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`).
+3. Export the settings in your shell only (not in a file): `NODE_ENV=production`, `ALLOW_DEMO_SEED=true`, `DEMO_SEED_CONFIRM=MONGO_PROD`, the four `DEMO_*_PASSWORD` values, `MONGO_PROD`, `SECRET_TOKEN`, `QR_SECRET`. The Atlas user needs `readWrite` on that database.
+4. `npm run check:demo` first (read only) to see what is there, then `npm run seed:demo`; later `npm run reset:demo`.
+5. Seeded events are in the future: run the seed again to refresh the dates. The seed sets `SEAT_HOLD_SECONDS=300` and `PAYMENT_MODE=simulated` for its own process only. Unset the variables afterwards.
 
 ## Render
 

@@ -16,6 +16,8 @@
     "start:prod:batch": "NODE_ENV=production node dist/apps/ticketzy-batch/main",
     "seed": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/seed.ts",
     "seed:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/seed-demo.ts",
+    "reset:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/reset-demo.ts",
+    "check:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/check-demo.ts",
     "report:currency": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/report-currency.ts",
     "ai:check": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/ai-check.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",

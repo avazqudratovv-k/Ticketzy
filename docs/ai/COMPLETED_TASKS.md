@@ -597,3 +597,19 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
   - `.env.example` was not edited (the task forbids editing env files): its names are behind `RUN_IN_PRODUCTION.md`.
   - Uploads on Render's ephemeral disk (C3-82) are report only, not built. In-memory rate limits reset on every sleep and need a shared store if the API is scaled.
   - Nothing committed.
+
+## Demo data, guarded seed and reset (decision #108)
+- **What changed:**
+  - New commands `npm run seed:demo` (rewritten), `reset:demo` and `check:demo`: `src/seed-demo.ts`, `reset-demo.ts`, `check-demo.ts`, `demo-app.ts`, `demo-seeder.ts`, `demo-snapshot.ts`; pure parts in `libs/demo-guards.ts`, `demo-manifest.ts`, `demo-data.ts`, `demo-plan.ts`, `demo-consistency.ts`; new schema `DemoSeedRecord` (collection `demo_seed_records`, written only by the seed). The old `libs/demo-seed.ts` and its spec are replaced.
+  - Guards: confirmation variable naming the database, production flag, non-demo-data flag, four strong passwords from the environment, counts-only output.
+  - Data in the plan: 10 organizers (8 approved with one rich history, 1 pending, 1 rejected), 50 buyers (Korean, English, Russian, Uzbek names), 10 venues, 56 events (29 ended, 21 approved of which 8 start within 7 days, 3 pending, 1 rejected with a reason, 1 cancelled, 1 draft; sold out, about 90 percent sold and not-yet-open events), orders with refunds, cancelled and failed checkouts, check-ins, payouts in every status, likes, follows, views, comments, organizer and admin chats, notifications and audit entries.
+  - `BatchService.batchEndEvents` takes an optional list of event ids (default unchanged).
+  - Docs: README ("Demo data"), `RUN_IN_PRODUCTION.md` ("Demo data on Atlas" and the variable tables), `.env.example` (every name in `RUN_IN_PRODUCTION.md` that was missing, and the new demo names, as empty placeholders; the owner asked for this edit), AGENTS.md, `DECISIONS.md` #108.
+- **Tests:** new specs `libs/demo-guards.spec.ts` (refuses without confirmation, in production without the flag, with foreign data; password rules), `libs/demo-manifest.spec.ts` (reset removes only tracked records, keeps what others use, twice is safe, empty manifest removes nothing), `libs/demo-plan.spec.ts` (counts, hero, sold out, no venue clash, tiers, payout statuses, planners), `libs/demo-consistency.spec.ts` (every rule catches its fault); one case in `batch.service.spec.ts`.
+- **Checks:** `tsc` (api and batch), `npm run build` and `npm run test` passed (see the final report for the counts). `npm run lint` was not run (it rewrites files).
+- **Decision:** #108.
+- **Not done / risks:**
+  - **Not run against a MongoDB**: none is installed here (no `mongod`, no Docker, no memory server) and no `.env` was read. `demo-seeder.ts` is type checked only; expect to fix small things on the first real run (N28).
+  - Comments have no reply field in the schema, so replies are comments starting with `@nick`.
+  - Leftover test data: no script in the repo mentions "ZZ Venue Clash Test"; the earlier live checks in this file say they deleted their test data by id. The dev database was not inspected. `check:demo` lists names that look like test data and changes nothing.
+  - Nothing committed.
