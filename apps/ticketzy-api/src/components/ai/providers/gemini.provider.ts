@@ -69,7 +69,7 @@ export class GeminiProvider implements AiProvider {
 					...getGeminiModelConfig(this.settings.model),
 					systemInstruction: request.system,
 					maxOutputTokens: request.maxTokens,
-					abortSignal: AbortSignal.timeout(this.settings.timeoutMs),
+					abortSignal: AbortSignal.timeout(request.timeoutMs ?? this.settings.timeoutMs),
 					...extra,
 				},
 			});

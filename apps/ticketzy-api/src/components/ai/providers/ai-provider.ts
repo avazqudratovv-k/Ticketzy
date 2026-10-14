@@ -35,6 +35,10 @@ export interface AiTextRequest {
 	system: string;
 	messages: AiMessage[];
 	maxTokens: number;
+	/** set by AiClientService: this attempt's own timeout (never above AI_TIMEOUT_MS, shortened when the total budget is nearly used up) */
+	timeoutMs?: number;
+	/** set by a caller that makes several model calls for one user request (the assistant): epoch ms when the whole request must be over */
+	deadlineAt?: number;
 }
 
 export interface AiChatRequest extends AiTextRequest {

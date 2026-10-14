@@ -31,6 +31,7 @@ import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
+import { CodedException } from '../../libs/coded-exception';
 import { EventSeat, EventSeatMap, TakenSeat } from '../../libs/dto/event/event-seat';
 import {
 	VenueLayout,
@@ -93,6 +94,9 @@ export const getEventSubmitError = (
 	}
 	return null;
 };
+
+/** no seat map to show (#114): the code the frontend already reads (`NO_DATA_FOUND`), as a 404 and not a server error */
+const noSeatMap = (): CodedException => new CodedException(Message.NO_DATA_FOUND, 'NO_DATA_FOUND', 404);
 
 @Injectable()
 export class EventService {
@@ -508,16 +512,21 @@ export class EventService {
 	}
 
 	/**
+	 * "No seat map" (#114) is the expected answer for a missing, hidden, cancelled, ended or general admission event and for
+	 * a venue without a layout: a `NO_DATA_FOUND` CodedException (404, logged as a warning), never a 500.
 	 * public: APPROVED events of ACTIVE organizers; only seats that are not free are listed, and never who holds them.
 	 * A hold that has run out counts as free. A logged-in caller's own active holds carry mine and holdExpiresAt.
 	 */
 	public async getEventSeatMap(eventId: ObjectId, memberId: ObjectId | null = null): Promise<EventSeatMap> {
 		const event: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
-		if (!event || event.seatingType !== SeatingType.RESERVED) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
-		await this.memberService.getMember(null, event.organizerId); // hidden when the organizer is not ACTIVE
+		if (!event || event.seatingType !== SeatingType.RESERVED) throw noSeatMap();
+		// hidden when the organizer is not ACTIVE: getMember says so with a plain 500, which is not what a client should see here
+		await this.memberService.getMember(null, event.organizerId).catch((err) => {
+			throw err instanceof InternalServerErrorException && err.message === Message.NO_DATA_FOUND ? noSeatMap() : err;
+		});
 
 		const venue = await this.venueModel.findById(event.venueId).lean().exec();
-		if (!venue?.venueLayout) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		if (!venue?.venueLayout) throw noSeatMap();
 
 		const now = new Date();
 		const seats = await this.eventSeatModel

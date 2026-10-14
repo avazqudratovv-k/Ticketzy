@@ -203,33 +203,55 @@ export class AiToolsService {
 		};
 	}
 
-	/** only the logged in caller's own tickets; no QR token is ever returned */
+	/**
+	 * Only the logged in caller's own tickets; no QR token is ever returned. The list is the 10 newest tickets that are not
+	 * CANCELLED (a REFUNDED one is listed with its status). `mostExpensiveTicket` is computed over ALL of the caller's
+	 * VALID and USED tickets, so "my most expensive ticket" is right even with more than 10 tickets and never picks a refunded one (#114).
+	 */
 	private async getMyTickets(authMember: Member | null): Promise<ToolOutcome> {
 		if (!authMember?._id) return this.fail(Message.AI_LOGIN_REQUIRED);
 
-		const tickets: any[] = await this.ticketModel
-			.aggregate([
-				{ $match: { ownerId: shapeIntoMongoObjectId(authMember._id), ticketStatus: { $ne: TicketStatus.CANCELLED } } },
-				{ $sort: { createdAt: -1 } },
-				{ $limit: MAX_MY_TICKETS },
-				lookupEvent,
-				{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
-				lookupTicketType,
-				{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },
-				lookupSeat,
-				{ $unwind: { path: '$seatData', preserveNullAndEmptyArrays: true } },
-			])
-			.exec();
+		const ownerId = shapeIntoMongoObjectId(authMember._id);
+		const join = [
+			lookupEvent,
+			{ $unwind: { path: '$eventData', preserveNullAndEmptyArrays: true } },
+			lookupTicketType,
+			{ $unwind: { path: '$ticketTypeData', preserveNullAndEmptyArrays: true } },
+		];
+		const [tickets, [priciest]]: any[][] = await Promise.all([
+			this.ticketModel
+				.aggregate([
+					{ $match: { ownerId, ticketStatus: { $ne: TicketStatus.CANCELLED } } },
+					{ $sort: { createdAt: -1 } },
+					{ $limit: MAX_MY_TICKETS },
+					...join,
+					lookupSeat,
+					{ $unwind: { path: '$seatData', preserveNullAndEmptyArrays: true } },
+				])
+				.exec(),
+			this.ticketModel
+				.aggregate([
+					{ $match: { ownerId, ticketStatus: { $in: [TicketStatus.VALID, TicketStatus.USED] } } },
+					...join,
+					{ $sort: { 'ticketTypeData.ticketPrice': -1, createdAt: -1 } },
+					{ $limit: 1 },
+				])
+				.exec(),
+		]);
 
+		const describe = (ticket: any) => ({
+			status: ticket.ticketStatus,
+			eventTitle: clip(ticket.eventData?.eventTitle, 200),
+			startAt: ticket.eventData?.startAt,
+			ticketType: clip(ticket.ticketTypeData?.ticketTypeName, 100),
+			price: ticket.ticketTypeData?.ticketPrice,
+			currency: ticket.ticketTypeData?.ticketCurrency,
+			seat: ticket.seatData ? `${ticket.seatData.sectionKey} row ${ticket.seatData.row} seat ${ticket.seatData.number}` : undefined,
+		});
 		return {
 			content: JSON.stringify({
-				tickets: tickets.map((ticket) => ({
-					status: ticket.ticketStatus,
-					eventTitle: clip(ticket.eventData?.eventTitle, 200),
-					startAt: ticket.eventData?.startAt,
-					ticketType: clip(ticket.ticketTypeData?.ticketTypeName, 100),
-					seat: ticket.seatData ? `${ticket.seatData.sectionKey} row ${ticket.seatData.row} seat ${ticket.seatData.number}` : undefined,
-				})),
+				tickets: tickets.map(describe),
+				mostExpensiveTicket: priciest ? describe(priciest) : null,
 			}),
 		};
 	}

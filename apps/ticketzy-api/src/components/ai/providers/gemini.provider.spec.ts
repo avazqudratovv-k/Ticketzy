@@ -19,6 +19,20 @@ describe('GeminiProvider', () => {
 		expect(sent.config.abortSignal).toBeInstanceOf(AbortSignal);
 	});
 
+	it('uses the attempt\'s own timeout when the client sets one, otherwise the configured one (#114)', async () => {
+		const generateContent = jest.fn().mockResolvedValue(reply([{ text: 'x' }]));
+		const timeout = jest.spyOn(AbortSignal, 'timeout');
+		try {
+			await make(generateContent).generateText({ system: 's', messages: [{ role: 'user', text: 'hi' }], maxTokens: 5, timeoutMs: 4321 });
+			expect(timeout).toHaveBeenLastCalledWith(4321);
+			await make(generateContent).generateText({ system: 's', messages: [{ role: 'user', text: 'hi' }], maxTokens: 5 });
+			expect(timeout).toHaveBeenLastCalledWith(expect.any(Number));
+			expect(timeout.mock.calls[1][0]).not.toBe(4321);
+		} finally {
+			timeout.mockRestore();
+		}
+	});
+
 	it('generateJson asks for JSON, parses it, and rejects text that is not JSON', async () => {
 		const generateContent = jest.fn().mockResolvedValueOnce(reply([{ text: '{"a":1}' }])).mockResolvedValueOnce(reply([{ text: 'sure!' }]));
 		const provider = make(generateContent);

@@ -53,13 +53,15 @@ export class AnthropicProvider implements AiProvider {
 
 	private async create(request: AiTextRequest, extra: Partial<Anthropic.MessageCreateParamsNonStreaming> = {}): Promise<Anthropic.Message> {
 		try {
-			return await this.client.messages.create({
+			const body: Anthropic.MessageCreateParamsNonStreaming = {
 				model: this.settings.model,
 				max_tokens: request.maxTokens,
 				system: request.system,
 				messages: request.messages.map((message) => this.toAnthropic(message)),
 				...extra,
-			});
+			};
+			// the attempt's own timeout (shortened by the total budget) beats the client-wide one
+			return await (request.timeoutMs ? this.client.messages.create(body, { timeout: request.timeoutMs }) : this.client.messages.create(body));
 		} catch (err) {
 			throw new AiProviderError(err instanceof Anthropic.APIConnectionTimeoutError ? 'timeout' : 'failed', err?.status, err?.constructor?.name);
 		}

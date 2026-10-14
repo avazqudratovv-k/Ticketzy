@@ -1,4 +1,5 @@
 import { InternalServerErrorException } from '@nestjs/common';
+import { CodedException } from '../../libs/coded-exception';
 import { EventService, getEventSubmitError } from './event.service';
 import { EventResolver } from './event.resolver';
 import { LikeService } from '../like/like.service';
@@ -1141,6 +1142,23 @@ describe('EventService', () => {
 				expect(eventSeatModel.find).not.toHaveBeenCalled();
 			});
 
+			it('answers "no seat map" with a coded 404, never a 500 (#114)', async () => {
+				const noMap = async (): Promise<any> => service.getEventSeatMap('e1' as any).catch((err) => err);
+				eventModel.findOne.mockReturnValue(lean(null));
+				const hidden = await noMap();
+				expect(hidden).toBeInstanceOf(CodedException);
+				expect(hidden).not.toBeInstanceOf(InternalServerErrorException);
+				expect(hidden).toMatchObject({ code: 'NO_DATA_FOUND', message: Message.NO_DATA_FOUND });
+				expect(hidden.getStatus()).toBe(404);
+
+				eventModel.findOne.mockReturnValue(lean(reservedEvent({ seatingType: SeatingType.GENERAL })));
+				expect(await noMap()).toMatchObject({ code: 'NO_DATA_FOUND' });
+
+				eventModel.findOne.mockReturnValue(lean(reservedEvent({ eventStatus: EventStatus.APPROVED })));
+				venueModel.findById.mockReturnValue(lean({ _id: 'v1' }));
+				expect(await noMap()).toMatchObject({ code: 'NO_DATA_FOUND' });
+			});
+
 			it('has no seat map for a GENERAL event or a venue without a layout', async () => {
 				eventModel.findOne.mockReturnValue(lean(reservedEvent({ seatingType: SeatingType.GENERAL })));
 				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
@@ -1152,7 +1170,10 @@ describe('EventService', () => {
 
 			it('is hidden when the organizer is not ACTIVE', async () => {
 				memberService.getMember.mockRejectedValue(new InternalServerErrorException(Message.NO_DATA_FOUND));
-				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toMatchObject({ code: 'NO_DATA_FOUND' });
+				// any other failure of the lookup is not turned into "no seat map"
+				memberService.getMember.mockRejectedValue(new Error('db down'));
+				await expect(service.getEventSeatMap('e1' as any)).rejects.toThrow('db down');
 			});
 
 			it('asks only for SOLD seats and for HELD seats whose hold is in the future', async () => {

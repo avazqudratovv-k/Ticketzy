@@ -1,9 +1,9 @@
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
-import { AI_RETRY_DELAY_MS, AiClientService } from './ai-client.service';
+import { AI_MAX_WAIT_MS, AI_MIN_ATTEMPT_MS, AI_RETRY_DELAY_MS, AiClientService } from './ai-client.service';
 import { AiModerationService } from './ai-moderation.service';
 import { AiTranslationService } from './ai-translation.service';
 import { ASSISTANT_TOOLS, AiToolsService, MAX_SEARCH_RESULTS } from './ai-tools.service';
-import { AiAssistantService, MAX_TOOL_ROUNDS, sanitizeHistory } from './ai-assistant.service';
+import { AiAssistantService, MAX_TOOL_ROUNDS, buildAssistantSystemPrompt, sanitizeHistory } from './ai-assistant.service';
 import { Message } from '../../libs/enums/common.enum';
 import { EventCategory, EventLocale, EventStatus } from '../../libs/enums/event.enum';
 import { AuditAction } from '../../libs/enums/audit-log.enum';
@@ -671,5 +671,172 @@ describe('AiAssistantService', () => {
 		process.env.AI_ENABLED = 'false';
 		await expect(ask()).rejects.toThrow(Message.AI_DISABLED);
 		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe('AI total wait and attempt log (#114)', () => {
+	beforeEach(() => {
+		process.env.AI_PROVIDER = 'gemini';
+		process.env.GEMINI_API_KEY = 'g-test-key';
+		process.env.GEMINI_MODEL = 'main-model';
+		process.env.GEMINI_FALLBACK_MODEL = 'backup-model';
+		process.env.AI_TIMEOUT_MS = '15000';
+	});
+
+	const slowClient = (seen: { model: string; timeoutMs?: number }[]) =>
+		new AiClientService((config) => ({
+			name: 'gemini',
+			generateText: jest.fn().mockImplementation(async (request: any) => {
+				seen.push({ model: config.model, timeoutMs: request.timeoutMs });
+				await new Promise((resolve) => setTimeout(resolve, request.timeoutMs)); // the vendor never answers
+				throw new AiProviderError('timeout', undefined, 'TimeoutError');
+			}),
+		} as any));
+
+	it('keeps the worst case (timeout, retry, fallback) at 40 seconds instead of 46', async () => {
+		jest.useFakeTimers();
+		try {
+			const seen: { model: string; timeoutMs?: number }[] = [];
+			const startedAt = Date.now();
+			const result = slowClient(seen).generateText({ system: 's', messages: [], maxTokens: 10 }).catch((err) => err);
+			await jest.advanceTimersByTimeAsync(AI_MAX_WAIT_MS);
+
+			expect((await result).message).toBe(Message.AI_BUSY);
+			expect(seen).toEqual([
+				{ model: 'main-model', timeoutMs: 15000 },
+				{ model: 'main-model', timeoutMs: 15000 },
+				{ model: 'backup-model', timeoutMs: 9000 }, // 40 s - 15 s - 1 s - 15 s
+			]);
+			expect(Date.now() - startedAt).toBeLessThanOrEqual(AI_MAX_WAIT_MS);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+
+	it('does not start an attempt when the caller\'s deadline leaves less than 3 seconds', async () => {
+		const provider = makeProvider();
+		await expect(
+			makeClient(provider).chat({ system: 's', messages: [], maxTokens: 10, tools: [], deadlineAt: Date.now() + AI_MIN_ATTEMPT_MS - 500 }),
+		).rejects.toThrow(Message.AI_BUSY);
+		expect(provider.chat).not.toHaveBeenCalled();
+	});
+
+	it('shortens an attempt to what is left of the caller\'s deadline', async () => {
+		const provider = makeProvider();
+		provider.generateText.mockResolvedValue({ text: 'ok', model: 'm' });
+		await makeClient(provider).generateText({ system: 's', messages: [], maxTokens: 10, deadlineAt: Date.now() + 7000 });
+		const { timeoutMs } = provider.generateText.mock.calls[0][0];
+		expect(timeoutMs).toBeLessThanOrEqual(7000);
+		expect(timeoutMs).toBeGreaterThan(6000);
+	});
+
+	it('logs one info line per attempt with model, duration and outcome, and nothing from the prompt', async () => {
+		const lines: string[] = [];
+		const provider = makeProvider();
+		provider.generateText
+			.mockRejectedValueOnce(new AiProviderError('failed', 401)) // a key problem: no retry, no fallback
+			.mockResolvedValueOnce({ text: 'the answer', model: 'main-model' });
+		const client = makeClient(provider);
+		jest.spyOn((client as any).logger, 'log').mockImplementation((line: any) => void lines.push(String(line)));
+		jest.spyOn((client as any).logger, 'error').mockImplementation(() => undefined);
+		jest.spyOn((client as any).logger, 'warn').mockImplementation(() => undefined);
+
+		await client.generateText({ system: 'SECRET SYSTEM PROMPT', messages: [{ role: 'user', text: 'SECRET QUESTION' }], maxTokens: 10 }).catch(() => undefined);
+		const attempts = lines.filter((line) => line.startsWith('AI attempt:'));
+		expect(attempts).toHaveLength(1);
+		expect(attempts[0]).toMatch(/^AI attempt: provider=gemini model=main-model ms=\d+ outcome=status 401$/);
+
+		await client.generateText({ system: 'SECRET SYSTEM PROMPT', messages: [{ role: 'user', text: 'SECRET QUESTION' }], maxTokens: 10 });
+		expect(lines[lines.length - 1]).toMatch(/ms=\d+ outcome=ok$/);
+		expect(lines.join('\n')).not.toMatch(/SECRET|sk-test-key|g-test-key/);
+	});
+
+	it('logs a timeout as outcome=timeout', async () => {
+		jest.useFakeTimers();
+		try {
+			const lines: string[] = [];
+			const client = slowClient([]);
+			jest.spyOn((client as any).logger, 'log').mockImplementation((line: any) => void lines.push(String(line)));
+			jest.spyOn((client as any).logger, 'error').mockImplementation(() => undefined);
+			jest.spyOn((client as any).logger, 'warn').mockImplementation(() => undefined);
+			const result = client.generateText({ system: 's', messages: [], maxTokens: 10 }).catch((err) => err);
+			await jest.advanceTimersByTimeAsync(AI_MAX_WAIT_MS);
+			await result;
+			expect(lines).toEqual([
+				'AI attempt: provider=gemini model=main-model ms=15000 outcome=timeout',
+				'AI attempt: provider=gemini model=main-model ms=15000 outcome=timeout',
+				'AI attempt: provider=gemini model=backup-model ms=9000 outcome=timeout',
+			]);
+		} finally {
+			jest.useRealTimers();
+		}
+	});
+});
+
+describe('the assistant answers "what is the most expensive ticket I have" (#114)', () => {
+	const ME = 'a'.repeat(24);
+	const ticket = (code: string, status: string, price: number, title: string, createdAt: number) => ({
+		ticketCode: code,
+		ticketStatus: status,
+		ownerId: ME,
+		qrToken: 'SECRET',
+		createdAt: new Date(createdAt),
+		eventData: { eventTitle: title, startAt: new Date('2026-11-01') },
+		ticketTypeData: { ticketTypeName: `Type ${code}`, ticketPrice: price, ticketCurrency: 'KRW' },
+	});
+	const all = [
+		ticket('T1', 'VALID', 55000, 'FC Seoul vs Jeonbuk', 1),
+		ticket('T2', 'REFUNDED', 150000, 'Refunded Concert', 2), // the dearest of all, but refunded
+		ticket('T3', 'USED', 88000, 'Finished Opera', 3),
+		ticket('T4', 'CANCELLED', 200000, 'Cancelled Gala', 4),
+		ticket('T5', 'VALID', 33000, 'Comedy Night', 5),
+	];
+
+	/** a tiny stand-in for MongoDB: it reads the $match status filter, the price $sort and the $limit of the pipeline it is given */
+	const fakeAggregate = (pipeline: any[]) => {
+		const match = pipeline.find((stage) => stage.$match).$match;
+		let rows = all.filter((row) => (match.ticketStatus.$in ? match.ticketStatus.$in.includes(row.ticketStatus) : row.ticketStatus !== match.ticketStatus.$ne));
+		const sort = pipeline.find((stage) => stage.$sort)?.$sort ?? {};
+		rows = [...rows].sort((a, b) => (sort['ticketTypeData.ticketPrice'] ? b.ticketTypeData.ticketPrice - a.ticketTypeData.ticketPrice : b.createdAt.getTime() - a.createdAt.getTime()));
+		const limit = pipeline.find((stage) => stage.$limit)?.$limit;
+		return exec(limit ? rows.slice(0, limit) : rows);
+	};
+
+	it('calls get_my_tickets, then answers from the dearest VALID or USED ticket; refunded and cancelled ones do not count', async () => {
+		const ticketModel = { aggregate: jest.fn().mockImplementation(fakeAggregate) };
+		const tools = new AiToolsService({} as any, {} as any, {} as any, ticketModel as any);
+		const provider = makeProvider();
+		provider.chat
+			.mockResolvedValueOnce(toolReply([{ id: 't1', name: 'get_my_tickets' }]))
+			.mockImplementationOnce(async (request: any) => {
+				// what the model reads in the tool result decides its answer: take mostExpensiveTicket
+				const result = JSON.parse(request.messages[request.messages.length - 1].results[0].content);
+				const best = result.mostExpensiveTicket;
+				return chatReply(`${best.eventTitle}: ${best.price} ${best.currency}`);
+			});
+		const service = new AiAssistantService(makeClient(provider), tools);
+
+		const answer = await service.askAssistant({ _id: ME } as any, ME, { message: 'what is the most expensive ticket I have' });
+
+		expect(answer.answer).toBe('Finished Opera: 88000 KRW');
+		expect(provider.chat).toHaveBeenCalledTimes(2); // one tool round, one answer
+		const sentTools = JSON.parse(provider.chat.mock.calls[1][0].messages[2].results[0].content);
+		expect(sentTools.tickets.map((row: any) => row.status)).toEqual(['VALID', 'USED', 'REFUNDED', 'VALID']); // newest first, CANCELLED left out
+		expect(sentTools.tickets.every((row: any) => row.currency === 'KRW' && typeof row.price === 'number')).toBe(true);
+		expect(JSON.stringify(sentTools)).not.toContain('SECRET');
+		// both chat calls share one deadline of AI_MAX_WAIT_MS
+		const [first, second] = provider.chat.mock.calls.map((call) => call[0].deadlineAt);
+		expect(first).toBe(second);
+		expect(first - Date.now()).toBeLessThanOrEqual(AI_MAX_WAIT_MS);
+	});
+
+	it('says there is none when the user has no valid ticket', async () => {
+		const ticketModel = { aggregate: jest.fn().mockReturnValue(exec([])) };
+		const outcome = await new AiToolsService({} as any, {} as any, {} as any, ticketModel as any).execute('get_my_tickets', {}, { _id: ME } as any);
+		expect(JSON.parse(outcome.content)).toEqual({ tickets: [], mostExpensiveTicket: null });
+	});
+
+	it('the system prompt tells the model to ignore refunded and cancelled tickets', () => {
+		expect(buildAssistantSystemPrompt(EventLocale.EN)).toMatch(/REFUNDED or CANCELLED are not valid/);
 	});
 });

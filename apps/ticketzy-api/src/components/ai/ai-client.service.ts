@@ -17,6 +17,14 @@ import {
 import { AI_PROVIDER_FACTORY, AiProviderFactory } from './providers/create-ai-provider';
 
 export const AI_RETRY_DELAY_MS = 1000;
+/**
+ * The longest a user waits for one AI operation, all attempts together (#114). Without it, one model call could take
+ * AI_TIMEOUT_MS + 1 s + AI_TIMEOUT_MS + AI_TIMEOUT_MS (retry, then fallback model), 46 s at the default, and the
+ * assistant makes up to 5 such calls. An attempt gets the smaller of AI_TIMEOUT_MS and what is left of the budget.
+ */
+export const AI_MAX_WAIT_MS = 40_000;
+/** an attempt with less time left than this is not started: it would only time out */
+export const AI_MIN_ATTEMPT_MS = 3_000;
 
 /** the vendor said 503/504 (overloaded, gateway timeout) or our own per-request timeout hit: worth one more try */
 const isRetryableError = (err: unknown): boolean =>
@@ -28,6 +36,12 @@ const isBusyError = (err: unknown): boolean => isRetryableError(err) || (err ins
 /** 400 (request refused, often a model specific option), 404 (unknown model), 429, 500, 503, 504 and a timeout: the fallback model gets one try. Never 401/403 (key problems) */
 const FALLBACK_STATUSES = [400, 404, 429, 500, 503, 504];
 const isKeyError = (err: unknown): boolean => err instanceof AiProviderError && [401, 403].includes(Number(err.status));
+/** ok is logged by the caller; this is the outcome word of a failed attempt: timeout, status 503, invalid_response or failed */
+const outcomeOf = (err: unknown): string => {
+	if (!(err instanceof AiProviderError)) return 'failed';
+	if (err.kind === 'timeout') return 'timeout';
+	return err.status !== undefined ? `status ${err.status}` : err.kind;
+};
 const canFallBack = (err: unknown): boolean =>
 	err instanceof AiProviderError && (err.kind === 'timeout' || FALLBACK_STATUSES.includes(Number(err.status)));
 
@@ -137,44 +151,47 @@ export class AiClientService implements OnModuleInit {
 	}
 
 	public generateText(request: AiTextRequest): Promise<AiTextResult> {
-		return this.run((provider) => provider.generateText(request));
+		return this.run(request, (provider, attempt) => provider.generateText(attempt));
 	}
 
 	/** parsed but NOT validated JSON: the caller runs its strict parser. Not JSON at all means AI_INVALID_RESPONSE. */
 	public generateJson(request: AiTextRequest): Promise<AiJsonResult> {
-		return this.run((provider) => provider.generateJson(request));
+		return this.run(request, (provider, attempt) => provider.generateJson(attempt));
 	}
 
 	public chat(request: AiChatRequest): Promise<AiChatResult> {
-		return this.run((provider) => provider.chat(request));
-	}
-
-	/** one retry, 1 second later, after a 503/504 or a timeout, then AI_BUSY */
-	private async runWithRetry<T>(call: () => Promise<T>): Promise<T> {
-		try {
-			return await call();
-		} catch (err) {
-			if (!isRetryableError(err)) throw err;
-			await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
-			return call();
-		}
+		return this.run(request, (provider, attempt) => provider.chat(attempt));
 	}
 
 	/**
-	 * One model call. The main model gets one retry; when it still fails with 404/429/503/504/timeout and
-	 * GEMINI_FALLBACK_MODEL is set, the fallback model gets exactly one try. Every failure becomes a clear Message,
-	 * with only the error type, status and model name in the log (never the key or the prompt).
+	 * One model call. The main model gets one retry (after 503/504/timeout, 1 second later); when it still fails with
+	 * 400/404/429/500/503/504/timeout and GEMINI_FALLBACK_MODEL is set, the fallback model gets exactly one try. All attempts
+	 * together stay inside the deadline (`request.deadlineAt`, or AI_MAX_WAIT_MS from now): no retry or fallback starts
+	 * when too little time is left. Every failure becomes a clear Message, with only the error type, status and model name
+	 * in the log (never the key or the prompt); every attempt logs model, duration and outcome.
 	 */
-	private async run<T>(call: (provider: AiProvider) => Promise<T>): Promise<T> {
+	private async run<R extends AiTextRequest, T>(request: R, call: (provider: AiProvider, attempt: R) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
+		const deadline = request.deadlineAt ?? Date.now() + AI_MAX_WAIT_MS;
+		const timeLeft = () => deadline - Date.now();
 		let failure: unknown;
 		// every attempt at the vendor, including the retry and the fallback model, is one model call against the daily cap
-		const metered = async (provider: AiProvider): Promise<T> => {
+		const metered = async (attemptConfig: AiConfig): Promise<T> => {
+			const timeoutMs = Math.min(attemptConfig.timeoutMs, timeLeft());
+			if (timeoutMs < AI_MIN_ATTEMPT_MS) throw new AiProviderError('timeout', undefined, 'DeadlineExceeded');
 			await this.chargeModelCall();
-			return call(provider);
+			const startedAt = Date.now();
+			try {
+				const result = await call(this.getProvider(attemptConfig), { ...request, timeoutMs });
+				this.logAttempt(attemptConfig, startedAt, 'ok');
+				return result;
+			} catch (err) {
+				this.logAttempt(attemptConfig, startedAt, outcomeOf(err));
+				throw err;
+			}
 		};
 		try {
-			return await this.runWithRetry(() => metered(this.getProvider(config)));
+			return await this.runWithRetry(() => metered(config), timeLeft);
 		} catch (err) {
 			if (err instanceof CodedException) throw err;
 			failure = err;
@@ -182,10 +199,10 @@ export class AiClientService implements OnModuleInit {
 		}
 		if (isKeyError(failure)) {
 			this.logger.error(`AI key rejected (status ${(failure as AiProviderError).status}): check the API key and its permissions; the fallback model is not tried because the same key would fail`);
-		} else if (config.fallbackModel && canFallBack(failure)) {
+		} else if (config.fallbackModel && canFallBack(failure) && timeLeft() >= AI_MIN_ATTEMPT_MS) {
 			const fallback = { ...config, model: config.fallbackModel };
 			try {
-				const result = await metered(this.getProvider(fallback));
+				const result = await metered(fallback);
 				this.logger.warn(`AI fallback model answered: provider=${config.provider} model=${fallback.model}`);
 				return result;
 			} catch (err) {
@@ -199,6 +216,22 @@ export class AiClientService implements OnModuleInit {
 			if (isBusyError(failure)) throw new ServiceUnavailableException(Message.AI_BUSY);
 		}
 		throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
+	}
+
+	/** one retry, 1 second later, after a 503/504 or a timeout, when the deadline leaves room for a useful attempt */
+	private async runWithRetry<T>(call: () => Promise<T>, timeLeft: () => number): Promise<T> {
+		try {
+			return await call();
+		} catch (err) {
+			if (!isRetryableError(err) || timeLeft() < AI_RETRY_DELAY_MS + AI_MIN_ATTEMPT_MS) throw err;
+			await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
+			return call();
+		}
+	}
+
+	/** info level, one line per vendor attempt: a slow day at Google shows up here before it shows up as errors. No prompt, no user data, no key. */
+	private logAttempt(config: AiConfig, startedAt: number, outcome: string): void {
+		this.logger.log(`AI attempt: provider=${config.provider} model=${config.model} ms=${Date.now() - startedAt} outcome=${outcome}`);
 	}
 
 	private logFailure(config: AiConfig, model: string, err: unknown): void {
