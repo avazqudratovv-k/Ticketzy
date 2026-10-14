@@ -16,3 +16,19 @@ export class CodedException extends HttpException {
 		super(message, status);
 	}
 }
+
+/** one failed field of an input: the property path (`input.memberNick` is `memberNick`) and the class-validator rule names, never a value */
+export interface ValidationIssue {
+	field: string;
+	rules: string[];
+}
+
+/** a request that failed input validation; `formatGraphQLError` adds the `fields` list to the answer (#113) */
+export class ValidationFailedException extends CodedException {
+	constructor(
+		message: string,
+		public readonly fields: ValidationIssue[],
+	) {
+		super(message, 'VALIDATION_FAILED', 400);
+	}
+}

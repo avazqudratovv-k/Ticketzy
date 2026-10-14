@@ -8,6 +8,7 @@ export enum Message {
 	REMOVE_FAILED = 'Remove failed!',
 	UPLOAD_FAILED = 'Upload failed!',
 	BAD_REQUEST = 'Bad Request',
+	VALIDATION_FAILED = 'Some fields are not valid, please check them and try again!',
 	PAYMENTS_DISABLED = 'Payments are switched off on this server, so orders cannot be paid right now!',
 	ONLY_KRW_TICKETS = 'Ticket prices must be in KRW, the only currency this platform supports!',
 	EVENT_HAS_OTHER_CURRENCY = 'This event still has a ticket type in another currency. Change it to KRW first, an event never mixes currencies!',

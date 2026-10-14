@@ -666,3 +666,9 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Run after committing:** `reset:demo` (removes the old accounts through the manifest), then `seed:demo`, then `check:demo`. Anyone who logged in with an old demo email must use the new one.
 - **Verified:** tsc (api and batch), build and the whole test suite; seed not run, lint not run, nothing committed.
 
+
+## SignupOrganizer "Bad Request Exception" (decision #113)
+- **Cause:** `SignupForm.tsx` (frontend, read only) sends the organization name as `memberNick`; `MemberInput.memberNick` (and `MemberUpdate`) had `@Length(3, 12)`, so "JJ Entertainment" (16 characters) failed rule `isLength`. All other fields match the DTO (email, password min 8, `memberFullName` 3 to 100; the form sends no phone). The backend rule was wrong, not the frontend.
+- **Changed:** `memberNick` is 3 to 50 in `member.input.ts` and `member.update.ts`. New `libs/validation.ts` (`createValidationPipe`, `flattenValidationErrors`) used in `main.ts`; `ValidationFailedException` in `libs/coded-exception.ts`; `formatGraphQLError` adds `fields` and logs them at warn without values; `Message.VALIDATION_FAILED`.
+- **Tests:** new `libs/validation.spec.ts` (frontend-shaped organizer input, boundaries 2/50/51, profile update, field list, answer through Apollo, log without values); `production-behaviour.spec.ts` and `member.service.spec.ts` now use the real pipe factory (limit error is now `VALIDATION_FAILED` with `fields`).
+- **Verified:** see the report of the task. `npm run lint` not run. Nothing committed.

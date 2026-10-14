@@ -22,7 +22,7 @@ export class MemberUpdate {
 	memberPhone?: string;
 
 	@IsOptional()
-	@Length(3, 12)
+	@Length(3, 50)
 	@Field(() => String, { nullable: true })
 	memberNick?: string;
 

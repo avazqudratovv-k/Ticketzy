@@ -1,7 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
 import { LoggingInterceptor } from './libs/interceptor/Logging.interceptor';
 import { graphqlUploadExpress } from 'graphql-upload'
 import * as express from 'express';
@@ -12,11 +11,12 @@ import { createUploadAuthMiddleware } from './libs/upload-guard';
 import { getListenPort, getLogLevels, getTrustProxyHops, getUploadLimits } from './libs/env.validation';
 import { buildCorsOptions, getHelmetOptions } from './libs/http-hardening';
 import { createGeneralRateLimitMiddleware } from './libs/rate-limit';
+import { createValidationPipe } from './libs/validation';
 
 async function bootstrap() {
 	// production logs warn and error only (LOG_LEVEL changes that); the settings were validated when ConfigModule loaded
 	const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: getLogLevels() });
-	app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+	app.useGlobalPipes(createValidationPipe());
 	app.useGlobalInterceptors(new LoggingInterceptor());
 
 	// behind Render's proxy `req.ip` is the proxy unless the hops are trusted; rate limits and logs need the real client

@@ -1,4 +1,5 @@
-import { UnauthorizedException, ValidationPipe } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
+import { createValidationPipe } from '../../libs/validation';
 import { MemberService } from './member.service';
 import { AuthService } from '../auth/auth.service';
 import { Message } from '../../libs/enums/common.enum';
@@ -89,7 +90,7 @@ describe('MemberService signup and login', () => {
 });
 
 describe('signup input validation (global ValidationPipe)', () => {
-	const pipe = new ValidationPipe({ whitelist: true, transform: true });
+	const pipe = createValidationPipe();
 	const run = (value: any) => pipe.transform(value, { type: 'body', metatype: MemberInput });
 
 	it('trims and lowercases the email and drops fields the client may not set', async () => {

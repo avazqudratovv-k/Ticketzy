@@ -1,6 +1,5 @@
 import { ApolloServer } from '@apollo/server';
 import { GraphQLError } from 'graphql';
-import { ValidationPipe } from '@nestjs/common';
 import { GqlExecutionContext } from '@nestjs/graphql';
 import { of } from 'rxjs';
 import { readFileSync } from 'fs';
@@ -9,6 +8,7 @@ import { OrdinaryInquiry } from './dto/common/common.input';
 import { Message } from './enums/common.enum';
 import { formatGraphQLError, mapRawError, mapValidationMessage } from './error-mapping';
 import { createRateLimitedError } from './rate-limit';
+import { createValidationPipe } from './validation';
 import { LoggingInterceptor } from './interceptor/Logging.interceptor';
 import { buildMongoOptions } from './mongo-options';
 import { SocketGateway } from '../socket/socket.gateway';
@@ -26,7 +26,7 @@ import VenueSchema from './schemas/Venue.model';
 
 describe('over-limit list arguments get a clear message (item 8)', () => {
 	const validate = async (value: object) => {
-		const pipe = new ValidationPipe({ whitelist: true, transform: true });
+		const pipe = createValidationPipe();
 		try {
 			await pipe.transform(value, { type: 'body', metatype: OrdinaryInquiry });
 		} catch (err: any) {
@@ -37,16 +37,18 @@ describe('over-limit list arguments get a clear message (item 8)', () => {
 
 	it('limit above 100 says what the maximum is, through the real ValidationPipe and formatError', async () => {
 		const err = await validate({ page: 1, limit: 5000 });
-		expect(err.getResponse().message).toEqual(['limit must not be greater than 100']);
-		// what Nest's Apollo driver does with an HttpException: the text becomes the message, the response moves to extensions.originalError
-		const asDriver = new GraphQLError(err.message, { extensions: { code: 'BAD_REQUEST', originalError: err.getResponse() } });
+		expect(err.fields).toEqual([{ field: 'limit', rules: ['max'] }]);
 		const server = new ApolloServer({
 			typeDefs: 'type Query { a: String }',
-			resolvers: { Query: { a: () => { throw asDriver; } } },
+			resolvers: { Query: { a: () => { throw err; } } },
 			formatError: (formatted, original) => formatGraphQLError(formatted as any, original, { warn: jest.fn(), error: jest.fn() }) as any,
 		});
 		const body: any = (await server.executeOperation({ query: '{ a }' })).body;
-		expect(body.singleResult.errors[0]).toEqual({ code: 'BAD_REQUEST', message: 'You asked for too many items at once, the maximum is 100 per page!' });
+		expect(body.singleResult.errors[0]).toEqual({
+			code: 'VALIDATION_FAILED',
+			message: 'You asked for too many items at once, the maximum is 100 per page!',
+			fields: [{ field: 'limit', rules: ['max'] }],
+		});
 	});
 
 	it('page above 10000 says so too, and other validation texts stay as they are', async () => {

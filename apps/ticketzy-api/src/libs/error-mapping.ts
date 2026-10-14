@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { unwrapResolverError } from '@apollo/server/errors';
 import { GraphQLError } from 'graphql';
 import { Message } from './enums/common.enum';
-import { CodedException } from './coded-exception';
+import { CodedException, ValidationFailedException, ValidationIssue } from './coded-exception';
 import { isExpectedDomainError } from './expected-errors';
 import { T } from './types/common';
 
@@ -12,6 +12,8 @@ export interface SafeGraphQLError {
 	message: string;
 	/** only on RATE_LIMITED: whole seconds until the client may try again */
 	retryAfterSeconds?: number;
+	/** only on VALIDATION_FAILED: the failed fields with their rule names, never a value (#113) */
+	fields?: ValidationIssue[];
 }
 
 export interface MappedRawError extends SafeGraphQLError {
@@ -111,6 +113,11 @@ export const formatGraphQLError = (
 	if (original instanceof CodedException) {
 		const coded: SafeGraphQLError = { code: original.code, message: original.message };
 		if (original.retryAfterSeconds !== undefined) coded.retryAfterSeconds = original.retryAfterSeconds;
+		if (original instanceof ValidationFailedException) {
+			coded.fields = original.fields;
+			logger.warn(`${original.code} [${original.fields.map((issue) => `${issue.field}: ${issue.rules.join(', ')}`).join('; ')}]`);
+			return coded;
+		}
 		logger.warn(`${original.code}${original.retryAfterSeconds !== undefined ? ` (retry in ${original.retryAfterSeconds}s)` : ''}`);
 		return coded;
 	}

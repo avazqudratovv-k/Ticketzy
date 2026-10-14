@@ -23,7 +23,7 @@ export class MemberInput {
 	memberPassword: string;
 
 	@IsOptional()
-	@Length(3, 12)
+	@Length(3, 50)
 	@Field(() => String, { nullable: true })
 	memberNick?: string;
 
