@@ -6,17 +6,20 @@
 import { EventCategory, EventStatus, SeatingType } from './enums/event.enum';
 import {
 	CATEGORY_PRICES,
+	CATEGORY_PRICE_RANGE,
 	DEMO_BASES,
 	DEMO_LOCALES,
 	DEMO_VENUES,
 	DemoBase,
+	DemoFixture,
 	DemoLocale,
 	GA_QUANTITIES,
 	OrganizerKey,
 	TIER_FACTORS,
 	TIER_NAMES,
 	VenueKey,
-	demoImage,
+	demoEventImages,
+	getFixtureVenue,
 } from './demo-data';
 import { getSeatedSections } from './venue-layout';
 
@@ -67,6 +70,8 @@ export interface PlanEvent {
 	venue: VenueKey;
 	baseId: string;
 	category: EventCategory;
+	/** football only: the invented match (home and away club); `venue` is the home ground of the home club */
+	fixture?: DemoFixture;
 	seating: SeatingType;
 	/** the status the seed brings the event to */
 	status: EventStatus;
@@ -131,34 +136,37 @@ const { APPROVED, PENDING, REJECTED, CANCELLED, DRAFT } = EventStatus;
 /** venues whose events are general admission unless the row says otherwise */
 const GENERAL_VENUES: VenueKey[] = ['openair', 'livehouse', 'arena'];
 
+/** the home ground of the home club of a fixture of the demo data: football events always play there */
+const fx = (baseId: string): VenueKey => getFixtureVenue(DEMO_BASES.find((item) => item.id === baseId).fixture);
+
 /** days ago of the 21 finished events of the organizer with the rich history; the order of the shows below */
 const HANBIT_ENDED_DAYS = [1, 8, 15, 24, 31, 40, 52, 63, 74, 86, 98, 111, 125, 140, 156, 173, 192, 212, 233, 256, 280];
 const HANBIT_ENDED_SHOWS: [string, VenueKey, Partial<Row>?][] = [
 	['lanterns', 'hall'],
-	['derby1', 'stadium'],
+	['fx-seoul-jeonbuk', fx('fx-seoul-jeonbuk')],
 	['latenight', 'club'],
 	['webtoon', 'expo', { seating: GENERAL, refundAll: true, orders: [3, 5] }],
-	['acoustic', 'jeju', { buyerOrders: [{ quantity: 2, outcome: 'paid', checkIn: true }] }],
-	['derby2', 'fortress', { adminRefunds: 1 }],
+	['acoustic', 'goyang', { buyerOrders: [{ quantity: 2, outcome: 'paid', checkIn: true }] }],
+	['fx-incheon-ulsan', fx('fx-incheon-ulsan'), { adminRefunds: 1 }],
 	['rising', 'playhouse', { buyerOrders: [{ quantity: 3, outcome: 'paid', checkIn: true }] }],
 	['rockfest', 'openair'],
 	['gugak', 'hall', { buyerOrders: [{ quantity: 2, outcome: 'paid', checkIn: true }] }],
-	['derby3', 'fortress'],
+	['fx-gwangju-pohang', fx('fx-gwangju-pohang')],
 	['improv', 'club'],
 	['vinyl', 'livehouse'],
 	['symphony', 'hall'],
-	['derby4', 'stadium'],
+	['fx-seoul-daejeon', fx('fx-seoul-daejeon')],
 	['jazz', 'playhouse'],
 	['founders', 'expo', { seating: GENERAL }],
 	['electronic', 'arena'],
 	['bilingual', 'club'],
-	['choir', 'jeju'],
+	['choir', 'goyang'],
 	['indiegame', 'arena'],
 	['pop', 'hall'],
 ];
 
 const CANCEL_REASON = 'The headline performers are unavailable because of illness. All tickets are refunded in full.';
-const REJECT_REASON = 'The description is too short and the line-up is missing. Please add the confirmed players and the charity partner, then resubmit.';
+const REJECT_REASON = 'The description is too short and the line-up is missing. Please add the confirmed line-up and the charity partner, then resubmit.';
 
 const buildRows = (): Row[] => {
 	const rows: Row[] = HANBIT_ENDED_SHOWS.map(([base, venue, extra], index) => ({
@@ -177,29 +185,29 @@ const buildRows = (): Row[] => {
 		// upcoming events of the organizer with the rich history; the first four start within a week (the home hero)
 		{ org: 'hanbit', base: 'lanterns', venue: 'hall', day: 2, orders: [8, 14], pop: 0.95, buyerOrders: [{ quantity: 2, outcome: 'paid' }] },
 		{ org: 'hanbit', base: 'latenight', venue: 'club', day: 3, orders: [6, 9], pop: 0.9 },
-		{ org: 'hanbit', base: 'derby1', venue: 'stadium', day: 5, orders: [10, 14], pop: 0.9, buyerOrders: [{ quantity: 2, outcome: 'failed' }] },
+		{ org: 'hanbit', base: 'fx-incheon-seoul', venue: fx('fx-incheon-seoul'), day: 5, orders: [10, 14], pop: 0.9, buyerOrders: [{ quantity: 2, outcome: 'failed' }] },
 		{ org: 'hanbit', base: 'webtoon', venue: 'expo', day: 6, seating: GENERAL, orders: [6, 10], pop: 0.8 },
 		{ org: 'hanbit', base: 'rising', venue: 'club', day: 12, fill: 1 },
 		{ org: 'hanbit', base: 'bilingual', venue: 'club', day: 19, fill: 0.9 },
 		{ org: 'hanbit', base: 'electronic', venue: 'livehouse', day: 27, fill: 0.9, gaQty: [90, 20], buyerOrders: [{ quantity: 2, outcome: 'cancelled' }] },
-		{ org: 'hanbit', base: 'symphony', venue: 'jeju', day: 41, saleOpensInDays: 9 },
-		{ org: 'hanbit', base: 'cup', venue: 'fortress', day: 58, orders: [8, 12], adminRefunds: 1, buyerOrders: [{ quantity: 2, outcome: 'refunded' }] },
+		{ org: 'hanbit', base: 'symphony', venue: 'goyang', day: 41, saleOpensInDays: 9 },
+		{ org: 'hanbit', base: 'fx-gwangju-jeju-cup', venue: fx('fx-gwangju-jeju-cup'), day: 58, orders: [8, 12], adminRefunds: 1, buyerOrders: [{ quantity: 2, outcome: 'refunded' }] },
 		// an event waiting for the review, one that was rejected, one that was cancelled after it sold, and a draft
 		{ org: 'hanbit', base: 'jazz', venue: 'hall', day: 35, status: PENDING },
-		{ org: 'hanbit', base: 'charity', venue: 'stadium', day: 44, status: REJECTED, reason: REJECT_REASON },
+		{ org: 'hanbit', base: 'charity', venue: fx('charity'), day: 44, status: REJECTED, reason: REJECT_REASON },
 		{ org: 'hanbit', base: 'choir', venue: 'expo', day: 22, status: CANCELLED, orders: [5, 8], reason: CANCEL_REASON, buyerOrders: [{ quantity: 2, outcome: 'paid' }] },
 		{ org: 'hanbit', base: 'esports', venue: 'arena', day: 70, status: DRAFT },
 
 		// the other organizers
 		{ org: 'mirae', base: 'jazz', venue: 'playhouse', day: -20, orders: [5, 8] },
 		{ org: 'mirae', base: 'pop', venue: 'hall', day: 4, orders: [8, 12], pop: 0.85 },
-		{ org: 'mirae', base: 'acoustic', venue: 'jeju', day: 16, orders: [5, 9] },
+		{ org: 'mirae', base: 'acoustic', venue: 'goyang', day: 16, orders: [5, 9] },
 		{ org: 'mirae', base: 'lanterns', venue: 'expo', day: 50, status: PENDING },
 
-		{ org: 'harbor', base: 'derby2', venue: 'fortress', day: -12, orders: [6, 10] },
-		{ org: 'harbor', base: 'derby3', venue: 'stadium', day: -45, orders: [6, 10] },
-		{ org: 'harbor', base: 'derby4', venue: 'fortress', day: 1, orders: [10, 14], pop: 0.95, buyerOrders: [{ quantity: 4, outcome: 'paid' }] },
-		{ org: 'harbor', base: 'cup', venue: 'stadium', day: 9, orders: [10, 15] },
+		{ org: 'harbor', base: 'fx-incheon-jeju', venue: fx('fx-incheon-jeju'), day: -12, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-gwangju-ulsan', venue: fx('fx-gwangju-ulsan'), day: -45, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-seoul-pohang', venue: fx('fx-seoul-pohang'), day: 1, orders: [10, 14], pop: 0.95, buyerOrders: [{ quantity: 4, outcome: 'paid' }] },
+		{ org: 'harbor', base: 'fx-incheon-jeonbuk', venue: fx('fx-incheon-jeonbuk'), day: 9, orders: [10, 15] },
 
 		{ org: 'cellar', base: 'rising', venue: 'club', day: -6, orders: [5, 8] },
 		{ org: 'cellar', base: 'improv', venue: 'playhouse', day: 3, orders: [8, 12], pop: 0.8, buyerOrders: [{ quantity: 2, outcome: 'paid' }] },
@@ -217,8 +225,8 @@ const buildRows = (): Row[] => {
 		{ org: 'neon', base: 'electronic', venue: 'livehouse', day: -4, orders: [4, 7] },
 		{ org: 'neon', base: 'pop', venue: 'livehouse', day: 18, fill: 0.9, gaQty: [90, 20] },
 
-		{ org: 'jeju', base: 'lanterns', venue: 'jeju', day: -80, orders: [5, 8] },
-		{ org: 'jeju', base: 'acoustic', venue: 'jeju', day: 46, orders: [6, 10] },
+		{ org: 'jeju', base: 'lanterns', venue: 'goyang', day: -80, orders: [5, 8] },
+		{ org: 'jeju', base: 'acoustic', venue: 'goyang', day: 46, orders: [6, 10] },
 	);
 	return rows;
 };
@@ -236,22 +244,25 @@ const SHOW_TIMES: Record<string, { hour: number; hours: number }> = {
 	[EventCategory.OTHER]: { hour: 5, hours: 4 },
 };
 
-const roundPrice = (value: number): number => Math.round(value / 1000) * 1000;
+const roundPrice = (value: number, category: string): number => {
+	const [min, max] = CATEGORY_PRICE_RANGE[category];
+	return Math.min(max, Math.max(min, Math.round(value / 1000) * 1000));
+};
 
 const buildTicketTypes = (row: Row, base: DemoBase, seating: SeatingType): PlanTicketType[] => {
 	const standard = CATEGORY_PRICES[base.category];
 	if (seating === GENERAL) {
 		const [general, premium] = row.gaQty ?? GA_QUANTITIES[row.venue];
 		return [
-			{ name: 'General Admission', price: roundPrice(standard * 1.2), maxPerOrder: 6, quantity: general },
-			{ name: 'VIP Zone', price: roundPrice(standard * 2.6), maxPerOrder: 4, quantity: premium },
+			{ name: 'General Admission', price: roundPrice(standard * 1.2, base.category), maxPerOrder: 6, quantity: general },
+			{ name: 'VIP Zone', price: roundPrice(standard * 2.6, base.category), maxPerOrder: 4, quantity: premium },
 		];
 	}
 	const venue = DEMO_VENUES.find((item) => item.key === row.venue);
 	const tiers = [...new Set(getSeatedSections({ sections: venue.sections }).map((section) => section.tierKey))];
 	return tiers.map((tierKey) => ({
 		name: TIER_NAMES[tierKey] ?? tierKey,
-		price: roundPrice(standard * (TIER_FACTORS[tierKey] ?? 1)),
+		price: roundPrice(standard * (TIER_FACTORS[tierKey] ?? 1), base.category),
 		maxPerOrder: base.category === EventCategory.COMEDY ? 6 : 8,
 		tierKey,
 	}));
@@ -284,6 +295,8 @@ export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 	const uses = new Map<string, number>();
 	for (const row of rows) uses.set(row.base, (uses.get(row.base) ?? 0) + 1);
 	const seen = new Map<string, number>();
+	/** how many events of a category came before: picks the pictures from the pool of that category */
+	const ordinals = new Map<string, number>();
 
 	const events = rows.map((row, index): PlanEvent => {
 		const base = DEMO_BASES.find((item) => item.id === row.base);
@@ -293,7 +306,10 @@ export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 		const suffix = uses.get(row.base) > 1 ? ` Vol. ${edition}` : '';
 
 		const status = row.status ?? (row.day < 0 ? EventStatus.ENDED : APPROVED);
-		const seating = row.seating ?? (GENERAL_VENUES.includes(row.venue) ? GENERAL : RESERVED);
+		// football is always seated, also at the multi-use ground of Gwangju
+		const seating = row.seating ?? (base.category !== EventCategory.FOOTBALL && GENERAL_VENUES.includes(row.venue) ? GENERAL : RESERVED);
+		const ordinal = ordinals.get(base.category) ?? 0;
+		ordinals.set(base.category, ordinal + 1);
 		const times = SHOW_TIMES[base.category];
 		const startAt = new Date(today + row.day * DAY_MS + (row.hour ?? times.hour) * HOUR_MS);
 		const endAt = new Date(startAt.getTime() + (row.hours ?? times.hours) * HOUR_MS);
@@ -312,6 +328,7 @@ export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 			venue: row.venue,
 			baseId: row.base,
 			category: base.category,
+			fixture: base.fixture,
 			seating,
 			status,
 			startAt,
@@ -324,7 +341,7 @@ export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 			title: `${base.title.en}${suffix}`,
 			desc: base.desc.en,
 			translations: DEMO_LOCALES.map((locale) => ({ locale, title: `${base.title[locale]}${suffix}`, description: base.desc[locale] })),
-			images: [demoImage(`event-${row.org}-${row.base}-${edition}`), demoImage(`event-${row.org}-${row.base}-${edition}-b`)],
+			images: demoEventImages(base.category, ordinal),
 			ticketTypes: buildTicketTypes(row, base, seating),
 			orders: row.orders ?? [4, 12],
 			fill: row.fill,

@@ -86,6 +86,7 @@ The API refuses to start, and prints every problem at once by variable **name**,
 - A refused origin gets no CORS header; the browser then reports a CORS error, the API answers normally to non-browser clients.
 - The chat WebSocket is served by the same process on the same port (`wss://` through Render's proxy). Browsers do not apply CORS to WebSockets; the connection is authenticated by a token sent in the first `auth` message (or an `Authorization` header), never in the URL. The frontend needs `NEXT_PUBLIC_API_WS_URL` pointing at the API host.
 - Uploaded images are served from `/uploads` with `Cross-Origin-Resource-Policy: cross-origin` so the Vercel site can show them.
+- The demo photos of `seed:demo` are served the same way from `/demo-images` (the folder `demo-images/` is committed in the repository, so Render has it after every deploy; the API reads it relative to the working directory, the repository root). Seeded events and venues store `demo-images/<name>.jpg`, which the frontend turns into `<API address>/demo-images/<name>.jpg`.
 
 ## Cold start (free tier)
 
@@ -112,7 +113,7 @@ If you skip the batch process, run `npm run start:prod:batch` yourself (locally,
 
 ## Uploads on Render's disk
 
-User-uploaded images are written to `./uploads` on the instance's disk. On Render's free tier the disk is **ephemeral**: it is erased on every deploy, restart and spin-down, while the database keeps the image paths, so organizer images show as broken. Seeded demo events are not affected (they use external image URLs). Options are compared in the task report; the recommended one is Cloudinary's free tier uploaded through its REST API (the frontend already accepts absolute `https://` image URLs). Not implemented.
+User-uploaded images are written to `./uploads` on the instance's disk. On Render's free tier the disk is **ephemeral**: it is erased on every deploy, restart and spin-down, while the database keeps the image paths, so organizer images show as broken. Seeded demo events are not affected (their photos are committed in `demo-images/`, which is part of every deploy). Options are compared in the task report; the recommended one is Cloudinary's free tier uploaded through its REST API (the frontend already accepts absolute `https://` image URLs). Not implemented.
 
 ## Emails
 

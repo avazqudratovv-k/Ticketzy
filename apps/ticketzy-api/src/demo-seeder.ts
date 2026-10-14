@@ -35,7 +35,6 @@ import {
 	DemoLocale,
 	OrganizerKey,
 	VenueKey,
-	demoImage,
 } from './libs/demo-data';
 import { DemoPasswordKey } from './libs/demo-guards';
 import {
@@ -239,8 +238,8 @@ export class DemoSeeder {
 				memberNick: account.nick,
 				memberFullName: account.fullName,
 				memberAddress: account.address,
+				memberPhone: account.phone,
 				memberDesc: account.desc,
-				memberImage: demoImage(`organizer-${account.key}`, 300, 300),
 			});
 			if (account.outcome === 'verify') await this.organizerService.verifyOrganizerByAdmin(this.admin._id, _id as any);
 			if (account.outcome === 'reject') await this.organizerService.rejectOrganizerByAdmin(this.admin._id, { memberId: _id, reason: account.rejectReason } as any);
@@ -259,7 +258,8 @@ export class DemoSeeder {
 				memberAuthType: MemberAuthType.EMAIL,
 				memberNick: buyer.nick,
 				memberFullName: buyer.fullName,
-				memberImage: demoImage(`buyer-${buyer.nick}`, 300, 300),
+				memberPhone: buyer.phone,
+				memberAddress: buyer.address,
 			})),
 		);
 		this.buyers = await this.models.member.find({ _id: { $in: ids } }).lean().exec();
@@ -283,7 +283,7 @@ export class DemoSeeder {
 				venueCoordinates: venue.coordinates,
 				venueTimezone: 'Asia/Seoul',
 				venueLayout: { sections: venue.sections },
-				venueImages: [demoImage(`venue-${venue.key}`), demoImage(`venue-${venue.key}-b`)],
+				venueImages: venue.images,
 				memberId: this.organizers[venue.owner]._id,
 			} as any);
 			await this.setTimes(this.models.venue, { _id }, new Date(this.now.getTime() - 395 * DAY));
@@ -682,7 +682,7 @@ export class DemoSeeder {
 			await talk(
 				conversation,
 				[
-					[hanbit, 'We submitted Late Night Jazz Sessions for review. Is anything missing?', day(4)],
+					[hanbit, `We submitted ${jazz.eventTitle} for review. Is anything missing?`, day(4)],
 					[admin, 'Looking at it now. Could you confirm the guest players so we can check the description?', new Date(day(4).getTime() + 2 * HOUR)],
 					[hanbit, 'Confirmed: the trio plus two guest players. I will add their names to the description today.', day(3)],
 				],
@@ -696,7 +696,7 @@ export class DemoSeeder {
 			await talk(
 				conversation,
 				[
-					[hanbit, 'We added the confirmed players and the charity partner to the Charity Legends Match. Can you review it again?', day(5)],
+					[hanbit, `We added the confirmed line-up and the charity partner to ${charity.eventTitle}. Can you review it again?`, day(5)],
 					[admin, 'Thank you. Please submit the event again and we will look at it first thing tomorrow.', new Date(day(5).getTime() + 3 * HOUR)],
 				],
 				true,

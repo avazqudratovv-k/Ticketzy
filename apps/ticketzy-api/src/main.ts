@@ -31,6 +31,8 @@ async function bootstrap() {
 	app.use(createUploadAuthMiddleware(app.get(AuthService, { strict: false })));
 	app.use(graphqlUploadExpress(getUploadLimits()));
 	app.use('/uploads', express.static('./uploads'))
+	// the committed demo photos (credits in demo-images/CREDITS.md); read only, like uploads they are found from the working directory
+	app.use('/demo-images', express.static('./demo-images'))
 
 	app.useWebSocketAdapter(new WsAdapter(app));
 	// SIGTERM (a deploy, Render stopping the service) lets running requests finish and closes MongoDB and the WebSocket server
