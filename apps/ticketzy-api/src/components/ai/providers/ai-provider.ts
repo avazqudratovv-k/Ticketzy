@@ -70,6 +70,8 @@ export class AiProviderError extends Error {
 		public readonly kind: AiProviderErrorKind,
 		public readonly status?: number | string,
 		public readonly errorType = 'Error',
+		/** the vendor's own reason, already sanitized (sanitizeProviderReason): safe to log, never shown to users */
+		public readonly reason?: string,
 	) {
 		super(kind);
 	}

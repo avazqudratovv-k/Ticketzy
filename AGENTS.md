@@ -16,7 +16,7 @@ npm run build              # nest build
 npm run start:prod         # node dist/apps/ticketzy-api/main (needs build first)
 npm run test               # Jest, whole suite
 npm run lint               # ESLint WITH --fix: it rewrites files (decision #6), run only when that is fine
-npm run ai:check           # checks the AI settings and sends one tiny request (uses the key in .env, a real call)
+npm run ai:check           # checks the AI settings and sends real-shaped requests to the primary and fallback model (uses the key in .env, real calls; run before deploy)
 npm run seed:demo          # demo data (needs DEMO_SEED_CONFIRM and four DEMO_*_PASSWORD, writes to the database: #108)
 npm run reset:demo         # removes only what seed:demo tracked
 npm run check:demo         # read-only consistency report of the demo data
@@ -61,7 +61,7 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Event seat fields: `EventSeat` documents generated at approval; `eventTotalSeats` and `eventSoldSeats` on `Event`. `libs/seat-counts.ts` (#43, #79).
 - Refunds: whole order, deadline the day before the event. `components/refund`, `libs/refund-policy.ts` (#54, #55).
 - Admin seed: `ADMIN_EMAIL`/`ADMIN_PASSWORD` and optional `ADMIN2_*` (`npm run seed`, #23, #75); demo data: `npm run seed:demo` / `reset:demo` / `check:demo` (#62, #108). They refuse without `DEMO_SEED_CONFIRM` naming the database variable, refuse production without `ALLOW_DEMO_SEED=true`, refuse a database with non-demo data without `DEMO_SEED_ALLOW_NON_DEMO_DB=true`; reset removes only what the `demo_seed_records` manifest tracks; they print counts only. Seeding goes through the real services (`demo-seeder.ts`, plan in `libs/demo-plan.ts`).
-- AI assistant: off unless `AI_ENABLED=true`; settings `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE`. `components/ai`, `libs/env.validation.ts` (#60, #61, #63, #85 to #87).
+- AI assistant: off unless `AI_ENABLED=true`; settings `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE`. `components/ai`, `libs/env.validation.ts` (#60, #61, #63, #85 to #87, #111: per-model options only in `providers/gemini-model-config.ts`, never set the SDK `httpOptions.timeout`, fallback on 400/404/429/500/503/504/timeout but never 401/403).
 
 ## Production
 

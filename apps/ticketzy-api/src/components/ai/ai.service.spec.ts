@@ -201,15 +201,43 @@ describe('AiClientService: disabled AI and rate limit', () => {
 			expect(seen404).toEqual(['main-model', 'backup-model']);
 		});
 
-		it('does not use the fallback for other errors (400) or when it is unset', async () => {
+		it.each([400, 500])('answers from the fallback model after the main model gives a %s', async (status) => {
+			const seen: string[] = [];
+			const client = geminiClient(seen, (model) => (model === 'main-model' ? new AiProviderError('failed', status) : null));
+			await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).resolves.toMatchObject({ text: 'ok from backup-model' });
+			expect(seen).toEqual(['main-model', 'backup-model']);
+		});
+
+		it('says "could not answer" (friendly, generic) when the main and the fallback model both fail with a 400', async () => {
 			const seen: string[] = [];
 			await expect(geminiClient(seen, () => new AiProviderError('failed', 400)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
-			expect(seen).toEqual(['main-model']);
+			expect(seen).toEqual(['main-model', 'backup-model']);
+		});
 
+		it.each([401, 403])('never falls back on a %s (key problem) and logs a clear line', async (status) => {
+			const seen: string[] = [];
+			const client = geminiClient(seen, () => new AiProviderError('failed', status, 'ApiError'));
+			const logs: string[] = [];
+			jest.spyOn((client as any).logger, 'error').mockImplementation((message: any) => void logs.push(String(message)));
+			await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
+			expect(seen).toEqual(['main-model']);
+			expect(logs.some((line) => line.includes(`AI key rejected (status ${status})`))).toBe(true);
+			expect(logs.join(' ')).not.toContain('g-test-key');
+		});
+
+		it('does not use the fallback when it is unset', async () => {
 			delete process.env.GEMINI_FALLBACK_MODEL;
 			const none: string[] = [];
 			await expect(geminiClient(none, () => new AiProviderError('failed', 404)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_REQUEST_FAILED);
 			expect(none).toEqual(['main-model']);
+		});
+
+		it('logs the sanitized vendor reason with the status', async () => {
+			const client = geminiClient([], () => new AiProviderError('failed', 400, 'ApiError', 'INVALID_ARGUMENT: deadline too short'));
+			const logs: string[] = [];
+			jest.spyOn((client as any).logger, 'error').mockImplementation((message: any) => void logs.push(String(message)));
+			await client.generateText({ system: 's', messages: [], maxTokens: 10 }).catch(() => undefined);
+			expect(logs[0]).toBe('AI request failed: provider=gemini model=main-model failed ApiError status=400 reason="INVALID_ARGUMENT: deadline too short"');
 		});
 
 		it('logs the real status and the failing model, never the key', async () => {

@@ -1,5 +1,9 @@
 import { AiConfig, getAiConfig } from './env.validation';
-import { AiProviderError } from '../components/ai/providers/ai-provider';
+import { AiMessage, AiProvider, AiProviderError } from '../components/ai/providers/ai-provider';
+import { ASSISTANT_MAX_TOKENS, buildAssistantSystemPrompt } from '../components/ai/ai-assistant.service';
+import { ASSISTANT_TOOLS } from '../components/ai/ai-tools.service';
+import { MODERATION_SYSTEM_PROMPT } from '../components/ai/ai-moderation.service';
+import { EventLocale } from './enums/event.enum';
 import { AiProviderFactory } from '../components/ai/providers/create-ai-provider';
 
 export const GEMINI_MODELS_URL = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000';
@@ -12,7 +16,8 @@ export const explainStatus = (status: number | string | undefined, timedOut = fa
 	const code = Number(status);
 	if (timedOut) return 'the request timed out (Google did not answer in time, try again or raise AI_TIMEOUT_MS)';
 	if (code === 404) return 'wrong model (404): Google does not know this model name, pick one from the list above';
-	if (code === 400 || code === 401 || code === 403) return `bad key or permission (${code}): the API key is wrong, expired, restricted or has no access to this model`;
+	if (code === 400) return 'request refused (400): Google rejected the request itself (an option this model does not accept, or a bad key), see the reason';
+	if (code === 401 || code === 403) return `bad key or permission (${code}): the API key is wrong, expired, restricted or has no access to this model`;
 	if (code === 429) return 'quota (429): too many requests or the free quota is used up, wait or check your Google AI plan';
 	if (code === 503 || code === 504) return `Google is busy (${code}): the model is overloaded, try again in a moment`;
 	return status === undefined ? 'could not reach Google (network problem)' : `unexpected answer from Google (${status})`;
@@ -111,16 +116,58 @@ export const runAiCheck = async (env: Record<string, any>, deps: AiCheckDeps, pr
 		}
 	}
 
-	print('');
-	print(`Sending one tiny request to ${config.model} ...`);
+	const checks: [string, AiConfig][] = [['primary', config]];
+	if (config.fallbackModel) checks.push(['fallback', { ...config, model: config.fallbackModel }]);
+	for (const [role, modelConfig] of checks) {
+		print('');
+		print(`Checking the ${role} model ${modelConfig.model}:`);
+		if (!(await checkModel(modelConfig, deps, print))) failed = true;
+	}
+	if (!config.fallbackModel && isGemini) print('\nNo fallback model is set, so only the primary model was checked.');
+	return failed ? 1 : 0;
+};
+
+/** one line per request: `  label: OK in 250 ms` or `  label: FAILED after 250 ms: plain words [Google said: sanitized reason]` */
+const timed = async (label: string, now: () => number, print: (line: string) => void, run: () => Promise<void>): Promise<boolean> => {
 	const started = now();
 	try {
-		await deps.createProvider(config).generateText({ system: 'You are a friendly assistant.', messages: [{ role: 'user', text: 'Say hello' }], maxTokens: 64 });
-		print(`OK in ${now() - started} ms`);
+		await run();
+		print(`  ${label}: OK in ${now() - started} ms`);
+		return true;
 	} catch (err) {
-		failed = true;
 		const status = err instanceof AiProviderError ? err.status : undefined;
-		print(`FAILED after ${now() - started} ms: ${explainStatus(status, err instanceof AiProviderError && err.kind === 'timeout')}`);
+		const timedOut = err instanceof AiProviderError && err.kind === 'timeout';
+		const invalid = err instanceof AiProviderError && err.kind === 'invalid_response';
+		const reason = err instanceof AiProviderError && err.reason ? ` [Google said: ${err.reason}]` : '';
+		print(`  ${label}: FAILED after ${now() - started} ms: ${invalid ? 'the answer was not valid JSON' : explainStatus(status, timedOut)}${reason}`);
+		return false;
 	}
-	return failed ? 1 : 0;
+};
+
+/**
+ * Three requests built like the real ones, with fake data and the real system prompts, tools and limits:
+ * a tiny hello, the assistant (system prompt + function declarations, then a fake tool result and a final turn without
+ * tools) and the moderation style JSON answer. Nothing from the database or a member is sent.
+ */
+const checkModel = async (config: AiConfig, deps: AiCheckDeps, print: (line: string) => void): Promise<boolean> => {
+	const now = deps.now ?? Date.now;
+	const provider: AiProvider = deps.createProvider(config);
+	let ok = true;
+	ok = (await timed('tiny request', now, print, async () => void (await provider.generateText({ system: 'You are a friendly assistant.', messages: [{ role: 'user', text: 'Say hello' }], maxTokens: 64 })))) && ok;
+	ok = (await timed('assistant request (system prompt, tools, tool result)', now, print, async () => {
+		const system = buildAssistantSystemPrompt(EventLocale.EN);
+		const messages: AiMessage[] = [{ role: 'user', text: 'What is your refund policy?' }];
+		const first = await provider.chat({ system, messages, maxTokens: ASSISTANT_MAX_TOKENS, tools: ASSISTANT_TOOLS, toolChoice: 'auto' });
+		if (!first.toolCalls.length) return;
+		messages.push(first.assistantMessage, {
+			role: 'tool',
+			results: first.toolCalls.map((call) => ({ callId: call.id, name: call.name, content: JSON.stringify({ note: 'Refunds are possible until the day before the event.' }) })),
+		});
+		await provider.chat({ system, messages, maxTokens: ASSISTANT_MAX_TOKENS, tools: ASSISTANT_TOOLS, toolChoice: 'none' });
+	})) && ok;
+	ok = (await timed('moderation request (JSON answer)', now, print, async () => {
+		const event = { title: 'Check concert', description: 'A fake event used only by the AI check.', ticketTypes: [{ name: 'General', price: 30000 }], otherEventTitles: [] };
+		await provider.generateJson({ system: MODERATION_SYSTEM_PROMPT, messages: [{ role: 'user', text: JSON.stringify(event) }], maxTokens: 800 });
+	})) && ok;
+	return ok;
 };

@@ -25,8 +25,9 @@ const isRetryableError = (err: unknown): boolean =>
 /** the user is told "busy": a retryable error, or 429 (quota) */
 const isBusyError = (err: unknown): boolean => isRetryableError(err) || (err instanceof AiProviderError && Number(err.status) === 429);
 
-/** 404 (unknown model), 429, 503, 504 and a timeout: the configured fallback model gets one try */
-const FALLBACK_STATUSES = [404, 429, 503, 504];
+/** 400 (request refused, often a model specific option), 404 (unknown model), 429, 500, 503, 504 and a timeout: the fallback model gets one try. Never 401/403 (key problems) */
+const FALLBACK_STATUSES = [400, 404, 429, 500, 503, 504];
+const isKeyError = (err: unknown): boolean => err instanceof AiProviderError && [401, 403].includes(Number(err.status));
 const canFallBack = (err: unknown): boolean =>
 	err instanceof AiProviderError && (err.kind === 'timeout' || FALLBACK_STATUSES.includes(Number(err.status)));
 
@@ -179,7 +180,9 @@ export class AiClientService implements OnModuleInit {
 			failure = err;
 			this.logFailure(config, config.model, err);
 		}
-		if (config.fallbackModel && canFallBack(failure)) {
+		if (isKeyError(failure)) {
+			this.logger.error(`AI key rejected (status ${(failure as AiProviderError).status}): check the API key and its permissions; the fallback model is not tried because the same key would fail`);
+		} else if (config.fallbackModel && canFallBack(failure)) {
 			const fallback = { ...config, model: config.fallbackModel };
 			try {
 				const result = await metered(this.getProvider(fallback));
@@ -200,7 +203,7 @@ export class AiClientService implements OnModuleInit {
 
 	private logFailure(config: AiConfig, model: string, err: unknown): void {
 		if (err instanceof AiProviderError) {
-			this.logger.error(`AI request failed: provider=${config.provider} model=${model} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}`);
+			this.logger.error(`AI request failed: provider=${config.provider} model=${model} ${err.kind} ${err.errorType} status=${err.status ?? 'none'}${err.reason ? ` reason="${err.reason}"` : ''}`);
 		} else {
 			this.logger.error(`AI request failed: provider=${config.provider} model=${model} ${(err as Error)?.constructor?.name ?? 'Error'}`);
 		}

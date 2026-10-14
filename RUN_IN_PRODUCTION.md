@@ -29,9 +29,9 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `RATE_LIMIT_PASSWORD_PER_15_MIN` | 5 | password changes and admin resets per member and per IP per 15 minutes |
 | `AI_ENABLED` | `false` | AI features on or off |
 | `AI_PROVIDER` | `anthropic` | `anthropic` or `gemini` |
-| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | model default `gemini-2.5-flash` | Gemini key and models (a missing key only turns the AI off) |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | model default `gemini-2.5-flash` | Gemini key and models (a missing key only turns the AI off). The fallback is tried once on 400/404/429/500/503/504/timeout. Model availability changes: run `npm run ai:check` before every deploy and after changing a model |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | model default `claude-haiku-4-5` | Anthropic key and model |
-| `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | 15000, 10 | per-request timeout and per-minute limit per member or IP |
+| `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | 15000, 10 | per-request timeout (our own abort, not a Google deadline) and per-minute limit per member or IP |
 | `AI_DAILY_CAP` | 400 | AI model calls per UTC day for the whole app, kept in MongoDB; `0` turns the AI off |
 | `AI_PER_KEY_DAILY_CAP` | 30 | AI operations per member or IP per UTC day |
 | `SEAT_HOLD_SECONDS` | 30 | length of a seat hold and an unpaid general-admission order (1 to 3600); use 300 for a demo |

@@ -1,5 +1,7 @@
 import { ApiError, Content, FunctionCallingConfigMode, GenerateContentConfig, GenerateContentResponse, GoogleGenAI, Part } from '@google/genai';
 import { extractJson } from '../../../libs/ai';
+import { getGeminiModelConfig } from './gemini-model-config';
+import { sanitizeProviderReason } from '../../../libs/ai-reason';
 import {
 	AiChatRequest,
 	AiChatResult,
@@ -23,7 +25,9 @@ export class GeminiProvider implements AiProvider {
 		private readonly settings: AiProviderSettings,
 		client?: GoogleGenAI,
 	) {
-		this.client = client ?? new GoogleGenAI({ apiKey: settings.apiKey, httpOptions: { timeout: settings.timeoutMs } });
+		// No `httpOptions.timeout` here: the SDK sends it to Google as a server side deadline and Google answers 400 for
+		// anything under 10 s ("Manually set deadline 8s is too short"). The timeout is our own AbortSignal in `generate`.
+		this.client = client ?? new GoogleGenAI({ apiKey: settings.apiKey });
 	}
 
 	public async generateText(request: AiTextRequest): Promise<AiTextResult> {
@@ -62,6 +66,7 @@ export class GeminiProvider implements AiProvider {
 				model: this.settings.model,
 				contents: this.toContents(request.messages),
 				config: {
+					...getGeminiModelConfig(this.settings.model),
 					systemInstruction: request.system,
 					maxOutputTokens: request.maxTokens,
 					abortSignal: AbortSignal.timeout(this.settings.timeoutMs),
@@ -70,7 +75,8 @@ export class GeminiProvider implements AiProvider {
 			});
 		} catch (err) {
 			const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-			throw new AiProviderError(timedOut ? 'timeout' : 'failed', err instanceof ApiError ? err.status : undefined, err?.constructor?.name);
+			const reason = err instanceof ApiError ? sanitizeProviderReason(err.message, [this.settings.apiKey]) : undefined;
+			throw new AiProviderError(timedOut ? 'timeout' : 'failed', err instanceof ApiError ? err.status : undefined, err?.constructor?.name, reason);
 		}
 	}
 

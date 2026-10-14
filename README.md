@@ -146,16 +146,17 @@ This repo is built with AI coding assistants under written rules, so their work 
 npm run ai:check
 ```
 
-It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set, lists the Gemini models that support `generateContent` (your `GEMINI_MODEL` is marked), and sends one tiny "Say hello" request. Exit code 0 means it works, 1 means it does not.
+It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set, lists the Gemini models that support `generateContent` (your `GEMINI_MODEL` is marked), and then, for the primary model and the fallback (`GEMINI_FALLBACK_MODEL`), sends three requests: a tiny "Say hello", an assistant turn built like the real one (the real system prompt and tools, a fake tool result, no user data) and a moderation style JSON answer. Each line is `OK in N ms` or `FAILED after N ms: <explanation> [Google said: <short sanitized reason>]`. Exit code 0 means everything works, 1 means something failed. Google renames, overloads and retires models, so run it before every deploy and after changing a model name.
 
 | Result | Meaning |
 | --- | --- |
 | `OK in 640 ms` | Key, model and network work. |
 | `GEMINI_MODEL "..." is not in the list` / `wrong model (404)` | The model name is wrong; use one of the IDs printed in the list (the closest ones are shown). |
-| `bad key or permission (400/403)` | The key is wrong, expired, restricted or has no access to the model. |
+| `request refused (400)` | Google rejected the request itself; read the `[Google said: ...]` part (a model option it does not accept, a bad value, a bad key). |
+| `bad key or permission (401/403)` | The key is wrong, expired, restricted or has no access to the model (no fallback is tried). |
 | `quota (429)` | Too many requests or the free quota is used up; wait or check your Google plan. |
 | `Google is busy (503/504)` | The model is overloaded; try again, or set `GEMINI_FALLBACK_MODEL`. |
-| `timed out` | Google did not answer within `AI_TIMEOUT_MS` (default 15000). |
+| `timed out` | Google did not answer within `AI_TIMEOUT_MS` (default 15000; any value from 1000 works, it is not sent to Google as a deadline). |
 
 When `AI_PROVIDER=gemini`, the API logs a warning at startup if `GEMINI_API_KEY` or `GEMINI_MODEL` is missing (it never calls Google at startup).
 

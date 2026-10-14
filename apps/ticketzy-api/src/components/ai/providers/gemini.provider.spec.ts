@@ -76,4 +76,46 @@ describe('GeminiProvider', () => {
 			.catch((err) => err);
 		expect(timeout).toMatchObject({ kind: 'timeout' });
 	});
+
+	describe('per-model config and errors', () => {
+		const request = { system: 's', messages: [{ role: 'user' as const, text: 'hi' }], maxTokens: 10 };
+		const sentConfig = async (model: string) => {
+			const generateContent = jest.fn().mockResolvedValue(reply([{ text: 'ok' }]));
+			await new GeminiProvider({ ...settings, model }, { models: { generateContent } } as any).generateText(request);
+			return generateContent.mock.calls[0][0].config;
+		};
+
+		it('sends thinkingLevel (never thinkingBudget) to Gemini 3 models and the -latest aliases', async () => {
+			for (const model of ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-flash-lite-latest']) {
+				const config = await sentConfig(model);
+				expect(config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+			}
+		});
+
+		it('sends thinkingBudget 0 to 2.5 Flash, nothing to 2.5 Pro or unknown models', async () => {
+			expect((await sentConfig('gemini-2.5-flash')).thinkingConfig).toEqual({ thinkingBudget: 0 });
+			expect((await sentConfig('gemini-2.5-pro')).thinkingConfig).toBeUndefined();
+			expect((await sentConfig('some-other-model')).thinkingConfig).toBeUndefined();
+		});
+
+		it('keeps tools and the guardrail system prompt for every model', async () => {
+			const generateContent = jest.fn().mockResolvedValue(reply([{ text: 'ok' }]));
+			const provider = new GeminiProvider({ ...settings, model: 'gemini-3.1-flash-lite' }, { models: { generateContent } } as any);
+			await provider.chat({ ...request, tools: [{ name: 't', description: 'd', parameters: { type: 'object' } }] });
+			const config = generateContent.mock.calls[0][0].config;
+			expect(config.systemInstruction).toBe('s');
+			expect(config.tools[0].functionDeclarations).toHaveLength(1);
+		});
+
+		it('keeps the sanitized vendor reason on the error: no key, no long quoted text, 300 characters at most', async () => {
+			const body = JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: `bad key g-test and AIzaSyA1234567890abcdefghijkl "${'secret prompt words '.repeat(5)}" ${'x'.repeat(400)}` } });
+			const generateContent = jest.fn().mockRejectedValue(new ApiError({ message: body, status: 400 }));
+			const error = await make(generateContent).generateText(request).catch((e) => e);
+			expect(error).toBeInstanceOf(AiProviderError);
+			expect(error.status).toBe(400);
+			expect(error.reason.startsWith('INVALID_ARGUMENT: bad key [redacted] and [redacted]')).toBe(true);
+			expect(error.reason).not.toMatch(/g-test|AIza|secret prompt/);
+			expect(error.reason.length).toBeLessThanOrEqual(300);
+		});
+	});
 });
