@@ -25,6 +25,8 @@ export interface SnapMember {
 
 export interface SnapEvent {
 	_id: string;
+	/** only used to name an event in a failing rule */
+	title?: string;
 	organizerId: string;
 	eventStatus: EventStatus;
 	eventLikes: number;
@@ -94,6 +96,8 @@ export interface Finding {
 	ok: boolean;
 	/** counts only */
 	detail: string;
+	/** one line per offending record (event id, title, the numbers compared); no personal data, never a secret */
+	lines?: string[];
 	kind: 'invariant' | 'coverage';
 }
 
@@ -101,40 +105,70 @@ const sum = (rows: SnapCount[], filter: (row: SnapCount) => boolean = () => true
 	rows.filter(filter).reduce((total, row) => total + row.count, 0);
 const countFor = (rows: SnapCount[], id: string): number => sum(rows, (row) => row.id === id);
 const VALID_RATES = [10, 7, 5];
+const MAX_LINES = 20;
 
 export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 	const findings: Finding[] = [];
-	const check = (kind: Finding['kind'], name: string, bad: number, detail: string, okDetail = 'ok'): void => {
-		findings.push({ kind, name, ok: bad === 0, detail: bad === 0 ? okDetail : `${bad} ${detail}` });
+	const check = (kind: Finding['kind'], name: string, bad: number, detail: string, okDetail = 'ok', lines: string[] = []): void => {
+		findings.push({ kind, name, ok: bad === 0, detail: bad === 0 ? okDetail : `${bad} ${detail}`, ...(bad === 0 || !lines.length ? {} : { lines }) });
 	};
+	const label = (event: SnapEvent): string => `${event._id} "${(event.title ?? '').slice(0, 60)}" [${event.eventStatus}]`;
+	/** the events a rule rejects, each with the numbers it compared */
+	const offenders = (list: SnapEvent[], numbers: (event: SnapEvent) => string): { count: number; lines: string[] } => ({
+		count: list.length,
+		lines: list.slice(0, MAX_LINES).map((event) => `${label(event)}: ${numbers(event)}`),
+	});
+	const ticketCounts = (eventId: string): { live: number; used: number; refunded: number } => ({
+		live: sum(snapshot.tickets, (row) => row.id === eventId && row.status === TicketStatus.VALID),
+		used: sum(snapshot.tickets, (row) => row.id === eventId && row.status === TicketStatus.USED),
+		refunded: sum(snapshot.tickets, (row) => row.id === eventId && row.status === TicketStatus.REFUNDED),
+	});
 	const { events, members, now } = snapshot;
+	const eventById = new Map(events.map((event) => [event._id, event]));
 	const ticketTypesOf = (eventId: string) => snapshot.ticketTypes.filter((type) => type.eventId === eventId);
 	const ticketsOfOrders = (eventId: string, status: OrderStatus): number =>
 		snapshot.orders.filter((row) => row.id === eventId && row.status === status).reduce((total, row) => total + row.tickets, 0);
 
 	// stock: what the ticket types say is sold is what the paid orders hold
-	const soldMismatch = events.filter(
-		(event) => ticketTypesOf(event._id).reduce((total, type) => total + type.soldQuantity, 0) !== ticketsOfOrders(event._id, OrderStatus.PAID),
-	).length;
-	check('invariant', 'sold counters equal the tickets of paid orders', soldMismatch, 'event(s) where soldQuantity differs from the paid orders');
+	const soldOf = (eventId: string): number => ticketTypesOf(eventId).reduce((total, type) => total + type.soldQuantity, 0);
+	const soldMismatch = offenders(
+		events.filter((event) => soldOf(event._id) !== ticketsOfOrders(event._id, OrderStatus.PAID)),
+		(event) =>
+			`soldQuantity ${soldOf(event._id)} (per ticket type: ${ticketTypesOf(event._id).map((type) => type.soldQuantity).join(', ') || 'none'}), ` +
+			`tickets on paid orders ${ticketsOfOrders(event._id, OrderStatus.PAID)}, on refunded orders ${ticketsOfOrders(event._id, OrderStatus.REFUNDED)}`,
+	);
+	check('invariant', 'sold counters equal the tickets of paid orders', soldMismatch.count, 'event(s) where soldQuantity differs from the paid orders', 'ok', soldMismatch.lines);
 
-	const oversold = snapshot.ticketTypes.filter((type) => type.soldQuantity > type.totalQuantity || type.soldQuantity < 0).length;
-	check('invariant', 'no ticket type is oversold', oversold, 'ticket type(s) sold more than their stock');
+	const typeLine = (type: SnapTicketType): string => {
+		const event = eventById.get(type.eventId);
+		return `${event ? label(event) : type.eventId}: sold ${type.soldQuantity} of ${type.totalQuantity}, status ${type.ticketTypeStatus}`;
+	};
+	const oversold = snapshot.ticketTypes.filter((type) => type.soldQuantity > type.totalQuantity || type.soldQuantity < 0);
+	check('invariant', 'no ticket type is oversold', oversold.length, 'ticket type(s) sold more than their stock', 'ok', oversold.slice(0, MAX_LINES).map(typeLine));
 
 	const soldOutWrong = snapshot.ticketTypes.filter(
 		(type) => type.totalQuantity > 0 && (type.soldQuantity >= type.totalQuantity) !== (type.ticketTypeStatus === TicketTypeStatus.SOLD_OUT),
-	).length;
-	check('invariant', 'SOLD_OUT matches the stock', soldOutWrong, 'ticket type(s) whose SOLD_OUT flag does not match their sold count');
+	);
+	check('invariant', 'SOLD_OUT matches the stock', soldOutWrong.length, 'ticket type(s) whose SOLD_OUT flag does not match their sold count', 'ok', soldOutWrong.slice(0, MAX_LINES).map(typeLine));
 
 	// seats: reserved events only (they have seat rows)
-	const reservedMismatch = events.filter((event) => {
-		const rows = snapshot.seats.filter((row) => row.id === event._id);
-		if (!rows.length) return false;
-		const soldSeats = sum(rows, (row) => row.status === 'SOLD');
-		const valid = sum(snapshot.tickets, (row) => row.id === event._id && (row.status === TicketStatus.VALID || row.status === TicketStatus.USED));
-		return soldSeats !== valid || soldSeats !== ticketsOfOrders(event._id, OrderStatus.PAID);
-	}).length;
-	check('invariant', 'sold seats equal the live tickets and the paid orders', reservedMismatch, 'reserved event(s) where seats, tickets and orders disagree');
+	const soldSeatsOf = (eventId: string): number => sum(snapshot.seats, (row) => row.id === eventId && row.status === 'SOLD');
+	const liveTicketsOf = (eventId: string): number => {
+		const counts = ticketCounts(eventId);
+		return counts.live + counts.used;
+	};
+	const reservedMismatch = offenders(
+		events.filter((event) => {
+			if (!snapshot.seats.some((row) => row.id === event._id)) return false;
+			const soldSeats = soldSeatsOf(event._id);
+			return soldSeats !== liveTicketsOf(event._id) || soldSeats !== ticketsOfOrders(event._id, OrderStatus.PAID);
+		}),
+		(event) =>
+			`sold seats ${soldSeatsOf(event._id)}, live tickets (valid or used) ${liveTicketsOf(event._id)}, ` +
+			`tickets on paid orders ${ticketsOfOrders(event._id, OrderStatus.PAID)}, refunded tickets ${ticketCounts(event._id).refunded}, ` +
+			`soldQuantity ${soldOf(event._id)}`,
+	);
+	check('invariant', 'sold seats equal the live tickets and the paid orders', reservedMismatch.count, 'reserved event(s) where seats, tickets and orders disagree', 'ok', reservedMismatch.lines);
 
 	const heldSeats = sum(snapshot.seats, (row) => row.status === 'HELD');
 	check('invariant', 'no seat is still held', heldSeats, 'seat(s) still held');
@@ -142,35 +176,50 @@ export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 	check('invariant', 'no checkout is left open', pendingOrders, 'order(s) still waiting for payment');
 
 	// tickets
-	const ticketMismatch = events.filter((event) => {
-		const live = sum(snapshot.tickets, (row) => row.id === event._id && (row.status === TicketStatus.VALID || row.status === TicketStatus.USED));
-		const refunded = sum(snapshot.tickets, (row) => row.id === event._id && row.status === TicketStatus.REFUNDED);
-		return live !== ticketsOfOrders(event._id, OrderStatus.PAID) || refunded !== ticketsOfOrders(event._id, OrderStatus.REFUNDED);
-	}).length;
-	check('invariant', 'tickets match their orders', ticketMismatch, 'event(s) where tickets differ from paid and refunded orders');
-
-	const cancelledNotRefunded = events.filter(
-		(event) => event.eventStatus === EventStatus.CANCELLED && ticketsOfOrders(event._id, OrderStatus.PAID) > 0,
-	).length;
-	check('invariant', 'a cancelled event has no paid order left', cancelledNotRefunded, 'cancelled event(s) with paid orders');
-
-	const usedWrong = events.filter((event) => {
-		const used = sum(snapshot.tickets, (row) => row.id === event._id && row.status === TicketStatus.USED);
-		return used > 0 && (event.eventStatus !== EventStatus.ENDED || event.startAt.getTime() > now.getTime());
-	}).length;
-	check('invariant', 'only events that already happened have checked-in tickets', usedWrong, 'event(s) with checked-in tickets that did not happen yet');
-
-	const noSalesEvents = events.filter(
+	const ticketMismatch = offenders(
+		events.filter(
+			(event) =>
+				liveTicketsOf(event._id) !== ticketsOfOrders(event._id, OrderStatus.PAID) ||
+				ticketCounts(event._id).refunded !== ticketsOfOrders(event._id, OrderStatus.REFUNDED),
+		),
 		(event) =>
-			[EventStatus.DRAFT, EventStatus.PENDING, EventStatus.REJECTED].includes(event.eventStatus) &&
-			(snapshot.orders.some((row) => row.id === event._id) || ticketTypesOf(event._id).some((type) => type.soldQuantity > 0)),
-	).length;
-	check('invariant', 'drafts, pending and rejected events have no sales', noSalesEvents, 'event(s) with sales that were never approved');
+			`live tickets ${liveTicketsOf(event._id)} vs paid-order tickets ${ticketsOfOrders(event._id, OrderStatus.PAID)}, ` +
+			`refunded tickets ${ticketCounts(event._id).refunded} vs refunded-order tickets ${ticketsOfOrders(event._id, OrderStatus.REFUNDED)}`,
+	);
+	check('invariant', 'tickets match their orders', ticketMismatch.count, 'event(s) where tickets differ from paid and refunded orders', 'ok', ticketMismatch.lines);
+
+	const cancelledNotRefunded = offenders(
+		events.filter((event) => event.eventStatus === EventStatus.CANCELLED && ticketsOfOrders(event._id, OrderStatus.PAID) > 0),
+		(event) => `tickets on paid orders ${ticketsOfOrders(event._id, OrderStatus.PAID)}`,
+	);
+	check('invariant', 'a cancelled event has no paid order left', cancelledNotRefunded.count, 'cancelled event(s) with paid orders', 'ok', cancelledNotRefunded.lines);
+
+	const usedWrong = offenders(
+		events.filter((event) => ticketCounts(event._id).used > 0 && (event.eventStatus !== EventStatus.ENDED || event.startAt.getTime() > now.getTime())),
+		(event) => `checked-in tickets ${ticketCounts(event._id).used}, starts ${event.startAt.toISOString()}`,
+	);
+	check('invariant', 'only events that already happened have checked-in tickets', usedWrong.count, 'event(s) with checked-in tickets that did not happen yet', 'ok', usedWrong.lines);
+
+	const noSalesEvents = offenders(
+		events.filter(
+			(event) =>
+				[EventStatus.DRAFT, EventStatus.PENDING, EventStatus.REJECTED].includes(event.eventStatus) &&
+				(snapshot.orders.some((row) => row.id === event._id) || ticketTypesOf(event._id).some((type) => type.soldQuantity > 0)),
+		),
+		(event) => `orders ${sum(snapshot.orders, (row) => row.id === event._id)}, soldQuantity ${soldOf(event._id)}`,
+	);
+	check('invariant', 'drafts, pending and rejected events have no sales', noSalesEvents.count, 'event(s) with sales that were never approved', 'ok', noSalesEvents.lines);
 
 	// dates
-	const staleApproved = events.filter((event) => event.eventStatus === EventStatus.APPROVED && event.endAt.getTime() <= now.getTime()).length;
-	const earlyEnded = events.filter((event) => event.eventStatus === EventStatus.ENDED && event.endAt.getTime() > now.getTime()).length;
-	check('invariant', 'event dates agree with their status', staleApproved + earlyEnded, 'event(s) whose dates and status disagree');
+	const dateWrong = offenders(
+		events.filter(
+			(event) =>
+				(event.eventStatus === EventStatus.APPROVED && event.endAt.getTime() <= now.getTime()) ||
+				(event.eventStatus === EventStatus.ENDED && event.endAt.getTime() > now.getTime()),
+		),
+		(event) => `ends ${event.endAt.toISOString()}, checked at ${now.toISOString()}`,
+	);
+	check('invariant', 'event dates agree with their status', dateWrong.count, 'event(s) whose dates and status disagree', 'ok', dateWrong.lines);
 
 	// money
 	check('invariant', 'order amounts and commissions are right', snapshot.badMoneyOrders, 'order(s) with a wrong total or commission');
@@ -189,50 +238,101 @@ export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 	}).length;
 	check('invariant', 'no order was sold at a lower commission than the organizer earned', finalTierWrong, 'organizer(s) with a too low commission');
 
-	const eventById = new Map(events.map((event) => [event._id, event]));
 	const badPayouts = snapshot.payouts.filter(
 		(payout) => payout.net !== payout.gross - payout.commission || payout.net < 1 || payout.eventStatus !== EventStatus.ENDED || !eventById.has(payout.eventId),
 	).length;
 	check('invariant', 'payout records add up and belong to finished events', badPayouts, 'payout(s) that do not add up');
 
 	// counters of social records
-	const likeMismatch = events.filter((event) => event.eventLikes !== countFor(snapshot.eventLikes, event._id)).length;
-	const viewMismatch = events.filter((event) => event.eventViews !== countFor(snapshot.eventViews, event._id)).length;
-	const commentMismatch = events.filter((event) => event.eventComments !== countFor(snapshot.activeComments, event._id)).length;
-	check('invariant', 'event like, view and comment counters match their records', likeMismatch + viewMismatch + commentMismatch, 'counter(s) that differ from the records');
+	const socialDiffs = (event: SnapEvent): string[] =>
+		[
+			['likes', event.eventLikes, countFor(snapshot.eventLikes, event._id)],
+			['views', event.eventViews, countFor(snapshot.eventViews, event._id)],
+			['comments', event.eventComments, countFor(snapshot.activeComments, event._id)],
+		]
+			.filter(([, counter, records]) => counter !== records)
+			.map(([name, counter, records]) => `${name} counter ${counter} vs ${records} records`);
+	const socialWrong = events.filter((event) => socialDiffs(event).length);
+	check(
+		'invariant',
+		'event like, view and comment counters match their records',
+		socialWrong.reduce((total, event) => total + socialDiffs(event).length, 0),
+		'counter(s) that differ from the records',
+		'ok',
+		socialWrong.slice(0, MAX_LINES).map((event) => `${label(event)}: ${socialDiffs(event).join(', ')}`),
+	);
 
-	const memberMismatch = members.filter(
-		(member) =>
-			member.memberLikes !== countFor(snapshot.memberLikes, member._id) ||
-			member.memberViews !== countFor(snapshot.memberViews, member._id) ||
-			member.memberFollowers !== countFor(snapshot.followers, member._id) ||
-			member.memberFollowings !== countFor(snapshot.followings, member._id),
-	).length;
-	check('invariant', 'member like, view and follow counters match their records', memberMismatch, 'member(s) with a counter that differs from the records');
+	const memberDiffs = (member: SnapMember): string[] =>
+		[
+			['likes', member.memberLikes, countFor(snapshot.memberLikes, member._id)],
+			['views', member.memberViews, countFor(snapshot.memberViews, member._id)],
+			['followers', member.memberFollowers, countFor(snapshot.followers, member._id)],
+			['followings', member.memberFollowings, countFor(snapshot.followings, member._id)],
+		]
+			.filter(([, counter, records]) => counter !== records)
+			.map(([name, counter, records]) => `${name} counter ${counter} vs ${records} records`);
+	const memberMismatch = members.filter((member) => memberDiffs(member).length);
+	check(
+		'invariant',
+		'member like, view and follow counters match their records',
+		memberMismatch.length,
+		'member(s) with a counter that differs from the records',
+		'ok',
+		memberMismatch.slice(0, MAX_LINES).map((member) => `member ${member._id} [${member.memberType}]: ${memberDiffs(member).join(', ')}`),
+	);
 
+	const expectedCounters = (member: SnapMember) => {
+		const own = events.filter((event) => event.organizerId === member._id);
+		return { events: own.filter((event) => event.eventStatus !== EventStatus.CANCELLED).length, completed: own.filter((event) => event.eventStatus === EventStatus.ENDED).length };
+	};
 	const organizerCounters = members.filter((member) => {
 		if (member.memberType !== MemberType.ORGANIZER) return false;
-		const own = events.filter((event) => event.organizerId === member._id);
-		const created = own.filter((event) => event.eventStatus !== EventStatus.CANCELLED).length;
-		return member.memberEvents !== created || member.completedEvents !== own.filter((event) => event.eventStatus === EventStatus.ENDED).length;
-	}).length;
-	check('invariant', 'organizer event counters match their events', organizerCounters, 'organizer(s) with a wrong memberEvents or completedEvents');
+		const expected = expectedCounters(member);
+		return member.memberEvents !== expected.events || member.completedEvents !== expected.completed;
+	});
+	check(
+		'invariant',
+		'organizer event counters match their events',
+		organizerCounters.length,
+		'organizer(s) with a wrong memberEvents or completedEvents',
+		'ok',
+		organizerCounters.slice(0, MAX_LINES).map((member) => {
+			const expected = expectedCounters(member);
+			return `organizer ${member._id}: memberEvents ${member.memberEvents} vs ${expected.events}, completedEvents ${member.completedEvents} vs ${expected.completed}`;
+		}),
+	);
 
 	// ranks, as the batch job computes them
-	const rankWrong =
-		events.filter((event) => event.eventStatus === EventStatus.APPROVED && event.eventRank !== event.eventLikes * 2 + event.eventViews).length +
-		members.filter(
-			(member) =>
-				member.memberType === MemberType.ORGANIZER &&
-				member.memberStatus === MemberStatus.ACTIVE &&
-				member.memberRank !== member.memberEvents * 5 + member.memberLikes * 2 + member.memberViews,
-		).length;
-	check('invariant', 'ranks are the ones the rank job computes', rankWrong, 'rank(s) that differ from the rank formula');
+	const eventRankWrong = events.filter((event) => event.eventStatus === EventStatus.APPROVED && event.eventRank !== event.eventLikes * 2 + event.eventViews);
+	const memberRankWrong = members.filter(
+		(member) =>
+			member.memberType === MemberType.ORGANIZER &&
+			member.memberStatus === MemberStatus.ACTIVE &&
+			member.memberRank !== member.memberEvents * 5 + member.memberLikes * 2 + member.memberViews,
+	);
+	check(
+		'invariant',
+		'ranks are the ones the rank job computes',
+		eventRankWrong.length + memberRankWrong.length,
+		'rank(s) that differ from the rank formula',
+		'ok',
+		[
+			...eventRankWrong.slice(0, MAX_LINES).map((event) => `${label(event)}: eventRank ${event.eventRank} vs ${event.eventLikes * 2 + event.eventViews}`),
+			...memberRankWrong.slice(0, MAX_LINES).map((member) => `organizer ${member._id}: memberRank ${member.memberRank} vs ${member.memberEvents * 5 + member.memberLikes * 2 + member.memberViews}`),
+		],
+	);
 
-	const unreadWrong = snapshot.conversations.filter(
-		(row) => row.unreadForOrganizer !== row.unreadFromAdmin || row.unreadForAdmin !== row.unreadFromOrganizer,
-	).length;
-	check('invariant', 'chat unread counters match the unread messages', unreadWrong, 'conversation(s) with a wrong unread counter');
+	const unreadWrong = snapshot.conversations.filter((row) => row.unreadForOrganizer !== row.unreadFromAdmin || row.unreadForAdmin !== row.unreadFromOrganizer);
+	check(
+		'invariant',
+		'chat unread counters match the unread messages',
+		unreadWrong.length,
+		'conversation(s) with a wrong unread counter',
+		'ok',
+		unreadWrong
+			.slice(0, MAX_LINES)
+			.map((row) => `conversation ${row.id}: for organizer ${row.unreadForOrganizer} vs ${row.unreadFromAdmin} unread from admin, for admin ${row.unreadForAdmin} vs ${row.unreadFromOrganizer} unread from organizer`),
+	);
 
 	// coverage: what the seed is meant to create
 	const buyers = members.filter((member) => member.memberType === MemberType.USER).length;
@@ -285,9 +385,14 @@ export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 	return findings;
 };
 
-/** the report: counts only, one line per rule */
+/** the report: one line per rule, and under a failing rule the offending records with the numbers compared */
 export const formatFindings = (findings: Finding[]): string =>
-	findings.map((finding) => `  ${finding.ok ? 'ok  ' : finding.kind === 'coverage' ? 'warn' : 'FAIL'}  ${finding.name}: ${finding.detail}`).join('\n');
+	findings
+		.map((finding) => {
+			const head = `  ${finding.ok ? 'ok  ' : finding.kind === 'coverage' ? 'warn' : 'FAIL'}  ${finding.name}: ${finding.detail}`;
+			return [head, ...(finding.lines ?? []).map((line) => `        - ${line}`)].join('\n');
+		})
+		.join('\n');
 
 export const getInvariantFailures = (findings: Finding[], includeCoverage = false): Finding[] =>
 	findings.filter((finding) => !finding.ok && (finding.kind === 'invariant' || includeCoverage));

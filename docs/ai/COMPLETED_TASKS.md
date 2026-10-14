@@ -630,3 +630,17 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
   - Expected run time is an estimate, not a measurement.
   - Nothing committed.
 
+
+## Demo consistency failures: cancelled event counters (decision #110)
+
+- **What changed:**
+  - **Cause:** the one cancelled reserved event of the demo plan. `RefundService.processRefund` did not call `releaseStock` for a cancelled event, so its seats stayed SOLD and `soldQuantity` stayed high while its orders and tickets were refunded. It was a **production bug** (the cancel path), not a seed artifact; #56 had documented "nothing goes back on sale" and conflicted with the counter rules of #108.
+  - **Fix (production behaviour changed):** `refund.service.ts` now releases seats and stock for every refund, once per refund (`stockReleased` claim).
+  - **Check output:** `libs/demo-consistency.ts` `Finding.lines` and `formatFindings` list the offending events (id, title, status) with the numbers compared (soldQuantity per ticket type, tickets on paid and refunded orders, sold seats, live and refunded tickets) for the stock, seat, ticket, cancelled, checked-in, sales, dates, social counter, member counter, organizer counter, rank and chat rules; capped at 20 lines per rule. `demo-snapshot.ts` adds the event title. No rule was changed, weakened or removed.
+- **Tests:** `refund.service.spec.ts`: the cancelled-event tests now expect seats AVAILABLE and `soldQuantity` 0, new regression test for a reserved and a general event including a re-run; `demo-consistency.spec.ts`: offender lines with the numbers (the cancelled-event case), no lines when passing, cap of 20.
+- **Checks:** `tsc` (api and batch), `npm run build` and `npm run test` pass: 61 suites, 1,177 tests. `npm run lint` not run (it rewrites files).
+- **Decision:** #110.
+- **Not done / risks:**
+  - Not run against MongoDB (no `.env` read). That the cancelled event was the offender is inferred from the code and the numbers (56 events, one cancelled with sales, reserved venue); `check:demo` after a reseed confirms it.
+  - Data already cancelled in a database keeps its old counters; reseed to repair demo data.
+  - Nothing committed.

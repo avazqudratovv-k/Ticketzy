@@ -34,7 +34,7 @@ Three commands (decisions #62 and #108). The data is fictional and its dates are
 |---|---|
 | `npm run seed:demo` | creates 10 organizer accounts, 50 buyers, 10 venues, 56 events (concerts, football, comedy, other, in en/ko/ru/uz), several hundred orders with tickets, refunds, check-ins and payouts, likes, follows, views, comments, chats, notifications and audit entries, through the real services, then runs the consistency check. Prints counts only |
 | `npm run reset:demo` | removes exactly the records the seed tracked, and what hangs off them. Other data is never touched |
-| `npm run check:demo` | read only: compares every counter with its records, and lists probable QA or test data that is not part of the seed (it only reports) |
+| `npm run check:demo` | read only: compares every counter with its records (a failing rule lists the offending events with their ids, titles and the numbers compared), and lists probable QA or test data that is not part of the seed (it only reports) |
 
 Safety rules: the seed and the reset do nothing unless `DEMO_SEED_CONFIRM` is set to the name of the database variable in use (`MONGO_DEV`, or `MONGO_PROD`); with `NODE_ENV=production` they also need `ALLOW_DEMO_SEED=true`; a database that holds data the seed did not create (ADMIN accounts excepted) is refused unless `DEMO_SEED_ALLOW_NON_DEMO_DB=true`. It needs an existing admin (`npm run seed`) and four strong passwords (12+ characters, three kinds of characters, no common words): `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD`. A missing or weak one stops the run with its name.
 

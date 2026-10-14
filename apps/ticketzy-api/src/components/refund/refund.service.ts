@@ -29,7 +29,7 @@ interface Assessment {
 	reason?: Message;
 	deadline: Date;
 	venueTimezone: string;
-	/** the event was cancelled: every ticket is refunded and nothing goes back on sale */
+	/** the event was cancelled: every ticket is refunded, USED ones too, and the deadline does not apply */
 	cancelled: boolean;
 	pastDeadline: boolean;
 }
@@ -247,7 +247,7 @@ export class RefundService {
 			await this.markTicketsRefunded(order, flipped, assessment.cancelled);
 			await this.paymentService.refundOrder(order._id);
 			paymentRefunded = true;
-			if (!assessment.cancelled) await this.releaseStock(order, refund);
+			await this.releaseStock(order, refund);
 
 			const done = await this.orderModel
 				.findOneAndUpdate(
@@ -342,7 +342,8 @@ export class RefundService {
 
 	/**
 	 * Seats go back to AVAILABLE and soldQuantity drops (which also lifts SOLD_OUT), once per refund: the flag on the
-	 * Refund is claimed in one conditional update first, and given back if releasing fails.
+	 * Refund is claimed in one conditional update first, and given back if releasing fails. This also holds for a cancelled
+	 * event (#110): its counters follow its PAID orders. Nothing can be bought there, only APPROVED events sell.
 	 */
 	private async releaseStock(order: Order, refund: Refund): Promise<void> {
 		const claimed = await this.refundModel

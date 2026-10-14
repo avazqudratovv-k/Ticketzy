@@ -118,6 +118,7 @@ export const loadDemoSnapshot = async (models: DemoMongoModels, now: Date = new 
 		venueCount: await models.venue.countDocuments({ _id: { $in: venueIds } }).exec(),
 		events: events.map((event) => ({
 			_id: str(event._id),
+			title: event.eventTitle,
 			organizerId: str(event.organizerId),
 			eventStatus: event.eventStatus,
 			eventLikes: event.eventLikes ?? 0,

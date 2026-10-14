@@ -162,6 +162,40 @@ describe('demo consistency check', () => {
 		expect(formatFindings(findings)).toMatch(/warn {2}/);
 	});
 
+	it('names the offending event and the numbers compared (the cancelled reserved event of the first real run)', () => {
+		const snapshot = good();
+		snapshot.events.push({ ...snapshot.events[1], _id: 'cancelled1', title: 'Winter Choir', eventStatus: EventStatus.CANCELLED, cancelReason: 'ill', eventLikes: 0, eventViews: 0, eventComments: 0, eventRank: 0 });
+		snapshot.ticketTypes.push({ eventId: 'cancelled1', totalQuantity: 10, soldQuantity: 2, ticketTypeStatus: TicketTypeStatus.ACTIVE });
+		snapshot.orders.push({ id: 'cancelled1', status: OrderStatus.REFUNDED, count: 1, tickets: 2 });
+		snapshot.seats.push({ id: 'cancelled1', status: 'SOLD', count: 2 });
+		snapshot.tickets.push({ id: 'cancelled1', status: TicketStatus.REFUNDED, count: 2 });
+
+		const findings = evaluateDemoConsistency(snapshot);
+		const stock = findings.find((finding) => finding.name === 'sold counters equal the tickets of paid orders');
+		const seats = findings.find((finding) => finding.name === 'sold seats equal the live tickets and the paid orders');
+		expect(stock?.ok).toBe(false);
+		expect(stock?.lines).toEqual(['cancelled1 "Winter Choir" [CANCELLED]: soldQuantity 2 (per ticket type: 2), tickets on paid orders 0, on refunded orders 2']);
+		expect(seats?.lines).toEqual([
+			'cancelled1 "Winter Choir" [CANCELLED]: sold seats 2, live tickets (valid or used) 0, tickets on paid orders 0, refunded tickets 2, soldQuantity 2',
+		]);
+		const text = formatFindings(findings);
+		expect(text).toContain('FAIL  sold counters equal the tickets of paid orders: 1 event(s)');
+		expect(text).toContain('        - cancelled1 "Winter Choir"');
+		expect(failing(snapshot)).toEqual(['sold counters equal the tickets of paid orders', 'sold seats equal the live tickets and the paid orders']);
+	});
+
+	it('lists no lines for a passing rule, and caps the lines of a failing one', () => {
+		expect(evaluateDemoConsistency(good()).every((finding) => !finding.lines)).toBe(true);
+		const snapshot = good();
+		for (let i = 0; i < 30; i++) {
+			snapshot.events.push({ ...snapshot.events[1], _id: `e${i}`, title: `Event ${i}`, eventLikes: 0, eventViews: 0, eventComments: 0, eventRank: 0 });
+			snapshot.ticketTypes.push({ eventId: `e${i}`, totalQuantity: 10, soldQuantity: 1, ticketTypeStatus: TicketTypeStatus.ACTIVE });
+		}
+		const stock = evaluateDemoConsistency(snapshot).find((finding) => finding.name === 'sold counters equal the tickets of paid orders');
+		expect(stock?.detail).toBe('30 event(s) where soldQuantity differs from the paid orders');
+		expect(stock?.lines).toHaveLength(20);
+	});
+
 	it('prints counts and names only', () => {
 		const text = formatFindings(evaluateDemoConsistency(good()));
 		expect(text).not.toMatch(/mongodb|password|token/i);

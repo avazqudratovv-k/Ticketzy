@@ -487,13 +487,13 @@ describe('RefundService', () => {
 		const cancelled = () => build({ eventStatus: EventStatus.CANCELLED });
 		const eventOf = (ctx: ReturnType<typeof build>) => ctx.events.docs[0] as any;
 
-		it('refunds every PAID order, leaves seats and stock alone, notifies buyers and organizer, and audits', async () => {
+		it('refunds every PAID order, releases seats and stock (#110), notifies buyers and organizer, and audits', async () => {
 			const ctx = cancelled();
 			const a = await ctx.addPaidOrder(2);
 			const b = await ctx.addPaidOrder(1, OTHER_BUYER);
 			ctx.tickets.docs[0].ticketStatus = TicketStatus.USED; // even a checked-in ticket is refunded when the event is cancelled
 			const pending = await ctx.orders.create({ ...ctx.orderOf(a._id), _id: oid(), orderStatus: OrderStatus.PENDING_PAYMENT });
-			const soldBefore = ctx.sold();
+			expect(ctx.sold()).toBe(3);
 
 			const summary = await ctx.service.refundOrdersForCancelledEvent(ADMIN as any, eventOf(ctx));
 
@@ -506,10 +506,10 @@ describe('RefundService', () => {
 			expect(ctx.refunds.docs[0].reason).toBe('Artist is ill');
 			expect(ctx.providerRefund).toHaveBeenCalledTimes(2);
 
-			// nothing goes back on sale
-			expect(ctx.seats.docs.every((s) => s.seatStatus === SeatStatus.SOLD)).toBe(true);
-			expect(ctx.sold()).toBe(soldBefore);
-			expect(ctx.refunds.docs.every((r) => !r.stockReleased)).toBe(true);
+			// the counters follow the PAID orders (none are left), as for any other refund (#110)
+			expect(ctx.seats.docs.every((s) => s.seatStatus === SeatStatus.AVAILABLE)).toBe(true);
+			expect(ctx.sold()).toBe(0);
+			expect(ctx.refunds.docs.every((r) => r.stockReleased === true)).toBe(true);
 
 			const calls = ctx.notificationService.createNotification.mock.calls.map(([n]) => n);
 			const buyers = calls.filter((n) => n.notificationType === NotificationType.REFUND_COMPLETED).map((n) => String(n.receiverId));
@@ -576,6 +576,22 @@ describe('RefundService', () => {
 			expect(ctx.providerRefund).toHaveBeenCalledTimes(120);
 		});
 
+		it('regression #110: a reserved and a general-admission cancelled event end with sold counters equal to their PAID orders, and a re-run releases nothing twice', async () => {
+			for (const seating of [SeatingType.RESERVED, SeatingType.GENERAL]) {
+				const ctx = build({ eventStatus: EventStatus.CANCELLED, seating });
+				await ctx.addPaidOrder(2);
+				await ctx.addPaidOrder(3, OTHER_BUYER);
+				expect(ctx.sold()).toBe(5);
+
+				await ctx.service.refundOrdersForCancelledEvent(ADMIN as any, eventOf(ctx));
+				await ctx.service.refundOrdersForCancelledEvent(ADMIN as any, eventOf(ctx));
+
+				expect(ctx.orders.docs.filter((o) => o.orderStatus === OrderStatus.PAID)).toHaveLength(0);
+				expect(ctx.sold()).toBe(0);
+				expect(ctx.seats.docs.filter((s) => s.seatStatus === SeatStatus.SOLD)).toHaveLength(0);
+			}
+		});
+
 		it('a failed order that keeps failing does not stop the loop from ending', async () => {
 			const ctx = cancelled();
 			for (let i = 0; i < 3; i++) await ctx.addPaidOrder(1);
@@ -634,11 +650,12 @@ describe('RefundService', () => {
 			expect(ctx.orderOf(order._id).orderStatus).toBe(OrderStatus.PAID);
 		});
 
-		it('a buyer can also finish their own refund on a cancelled event, past any deadline, without releasing seats', async () => {
+		it('a buyer can also finish their own refund on a cancelled event, past any deadline, and releases the seats', async () => {
 			const ctx = build({ eventStatus: EventStatus.CANCELLED, startAt: new Date(Date.now() - 86400000) });
 			const order = await ctx.addPaidOrder(1);
 			await expect(ctx.service.requestRefund(BUYER as any, order._id)).resolves.toMatchObject({ orderStatus: OrderStatus.REFUNDED });
-			expect(ctx.seats.docs[0].seatStatus).toBe(SeatStatus.SOLD);
+			expect(ctx.seats.docs[0].seatStatus).toBe(SeatStatus.AVAILABLE);
+			expect(ctx.sold()).toBe(0);
 		});
 	});
 
