@@ -33,8 +33,12 @@ describe('ai:check', () => {
 		expect(out).not.toContain('embed-1');
 		expect(out).toContain('GEMINI_API_KEY: set');
 		expect(out).toContain('tiny request: OK in 125 ms');
-		expect(out).toContain('assistant request (system prompt, tools, tool result): OK in');
-		expect(out).toContain('moderation request (JSON answer): OK in');
+		// the default run sends one tiny request per model, not the three real-shaped ones
+		expect(out).not.toContain('assistant request');
+		expect(out).not.toContain('moderation request');
+		expect(out).toContain('Quick check: 1 model(s) x 1 tiny request = 1 requests this run.');
+		expect(out).toContain('Requests sent to Google this run: 1.');
+		expect(generate).toHaveBeenCalledTimes(1);
 		expect(out).not.toContain(KEY);
 		// the key travels in a header, not in the URL
 		expect(fetchFn.mock.calls[0][0]).not.toContain(KEY);
@@ -89,13 +93,59 @@ describe('ai:check', () => {
 
 	it('only says set / not set for the key, and warns about a fallback that is not listed', async () => {
 		const generate = jest.fn().mockResolvedValue({ text: 'hi', model: 'm' });
-		const { out } = await run(env({ GEMINI_FALLBACK_MODEL: 'gemini-nope' }), listing('gemini-2.5-flash'), generate);
-		expect(out).toContain('WARNING: GEMINI_FALLBACK_MODEL "gemini-nope" is not in the list');
+		const { out } = await run(env({ GEMINI_FALLBACK_MODELS: 'gemini-nope' }), listing('gemini-2.5-flash'), generate);
+		expect(out).toContain('WARNING: fallback model "gemini-nope" (GEMINI_FALLBACK_MODELS) is not in the list');
 	});
 
 	it('helpers', () => {
 		expect(closestModels('gemini-3-flash', ['gpt', 'gemini-3-flash-preview', 'gemini-2-flash'], 2)).toEqual(['gemini-3-flash-preview', 'gemini-2-flash']);
 		expect(explainStatus(undefined)).toContain('network');
+	});
+});
+
+describe('ai:check: chain and --full', () => {
+	const mk = (calls: string[]) => (c: any) =>
+		({
+			name: 'gemini',
+			generateText: jest.fn().mockImplementation(async () => (calls.push(`${c.model}:text`), { text: 'hi', model: c.model })),
+			generateJson: jest.fn().mockImplementation(async () => (calls.push(`${c.model}:json`), { data: {}, model: c.model })),
+			chat: jest.fn().mockImplementation(async () => (calls.push(`${c.model}:chat`), { text: 'ok', toolCalls: [], model: c.model, assistantMessage: { role: 'assistant', text: '' } })),
+		}) as any;
+	const listFails = jest.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) });
+
+	it('sends one tiny request to the primary and to every fallback by default and says so', async () => {
+		const calls: string[] = [];
+		const lines: string[] = [];
+		const code = await runAiCheck(env({ GEMINI_MODEL: 'p', GEMINI_FALLBACK_MODELS: 'f1,f2' }), { fetchFn: listFails, createProvider: mk(calls) }, (l) => lines.push(l));
+		const out = lines.join('\n');
+		expect(code).toBe(0);
+		expect(calls).toEqual(['p:text', 'f1:text', 'f2:text']);
+		expect(out).toContain('GEMINI_FALLBACK_MODELS: f1, f2');
+		expect(out).toContain('Quick check: 3 model(s) x 1 tiny request = 3 requests this run.');
+		expect(out).toContain('npm run ai:check -- --full');
+		expect(out).toContain('Checking the fallback 2 model f2:');
+		expect(out).toContain('Requests sent to Google this run: 3.');
+		expect(out).not.toContain(KEY);
+	});
+
+	it('sends the three real-shaped requests per model only with --full and counts the real calls', async () => {
+		const calls: string[] = [];
+		const lines: string[] = [];
+		const code = await runAiCheck(env({ GEMINI_MODEL: 'p', GEMINI_FALLBACK_MODELS: 'f1' }), { fetchFn: listFails, createProvider: mk(calls), full: true }, (l) => lines.push(l));
+		const out = lines.join('\n');
+		expect(code).toBe(0);
+		expect(calls).toEqual(['p:text', 'p:chat', 'p:json', 'f1:text', 'f1:chat', 'f1:json']);
+		expect(out).toContain('Full check: 2 model(s) x 3 requests = 6 requests this run');
+		expect(out).toContain('Requests sent to Google this run: 6.');
+	});
+
+	it('exits 1 when one model of the chain fails and still checks the others', async () => {
+		const lines: string[] = [];
+		const create = (c: any) => ({ name: 'gemini', generateText: jest.fn().mockImplementation(async () => { if (c.model === 'p') throw new AiProviderError('failed', 429); return { text: 'hi', model: c.model }; }) }) as any;
+		const code = await runAiCheck(env({ GEMINI_MODEL: 'p', GEMINI_FALLBACK_MODELS: 'f1' }), { fetchFn: listFails, createProvider: create }, (l) => lines.push(l));
+		expect(code).toBe(1);
+		expect(lines.join('\n')).toContain('quota (429)');
+		expect(lines.join('\n')).toContain('tiny request: OK');
 	});
 });
 
@@ -116,11 +166,11 @@ describe('ai:check: real-shaped requests', () => {
 				return { text: 'ok', toolCalls: seen.filter((s) => s.kind === 'chat' && s.model === model).length === 1 ? [{ id: 'call_0', name: 'get_refund_policy', args: {} }] : [], model, assistantMessage: { role: 'assistant', text: '' } };
 			}),
 		});
-		const code = await runAiCheck(env({ GEMINI_MODEL: 'primary-m', GEMINI_FALLBACK_MODEL: 'fallback-m' }), { fetchFn: jest.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }), createProvider: (c) => mk(c.model) as any }, (l) => lines.push(l));
+		const code = await runAiCheck(env({ GEMINI_MODEL: 'primary-m', GEMINI_FALLBACK_MODELS: 'fallback-m' }), { fetchFn: jest.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({}) }), createProvider: (c) => mk(c.model) as any, full: true }, (l) => lines.push(l));
 		const out = lines.join('\n');
 		expect(code).toBe(1);
 		expect(out).toContain('Checking the primary model primary-m:');
-		expect(out).toContain('Checking the fallback model fallback-m:');
+		expect(out).toContain('Checking the fallback 1 model fallback-m:');
 		expect(out).toContain('FAILED after');
 		expect(out).toContain('[Google said: INVALID_ARGUMENT: bad option]');
 		expect(out).not.toContain(KEY);

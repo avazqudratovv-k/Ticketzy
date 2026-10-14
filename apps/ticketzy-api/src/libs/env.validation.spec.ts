@@ -1,4 +1,4 @@
-import { DEFAULT_SEAT_HOLD_SECONDS, getAiConfig, getPaymentMode, getSeatHoldSeconds, parsePaymentMode, parseSeatHoldSeconds, validateEnv } from './env.validation';
+import { DEFAULT_SEAT_HOLD_SECONDS, getAiConfig, getAiStartupWarnings, getPaymentMode, getSeatHoldSeconds, parsePaymentMode, parseSeatHoldSeconds, validateEnv } from './env.validation';
 
 describe('SEAT_HOLD_SECONDS', () => {
 	it('defaults to 30 when unset or blank', () => {
@@ -25,13 +25,39 @@ describe('SEAT_HOLD_SECONDS', () => {
 	});
 });
 
+describe('GEMINI_FALLBACK_MODELS (#115)', () => {
+	const gem = (extra: Record<string, string>) => getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_MODEL: 'a', ...extra }).fallbackModels;
+	it('reads a comma separated list in order, trimmed, without empty items, repeats or the main model', () => {
+		expect(gem({ GEMINI_FALLBACK_MODELS: ' b , c,d ' })).toEqual(['b', 'c', 'd']);
+		expect(gem({ GEMINI_FALLBACK_MODELS: 'b,,c,' })).toEqual(['b', 'c']);
+		expect(gem({ GEMINI_FALLBACK_MODELS: 'b,a,b' })).toEqual(['b']);
+	});
+	it('keeps the deprecated GEMINI_FALLBACK_MODEL working as a one item list, and the list wins when both are set', () => {
+		expect(gem({ GEMINI_FALLBACK_MODEL: ' b ' })).toEqual(['b']);
+		expect(gem({ GEMINI_FALLBACK_MODEL: 'a' })).toEqual([]);
+		expect(gem({ GEMINI_FALLBACK_MODEL: 'b', GEMINI_FALLBACK_MODELS: 'c,d' })).toEqual(['c', 'd']);
+		expect(() => gem({ GEMINI_FALLBACK_MODEL: 'x y' })).toThrow('GEMINI_FALLBACK_MODEL');
+	});
+	it('is empty when unset or blank, and ignored for anthropic', () => {
+		expect(gem({})).toEqual([]);
+		expect(gem({ GEMINI_FALLBACK_MODELS: '  ' })).toEqual([]);
+		expect(getAiConfig({ AI_PROVIDER: 'anthropic', GEMINI_FALLBACK_MODELS: 'b' }).fallbackModels).toEqual([]);
+	});
+	it('refuses more than 3 models and a bad name, naming the variable only', () => {
+		expect(gem({ GEMINI_FALLBACK_MODELS: 'b,c,d' })).toHaveLength(3);
+		expect(() => gem({ GEMINI_FALLBACK_MODELS: 'b,c,d,e' })).toThrow('GEMINI_FALLBACK_MODELS can list at most 3 models');
+		expect(() => gem({ GEMINI_FALLBACK_MODELS: 'b,bad name' })).toThrow('GEMINI_FALLBACK_MODELS has an invalid model name');
+		expect(() => gem({ GEMINI_FALLBACK_MODELS: 'b,bad name' })).not.toThrow(/bad name/);
+	});
+	it('warns at startup (no key or model value) when only the deprecated variable is used', () => {
+		expect(getAiStartupWarnings({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'k', GEMINI_MODEL: 'm', GEMINI_FALLBACK_MODEL: 'secretish-name' }).join(' ')).toContain('GEMINI_FALLBACK_MODEL is deprecated');
+		expect(getAiStartupWarnings({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'k', GEMINI_MODEL: 'm', GEMINI_FALLBACK_MODEL: 'b', GEMINI_FALLBACK_MODELS: 'c' })).toEqual([]);
+	});
+});
+
 describe('AI settings', () => {
 	it('is off by default, the key is optional and the model is a small one', () => {
-		expect(getAiConfig({})).toEqual({ enabled: false, provider: 'anthropic', apiKey: '', model: 'claude-haiku-4-5', fallbackModel: '', timeoutMs: 15000, rateLimitPerMinute: 10 });
-		expect(getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_MODEL: 'a', GEMINI_FALLBACK_MODEL: ' b ' }).fallbackModel).toBe('b');
-		expect(getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_MODEL: 'a', GEMINI_FALLBACK_MODEL: 'a' }).fallbackModel).toBe('');
-		expect(getAiConfig({ GEMINI_FALLBACK_MODEL: 'b' }).fallbackModel).toBe('');
-		expect(() => getAiConfig({ AI_PROVIDER: 'gemini', GEMINI_FALLBACK_MODEL: 'x y' })).toThrow('GEMINI_FALLBACK_MODEL');
+		expect(getAiConfig({})).toEqual({ enabled: false, provider: 'anthropic', apiKey: '', model: 'claude-haiku-4-5', fallbackModels: [], timeoutMs: 15000, rateLimitPerMinute: 10 });
 		expect(getAiConfig({ AI_ENABLED: 'true', ANTHROPIC_API_KEY: ' k ', ANTHROPIC_MODEL: 'm' })).toMatchObject({ enabled: true, apiKey: 'k', model: 'm' });
 	});
 

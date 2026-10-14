@@ -122,8 +122,8 @@ describe('parseCorsOrigins', () => {
 });
 
 describe('the other settings', () => {
-	it('AI_DAILY_CAP defaults to 400, accepts 0 (AI off) and refuses junk', () => {
-		expect(getAiCaps({})).toEqual({ dailyCap: 400, perKeyDailyCap: 30 });
+	it('AI_DAILY_CAP defaults to 200 (and the per key cap to 10), accepts 0 (AI off) and refuses junk', () => {
+		expect(getAiCaps({})).toEqual({ dailyCap: 200, perKeyDailyCap: 10 });
 		expect(getAiCaps({ AI_DAILY_CAP: '0', AI_PER_KEY_DAILY_CAP: '5' })).toEqual({ dailyCap: 0, perKeyDailyCap: 5 });
 		expect(() => getAiCaps({ AI_DAILY_CAP: 'many' })).toThrow('AI_DAILY_CAP');
 	});

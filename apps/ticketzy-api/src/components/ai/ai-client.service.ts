@@ -26,6 +26,12 @@ export const AI_MAX_WAIT_MS = 40_000;
 /** an attempt with less time left than this is not started: it would only time out */
 export const AI_MIN_ATTEMPT_MS = 3_000;
 
+/**
+ * How long a model that answered 429 (free-tier quota is per model per day, it will not recover in minutes) is skipped
+ * without a network call (#115). Kept in this process' memory, like the other limiters.
+ */
+export const AI_QUOTA_COOLDOWN_MS = 30 * 60_000;
+
 /** the vendor said 503/504 (overloaded, gateway timeout) or our own per-request timeout hit: worth one more try */
 const isRetryableError = (err: unknown): boolean =>
 	err instanceof AiProviderError && (err.kind === 'timeout' || Number(err.status) === 503 || Number(err.status) === 504);
@@ -33,8 +39,11 @@ const isRetryableError = (err: unknown): boolean =>
 /** the user is told "busy": a retryable error, or 429 (quota) */
 const isBusyError = (err: unknown): boolean => isRetryableError(err) || (err instanceof AiProviderError && Number(err.status) === 429);
 
-/** 400 (request refused, often a model specific option), 404 (unknown model), 429, 500, 503, 504 and a timeout: the fallback model gets one try. Never 401/403 (key problems) */
-const FALLBACK_STATUSES = [400, 404, 429, 500, 503, 504];
+/** the vendor said 429: the quota of this model is used up (or it is rate limited) */
+const isQuotaError = (err: unknown): boolean => err instanceof AiProviderError && Number(err.status) === 429;
+
+/** 400 (request refused, often a model specific option), 404 (unknown model), 500, 503, 504 and a timeout: the next model gets one try. 429 skips at once, 401/403 (key problems) stop */
+const FALLBACK_STATUSES = [400, 404, 500, 503, 504];
 const isKeyError = (err: unknown): boolean => err instanceof AiProviderError && [401, 403].includes(Number(err.status));
 /** ok is logged by the caller; this is the outcome word of a failed attempt: timeout, status 503, invalid_response or failed */
 const outcomeOf = (err: unknown): string => {
@@ -56,6 +65,8 @@ export class AiClientService implements OnModuleInit {
 	private readonly providers = new Map<string, AiProvider>();
 	private limiter: RateLimiter | null = null;
 	private limiterSize = 0;
+	/** `provider:model` -> epoch ms until which the model is skipped because it answered 429 (Gemini only) */
+	private readonly quotaUntil = new Map<string, number>();
 
 	private lastCapRefusalLog = 0;
 
@@ -164,18 +175,20 @@ export class AiClientService implements OnModuleInit {
 	}
 
 	/**
-	 * One model call. The main model gets one retry (after 503/504/timeout, 1 second later); when it still fails with
-	 * 400/404/429/500/503/504/timeout and GEMINI_FALLBACK_MODEL is set, the fallback model gets exactly one try. All attempts
-	 * together stay inside the deadline (`request.deadlineAt`, or AI_MAX_WAIT_MS from now): no retry or fallback starts
-	 * when too little time is left. Every failure becomes a clear Message, with only the error type, status and model name
-	 * in the log (never the key or the prompt); every attempt logs model, duration and outcome.
+	 * One model call, through the chain of the main model and GEMINI_FALLBACK_MODELS in order (#115). The main model gets
+	 * one retry (after 503/504/timeout, 1 second later); every fallback gets one try. A failure with 400/404/500/503/504/timeout
+	 * moves on to the next model; a 429 (quota, per model per day) moves on at once, with no retry, and the model is skipped
+	 * without a network call for AI_QUOTA_COOLDOWN_MS; 401/403 stops the chain (the same key fails everywhere). All attempts
+	 * together stay inside the deadline (`request.deadlineAt`, or AI_MAX_WAIT_MS from now): no retry or next model starts
+	 * when too little time is left. When every model is out of quota the user gets AI_QUOTA_EXHAUSTED, other failures become
+	 * AI_BUSY or AI_REQUEST_FAILED. Only the error type, status and model name are logged (never the key or the prompt);
+	 * every attempt logs model, duration and outcome.
 	 */
 	private async run<R extends AiTextRequest, T>(request: R, call: (provider: AiProvider, attempt: R) => Promise<T>): Promise<T> {
 		const config = this.assertAvailable();
 		const deadline = request.deadlineAt ?? Date.now() + AI_MAX_WAIT_MS;
 		const timeLeft = () => deadline - Date.now();
-		let failure: unknown;
-		// every attempt at the vendor, including the retry and the fallback model, is one model call against the daily cap
+		// every attempt at the vendor, including the retry and each fallback model, is one model call against the daily cap
 		const metered = async (attemptConfig: AiConfig): Promise<T> => {
 			const timeoutMs = Math.min(attemptConfig.timeoutMs, timeLeft());
 			if (timeoutMs < AI_MIN_ATTEMPT_MS) throw new AiProviderError('timeout', undefined, 'DeadlineExceeded');
@@ -190,32 +203,67 @@ export class AiClientService implements OnModuleInit {
 				throw err;
 			}
 		};
-		try {
-			return await this.runWithRetry(() => metered(config), timeLeft);
-		} catch (err) {
-			if (err instanceof CodedException) throw err;
-			failure = err;
-			this.logFailure(config, config.model, err);
-		}
-		if (isKeyError(failure)) {
-			this.logger.error(`AI key rejected (status ${(failure as AiProviderError).status}): check the API key and its permissions; the fallback model is not tried because the same key would fail`);
-		} else if (config.fallbackModel && canFallBack(failure) && timeLeft() >= AI_MIN_ATTEMPT_MS) {
-			const fallback = { ...config, model: config.fallbackModel };
+
+		const chain = [config.model, ...config.fallbackModels];
+		const hasQuotaMarks = config.provider === 'gemini';
+		let failure: unknown;
+		let attempted = 0;
+		let outOfQuota = 0;
+		for (const [index, model] of chain.entries()) {
+			if (hasQuotaMarks && this.isOutOfQuota(config.provider, model)) {
+				outOfQuota++;
+				continue;
+			}
+			if (attempted > 0 && timeLeft() < AI_MIN_ATTEMPT_MS) break;
+			attempted++;
+			const attemptConfig = { ...config, model };
 			try {
-				const result = await metered(fallback);
-				this.logger.warn(`AI fallback model answered: provider=${config.provider} model=${fallback.model}`);
+				const result = index === 0 ? await this.runWithRetry(() => metered(attemptConfig), timeLeft) : await metered(attemptConfig);
+				if (index > 0) this.logger.warn(`AI fallback model answered: provider=${config.provider} model=${model}`);
 				return result;
 			} catch (err) {
 				if (err instanceof CodedException) throw err;
+				if (hasQuotaMarks && isQuotaError(err)) {
+					outOfQuota++;
+					this.markOutOfQuota(config.provider, model);
+					continue;
+				}
 				failure = err;
-				this.logFailure(config, fallback.model, err);
+				this.logFailure(config, model, err);
+				if (isKeyError(err)) {
+					this.logger.error(`AI key rejected (status ${(err as AiProviderError).status}): check the API key and its permissions; the other models are not tried because the same key would fail`);
+					break;
+				}
+				if (!canFallBack(err)) break;
 			}
+		}
+		// no real failure and nothing but quota answers or marks: every model in the chain is out of quota for today
+		if (failure === undefined && outOfQuota === chain.length) {
+			throw new CodedException(Message.AI_QUOTA_EXHAUSTED, 'AI_QUOTA_EXHAUSTED', 503);
 		}
 		if (failure instanceof AiProviderError) {
 			if (failure.kind === 'invalid_response') throw new BadRequestException(Message.AI_INVALID_RESPONSE);
 			if (isBusyError(failure)) throw new ServiceUnavailableException(Message.AI_BUSY);
 		}
+		// the budget ran out after some models were out of quota: busy, not broken
+		if (failure === undefined && outOfQuota > 0) throw new ServiceUnavailableException(Message.AI_BUSY);
 		throw new ServiceUnavailableException(Message.AI_REQUEST_FAILED);
+	}
+
+	/** true while the model is inside its quota cooldown; the first look after the cooldown clears the mark and logs it */
+	private isOutOfQuota(provider: string, model: string): boolean {
+		const key = `${provider}:${model}`;
+		const until = this.quotaUntil.get(key);
+		if (until === undefined) return false;
+		if (Date.now() < until) return true;
+		this.quotaUntil.delete(key);
+		this.logger.warn(`AI model quota cooldown ended, trying again: provider=${provider} model=${model}`);
+		return false;
+	}
+
+	private markOutOfQuota(provider: string, model: string): void {
+		this.quotaUntil.set(`${provider}:${model}`, Date.now() + AI_QUOTA_COOLDOWN_MS);
+		this.logger.warn(`AI model out of quota (429), skipped for ${AI_QUOTA_COOLDOWN_MS / 60_000} minutes: provider=${provider} model=${model}`);
 	}
 
 	/** one retry, 1 second later, after a 503/504 or a timeout, when the deadline leaves room for a useful attempt */
@@ -246,8 +294,8 @@ export class AiClientService implements OnModuleInit {
 		const key = `${config.provider}:${config.model}:${config.apiKey.length}:${config.apiKey.slice(-4)}:${config.timeoutMs}`;
 		let provider = this.providers.get(key);
 		if (!provider) {
-			// a changed key or setting makes a new provider; keep the map small (main + fallback)
-			if (this.providers.size >= 4) this.providers.clear();
+			// a changed key or setting makes a new provider; keep the map small (main + up to 3 fallbacks)
+			if (this.providers.size >= 8) this.providers.clear();
 			provider = this.createProvider(config);
 			this.providers.set(key, provider);
 		}

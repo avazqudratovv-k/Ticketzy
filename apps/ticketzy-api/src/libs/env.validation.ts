@@ -54,11 +54,13 @@ export interface AiConfig {
 	apiKey: string;
 	/** the model of the SELECTED provider only */
 	model: string;
-	/** GEMINI_FALLBACK_MODEL (gemini only): tried once when the main model fails; '' means no fallback */
-	fallbackModel: string;
+	/** GEMINI_FALLBACK_MODELS (gemini only, at most MAX_GEMINI_FALLBACK_MODELS, in order; the deprecated GEMINI_FALLBACK_MODEL is a one item list): [] means no fallback */
+	fallbackModels: string[];
 	timeoutMs: number;
 	rateLimitPerMinute: number;
 }
+
+export const MAX_GEMINI_FALLBACK_MODELS = 3;
 
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 
@@ -76,6 +78,21 @@ const PROVIDER_ENV: Record<AiProviderName, { key: string; model: string; default
 };
 
 /**
+ * GEMINI_FALLBACK_MODELS: comma separated, tried in this order after the main model (#115). Empty items are ignored, names
+ * equal to the main model or repeated are dropped, more than 3 names is an error (names only, no network call). When the list
+ * is empty the deprecated single GEMINI_FALLBACK_MODEL is used as a one item list; when both are set the list wins.
+ */
+const parseFallbackModels = (env: Record<string, any>, mainModel: string): string[] => {
+	const listRaw = String(env.GEMINI_FALLBACK_MODELS ?? '').trim();
+	const variable = listRaw ? 'GEMINI_FALLBACK_MODELS' : 'GEMINI_FALLBACK_MODEL';
+	const items = (listRaw || String(env.GEMINI_FALLBACK_MODEL ?? '')).split(',').map((item) => item.trim()).filter(Boolean);
+	if (items.length > MAX_GEMINI_FALLBACK_MODELS) throw new Error(`${variable} can list at most ${MAX_GEMINI_FALLBACK_MODELS} models`);
+	if (variable === 'GEMINI_FALLBACK_MODEL' && items.length > 1) throw new Error('GEMINI_FALLBACK_MODEL takes one model name, use GEMINI_FALLBACK_MODELS for a list');
+	for (const item of items) if (!MODEL_NAME_PATTERN.test(item)) throw new Error(`${variable} has an invalid model name`);
+	return [...new Set(items)].filter((item) => item !== mainModel);
+};
+
+/**
  * AI is off unless AI_ENABLED is true, and the API key is optional: a missing key only turns the AI operations off
  * (they answer with a clear message), it never stops the app from starting. AI_PROVIDER picks anthropic (default) or
  * gemini; only the variables of the selected provider are read and checked, the other provider's are ignored.
@@ -89,14 +106,13 @@ export const getAiConfig = (env: Record<string, any> = process.env): AiConfig =>
 	const names = PROVIDER_ENV[provider];
 	const model = String(env[names.model] ?? '').trim() || names.defaultModel;
 	if (!MODEL_NAME_PATTERN.test(model)) throw new Error(`${names.model} is not a valid model name`);
-	const fallbackRaw = provider === 'gemini' ? String(env.GEMINI_FALLBACK_MODEL ?? '').trim() : '';
-	if (fallbackRaw && !MODEL_NAME_PATTERN.test(fallbackRaw)) throw new Error('GEMINI_FALLBACK_MODEL is not a valid model name');
+	const fallbackModels = provider === 'gemini' ? parseFallbackModels(env, model) : [];
 	return {
 		enabled: flag === 'true' || flag === '1',
 		provider,
 		apiKey: String(env[names.key] ?? '').trim(),
 		model,
-		fallbackModel: fallbackRaw === model ? '' : fallbackRaw,
+		fallbackModels,
 		timeoutMs: parseBoundedInt('AI_TIMEOUT_MS', env.AI_TIMEOUT_MS, DEFAULT_AI_TIMEOUT_MS, 1000, 120000),
 		rateLimitPerMinute: parseBoundedInt('AI_RATE_LIMIT_PER_MINUTE', env.AI_RATE_LIMIT_PER_MINUTE, DEFAULT_AI_RATE_LIMIT_PER_MINUTE, 1, 1000),
 	};
@@ -108,6 +124,9 @@ export const getAiStartupWarnings = (env: Record<string, any> = process.env): st
 	const warnings: string[] = [];
 	if (!String(env.GEMINI_API_KEY ?? '').trim()) warnings.push('GEMINI_API_KEY is not set, so the AI features will not work');
 	if (!String(env.GEMINI_MODEL ?? '').trim()) warnings.push(`GEMINI_MODEL is not set, the default ${DEFAULT_GEMINI_MODEL} is used`);
+	if (!String(env.GEMINI_FALLBACK_MODELS ?? '').trim() && String(env.GEMINI_FALLBACK_MODEL ?? '').trim()) {
+		warnings.push('GEMINI_FALLBACK_MODEL is deprecated, use GEMINI_FALLBACK_MODELS (a comma separated list of up to 3 models)');
+	}
 	if (warnings.length) warnings.push('Run `npm run ai:check` to test the AI setup');
 	return warnings;
 };
@@ -169,8 +188,8 @@ export const parseCorsOrigins = (env: Record<string, any> = process.env): string
 	return [...new Set(origins)];
 };
 
-export const DEFAULT_AI_DAILY_CAP = 400;
-export const DEFAULT_AI_PER_KEY_DAILY_CAP = 30;
+export const DEFAULT_AI_DAILY_CAP = 200;
+export const DEFAULT_AI_PER_KEY_DAILY_CAP = 10;
 
 /** AI_DAILY_CAP: model calls per UTC day for the whole app (0 switches the AI off); AI_PER_KEY_DAILY_CAP: assistant operations per member or IP per UTC day */
 export const getAiCaps = (env: Record<string, any> = process.env): { dailyCap: number; perKeyDailyCap: number } => ({

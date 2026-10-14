@@ -68,6 +68,8 @@ export interface AiCheckDeps {
 	fetchFn: FetchLike;
 	createProvider: AiProviderFactory;
 	now?: () => number;
+	/** `--full`: the three real-shaped requests per model instead of one tiny request (uses three times the daily quota) */
+	full?: boolean;
 }
 
 /** runs the whole check, printing line by line; returns the process exit code (0 ok, 1 failed). No secret is printed. */
@@ -87,7 +89,7 @@ export const runAiCheck = async (env: Record<string, any>, deps: AiCheckDeps, pr
 	print(`AI_ENABLED: ${config.enabled ? 'true' : 'false (the app keeps the AI off, this check still runs)'}`);
 	print(`${keyVar}: ${config.apiKey ? 'set' : 'NOT set'}`);
 	print(`${modelVar}: ${String(env[modelVar] ?? '').trim() ? config.model : `not set (default ${config.model})`}`);
-	if (isGemini) print(`GEMINI_FALLBACK_MODEL: ${config.fallbackModel || 'not set (no fallback)'}`);
+	if (isGemini) print(`GEMINI_FALLBACK_MODELS: ${config.fallbackModels.length ? config.fallbackModels.join(', ') : 'not set (no fallback)'}`);
 	print(`AI_TIMEOUT_MS: ${config.timeoutMs}`);
 	if (!config.apiKey) {
 		print(`FAILED: ${keyVar} is not set. Add it to .env and run this again.`);
@@ -100,14 +102,14 @@ export const runAiCheck = async (env: Record<string, any>, deps: AiCheckDeps, pr
 		print('Models that support generateContent:');
 		try {
 			const ids = await listGeminiModels(config.apiKey, config.timeoutMs, deps.fetchFn);
-			for (const id of ids) print(`  ${id}${id === config.model ? '   <-- GEMINI_MODEL' : ''}${config.fallbackModel && id === config.fallbackModel ? '   <-- GEMINI_FALLBACK_MODEL' : ''}`);
+			for (const id of ids) print(`  ${id}${id === config.model ? '   <-- GEMINI_MODEL' : ''}${config.fallbackModels.includes(id) ? `   <-- GEMINI_FALLBACK_MODELS #${config.fallbackModels.indexOf(id) + 1}` : ''}`);
 			if (!ids.length) print('  (none listed)');
 			if (!ids.includes(config.model)) {
 				failed = true;
 				print(`PROBLEM: GEMINI_MODEL "${config.model}" is not in the list. Closest: ${closestModels(config.model, ids).join(', ') || 'none'}`);
 			}
-			if (config.fallbackModel && !ids.includes(config.fallbackModel)) {
-				print(`WARNING: GEMINI_FALLBACK_MODEL "${config.fallbackModel}" is not in the list. Closest: ${closestModels(config.fallbackModel, ids).join(', ') || 'none'}`);
+			for (const fallback of config.fallbackModels.filter((name) => !ids.includes(name))) {
+				print(`WARNING: fallback model "${fallback}" (GEMINI_FALLBACK_MODELS) is not in the list. Closest: ${closestModels(fallback, ids).join(', ') || 'none'}`);
 			}
 		} catch (err) {
 			const timedOut = (err as Error)?.name === 'TimeoutError' || (err as Error)?.name === 'AbortError';
@@ -117,13 +119,25 @@ export const runAiCheck = async (env: Record<string, any>, deps: AiCheckDeps, pr
 	}
 
 	const checks: [string, AiConfig][] = [['primary', config]];
-	if (config.fallbackModel) checks.push(['fallback', { ...config, model: config.fallbackModel }]);
+	config.fallbackModels.forEach((model, index) => checks.push([`fallback ${index + 1}`, { ...config, model }]));
+	const perModel = deps.full ? 3 : 1;
+	print('');
+	print(
+		deps.full
+			? `Full check: ${checks.length} model(s) x 3 requests = ${checks.length * perModel} requests this run (each one counts against that model's daily quota).`
+			: `Quick check: ${checks.length} model(s) x 1 tiny request = ${checks.length * perModel} requests this run. Run \`npm run ai:check -- --full\` for the 3 real-shaped requests per model (${checks.length * 3} requests).`,
+	);
+	let sent = 0;
 	for (const [role, modelConfig] of checks) {
 		print('');
 		print(`Checking the ${role} model ${modelConfig.model}:`);
-		if (!(await checkModel(modelConfig, deps, print))) failed = true;
+		const result = await checkModel(modelConfig, deps, print);
+		sent += result.sent;
+		if (!result.ok) failed = true;
 	}
-	if (!config.fallbackModel && isGemini) print('\nNo fallback model is set, so only the primary model was checked.');
+	print('');
+	print(`Requests sent to Google this run: ${sent}.`);
+	if (!config.fallbackModels.length && isGemini) print('No fallback model is set, so only the primary model was checked.');
 	return failed ? 1 : 0;
 };
 
@@ -145,15 +159,24 @@ const timed = async (label: string, now: () => number, print: (line: string) => 
 };
 
 /**
- * Three requests built like the real ones, with fake data and the real system prompts, tools and limits:
+ * With `--full`, three requests built like the real ones, with fake data and the real system prompts, tools and limits:
  * a tiny hello, the assistant (system prompt + function declarations, then a fake tool result and a final turn without
  * tools) and the moderation style JSON answer. Nothing from the database or a member is sent.
  */
-const checkModel = async (config: AiConfig, deps: AiCheckDeps, print: (line: string) => void): Promise<boolean> => {
+const checkModel = async (config: AiConfig, deps: AiCheckDeps, print: (line: string) => void): Promise<{ ok: boolean; sent: number }> => {
 	const now = deps.now ?? Date.now;
-	const provider: AiProvider = deps.createProvider(config);
+	const inner: AiProvider = deps.createProvider(config);
+	let sent = 0;
+	// counts the calls that really reach the vendor (the assistant request makes a second call after a tool call)
+	const provider: AiProvider = {
+		name: inner.name,
+		generateText: (request) => (sent++, inner.generateText(request)),
+		generateJson: (request) => (sent++, inner.generateJson(request)),
+		chat: (request) => (sent++, inner.chat(request)),
+	};
 	let ok = true;
 	ok = (await timed('tiny request', now, print, async () => void (await provider.generateText({ system: 'You are a friendly assistant.', messages: [{ role: 'user', text: 'Say hello' }], maxTokens: 64 })))) && ok;
+	if (!deps.full) return { ok, sent };
 	ok = (await timed('assistant request (system prompt, tools, tool result)', now, print, async () => {
 		const system = buildAssistantSystemPrompt(EventLocale.EN);
 		const messages: AiMessage[] = [{ role: 'user', text: 'What is your refund policy?' }];
@@ -169,5 +192,5 @@ const checkModel = async (config: AiConfig, deps: AiCheckDeps, print: (line: str
 		const event = { title: 'Check concert', description: 'A fake event used only by the AI check.', ticketTypes: [{ name: 'General', price: 30000 }], otherEventTitles: [] };
 		await provider.generateJson({ system: MODERATION_SYSTEM_PROMPT, messages: [{ role: 'user', text: JSON.stringify(event) }], maxTokens: 800 });
 	})) && ok;
-	return ok;
+	return { ok, sent };
 };

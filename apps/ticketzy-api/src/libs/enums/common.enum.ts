@@ -123,6 +123,7 @@ export enum Message {
 	AI_RATE_LIMITED = 'You are using the AI features too fast, please try again in a minute!',
 	AI_REQUEST_FAILED = 'The AI service could not answer right now, please try again later!',
 	AI_BUSY = 'The AI is busy right now, please try again in a moment.',
+	AI_QUOTA_EXHAUSTED = 'The AI is resting for today, please try again later.',
 	AI_TIMEOUT = 'The AI service took too long to answer, please try again later!',
 	AI_INVALID_RESPONSE = 'The AI service returned an answer that could not be used!',
 	AI_ASSISTANT_NO_ANSWER = 'Sorry, I could not find an answer. Please try rephrasing your question.',

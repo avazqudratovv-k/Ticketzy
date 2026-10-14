@@ -1,5 +1,5 @@
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
-import { AI_MAX_WAIT_MS, AI_MIN_ATTEMPT_MS, AI_RETRY_DELAY_MS, AiClientService } from './ai-client.service';
+import { AI_MAX_WAIT_MS, AI_MIN_ATTEMPT_MS, AI_QUOTA_COOLDOWN_MS, AI_RETRY_DELAY_MS, AiClientService } from './ai-client.service';
 import { AiModerationService } from './ai-moderation.service';
 import { AiTranslationService } from './ai-translation.service';
 import { ASSISTANT_TOOLS, AiToolsService, MAX_SEARCH_RESULTS } from './ai-tools.service';
@@ -38,7 +38,7 @@ const makeProvider = (): MockProvider => ({ name: 'mock', generateText: jest.fn(
 /** a client whose provider is a mock: the services never see a vendor SDK */
 const makeClient = (provider: MockProvider = makeProvider()): AiClientService => new AiClientService(() => provider as any);
 
-const ENV_KEYS = ['AI_ENABLED', 'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODEL', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
+const ENV_KEYS = ['AI_ENABLED', 'AI_PROVIDER', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODEL', 'GEMINI_FALLBACK_MODELS', 'AI_RATE_LIMIT_PER_MINUTE', 'AI_TIMEOUT_MS'];
 let savedEnv: Record<string, string | undefined>;
 beforeEach(() => {
 	savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -191,9 +191,9 @@ describe('AiClientService: disabled AI and rate limit', () => {
 			}
 		});
 
-		it('tries the fallback once only, then says busy for a 429 or "could not answer" for a 404', async () => {
+		it('tries the fallback once only, then says the AI is resting for a 429 on both or "could not answer" for a 404', async () => {
 			const seen: string[] = [];
-			await expect(geminiClient(seen, () => new AiProviderError('failed', 429)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_BUSY);
+			await expect(geminiClient(seen, () => new AiProviderError('failed', 429)).generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_QUOTA_EXHAUSTED);
 			expect(seen).toEqual(['main-model', 'backup-model']);
 
 			const seen404: string[] = [];
@@ -671,6 +671,188 @@ describe('AiAssistantService', () => {
 		process.env.AI_ENABLED = 'false';
 		await expect(ask()).rejects.toThrow(Message.AI_DISABLED);
 		expect(create).not.toHaveBeenCalled();
+	});
+});
+
+describe('AI model chain and quota cooldown (#115)', () => {
+	beforeEach(() => {
+		process.env.AI_PROVIDER = 'gemini';
+		process.env.GEMINI_API_KEY = 'g-test-key';
+		process.env.GEMINI_MODEL = 'main';
+		process.env.GEMINI_FALLBACK_MODELS = 'second,third';
+		delete process.env.GEMINI_FALLBACK_MODEL;
+		process.env.AI_TIMEOUT_MS = '15000';
+	});
+	afterEach(() => jest.useRealTimers());
+
+	/** `behaviour(model, callNumberOfThatModel)` returns an error to throw, or undefined to answer */
+	const chainClient = (seen: string[], behaviour: (model: string, call: number) => unknown, usage?: any) => {
+		const counts: Record<string, number> = {};
+		const client = new AiClientService(
+			(config) =>
+				({
+					name: 'gemini',
+					generateText: jest.fn().mockImplementation(async () => {
+						seen.push(config.model);
+						counts[config.model] = (counts[config.model] ?? 0) + 1;
+						const failure = behaviour(config.model, counts[config.model]);
+						if (failure) throw failure;
+						return { text: 'from ' + config.model, model: config.model };
+					}),
+				}) as any,
+			usage,
+		);
+		const warns: string[] = [];
+		jest.spyOn((client as any).logger, 'warn').mockImplementation((message: any) => void warns.push(String(message)));
+		return { client, warns, ask: () => client.generateText({ system: 's', messages: [], maxTokens: 10 }) };
+	};
+	const quota = () => new AiProviderError('failed', 429, 'ApiError');
+
+	it('moves to the second model at once on a 429, with no retry and no waiting', async () => {
+		const seen: string[] = [];
+		const { ask, warns } = chainClient(seen, (model) => (model === 'main' ? quota() : undefined));
+		const startedAt = Date.now();
+		await expect(ask()).resolves.toMatchObject({ text: 'from second' });
+		expect(Date.now() - startedAt).toBeLessThan(AI_RETRY_DELAY_MS / 2);
+		expect(seen).toEqual(['main', 'second']);
+		expect(warns.some((line) => line.includes('out of quota') && line.includes('model=main'))).toBe(true);
+		expect(warns.some((line) => line.includes('fallback model answered') && line.includes('model=second'))).toBe(true);
+		expect(warns.join(' ')).not.toContain('g-test-key');
+	});
+
+	it('skips a model in its cooldown on the next request without a network call, and does not charge the daily cap for it', async () => {
+		const seen: string[] = [];
+		const usage = { consume: jest.fn().mockResolvedValue({ allowed: true, count: 1 }) };
+		const { ask } = chainClient(seen, (model) => (model === 'main' ? quota() : undefined), usage);
+		await ask();
+		await ask();
+		await ask();
+		expect(seen).toEqual(['main', 'second', 'second', 'second']);
+		expect(usage.consume).toHaveBeenCalledTimes(4); // main + second once, then second twice; never main again
+	});
+
+	it('tries the model again after the cooldown ends and logs that once', async () => {
+		jest.useFakeTimers();
+		const seen: string[] = [];
+		const { ask, warns } = chainClient(seen, (model, call) => (model === 'main' && call === 1 ? quota() : undefined));
+		await ask();
+		await jest.advanceTimersByTimeAsync(AI_QUOTA_COOLDOWN_MS - 1000);
+		await ask();
+		expect(seen).toEqual(['main', 'second', 'second']);
+		await jest.advanceTimersByTimeAsync(2000);
+		await expect(ask()).resolves.toMatchObject({ text: 'from main' });
+		await ask();
+		expect(seen).toEqual(['main', 'second', 'second', 'main', 'main']);
+		expect(warns.filter((line) => line.includes('cooldown ended'))).toHaveLength(1);
+	});
+
+	it('uses a 30 minute cooldown', () => {
+		expect(AI_QUOTA_COOLDOWN_MS).toBe(30 * 60_000);
+	});
+
+	it('retries only the main model on a 503, then moves on and gives each fallback one try', async () => {
+		jest.useFakeTimers();
+		const seen: string[] = [];
+		const { ask } = chainClient(seen, (model) => (model === 'third' ? undefined : new AiProviderError('failed', 503, 'ApiError')));
+		const result = ask();
+		await jest.advanceTimersByTimeAsync(AI_RETRY_DELAY_MS);
+		await expect(result).resolves.toMatchObject({ text: 'from third' });
+		expect(seen).toEqual(['main', 'main', 'second', 'third']);
+	});
+
+	it.each([400, 404, 500])('moves on after a %s without marking the model out of quota', async (status) => {
+		const seen: string[] = [];
+		const { ask } = chainClient(seen, (model) => (model === 'main' ? new AiProviderError('failed', status) : undefined));
+		await ask();
+		await ask();
+		expect(seen).toEqual(['main', 'second', 'main', 'second']);
+	});
+
+	it('says the AI is resting when every model is out of quota, then without any network call', async () => {
+		const seen: string[] = [];
+		const { ask } = chainClient(seen, () => quota());
+		const error: any = await ask().catch((err) => err);
+		expect(error.message).toBe(Message.AI_QUOTA_EXHAUSTED);
+		expect(error.message).toBe('The AI is resting for today, please try again later.');
+		expect(error.code).toBe('AI_QUOTA_EXHAUSTED');
+		expect(seen).toEqual(['main', 'second', 'third']);
+		await expect(ask()).rejects.toMatchObject({ code: 'AI_QUOTA_EXHAUSTED' });
+		expect(seen).toHaveLength(3);
+	});
+
+	it('says busy, not resting, when a quota answer is mixed with another failure', async () => {
+		const seen: string[] = [];
+		const { ask } = chainClient(seen, (model) => (model === 'second' ? new AiProviderError('failed', 503) : quota()));
+		await expect(ask()).rejects.toThrow(Message.AI_BUSY);
+		expect(seen).toEqual(['main', 'second', 'third']);
+	});
+
+	it.each([401, 403])('stops the whole chain on a %s and does not mark a quota', async (status) => {
+		const seen: string[] = [];
+		const { client, ask } = chainClient(seen, (model) => (model === 'second' ? new AiProviderError('failed', status, 'ApiError') : quota()));
+		const errors: string[] = [];
+		jest.spyOn((client as any).logger, 'error').mockImplementation((message: any) => void errors.push(String(message)));
+		await expect(ask()).rejects.toThrow(Message.AI_REQUEST_FAILED);
+		expect(seen).toEqual(['main', 'second']); // the third is never tried
+		expect(errors.some((line) => line.includes(`AI key rejected (status ${status})`))).toBe(true);
+		expect(errors.join(' ')).not.toContain('g-test-key');
+	});
+
+	it('keeps the whole chain inside the 40 second budget and starts no attempt with less than 3 seconds left', async () => {
+		jest.useFakeTimers();
+		const attempts: { model: string; timeoutMs: number }[] = [];
+		const client = new AiClientService(
+			(config) =>
+				({
+					name: 'gemini',
+					generateText: jest.fn().mockImplementation(async (request: any) => {
+						attempts.push({ model: config.model, timeoutMs: request.timeoutMs });
+						await new Promise((resolve) => setTimeout(resolve, request.timeoutMs));
+						throw new AiProviderError('timeout', undefined, 'TimeoutError');
+					}),
+				}) as any,
+		);
+		jest.spyOn((client as any).logger, 'warn').mockImplementation(() => undefined);
+		const startedAt = Date.now();
+		const result = client.generateText({ system: 's', messages: [], maxTokens: 10 }).catch((err) => err);
+		await jest.advanceTimersByTimeAsync(AI_MAX_WAIT_MS);
+		expect((await result).message).toBe(Message.AI_BUSY);
+		expect(attempts).toEqual([
+			{ model: 'main', timeoutMs: 15000 },
+			{ model: 'main', timeoutMs: 15000 },
+			{ model: 'second', timeoutMs: 9000 },
+		]);
+		expect(Date.now() - startedAt).toBeLessThanOrEqual(AI_MAX_WAIT_MS);
+	});
+
+	it('does not start the next model when a 429 leaves less than 3 seconds of the caller\'s deadline', async () => {
+		jest.useFakeTimers();
+		const seen: string[] = [];
+		const { ask: _ask, client } = chainClient(seen, (model) => {
+			if (model === 'main') jest.setSystemTime(Date.now() + 1000); // the 429 arrives after 1 s
+			return quota();
+		});
+		const deadlineAt = Date.now() + AI_MIN_ATTEMPT_MS + 500;
+		await expect(client.generateText({ system: 's', messages: [], maxTokens: 10, deadlineAt })).rejects.toThrow(Message.AI_BUSY);
+		expect(seen).toEqual(['main']);
+	});
+
+	it('does not use quota marks for Anthropic: a 429 stays busy and is tried again next time', async () => {
+		process.env.AI_PROVIDER = 'anthropic';
+		const provider = makeProvider();
+		provider.generateText.mockRejectedValue(quota());
+		const client = makeClient(provider);
+		await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_BUSY);
+		await expect(client.generateText({ system: 's', messages: [], maxTokens: 10 })).rejects.toThrow(Message.AI_BUSY);
+		expect(provider.generateText).toHaveBeenCalledTimes(2);
+	});
+
+	it('still ends at the daily cap with its own code while the chain runs', async () => {
+		const seen: string[] = [];
+		const usage = { consume: jest.fn().mockResolvedValue({ allowed: false, count: 999 }) };
+		const { ask } = chainClient(seen, () => undefined, usage);
+		await expect(ask()).rejects.toMatchObject({ code: 'AI_DAILY_CAP_REACHED' });
+		expect(seen).toEqual([]);
 	});
 });
 

@@ -3,7 +3,7 @@ import { GenerateContentConfig, ThinkingLevel } from '@google/genai';
 /**
  * Every model specific option of a Gemini request lives here, so a model is never sent an option it rejects.
  * Model names change and models come and go: run `npm run ai:check` after changing GEMINI_MODEL or
- * GEMINI_FALLBACK_MODEL, it sends the same options as the real assistant to the primary and the fallback model.
+ * GEMINI_FALLBACK_MODELS, it sends a tiny request (or with `-- --full` the same requests as the real assistant) to the primary and each fallback model.
  *
  * - Gemini 3.x (and the `-latest` aliases, which point at it): thinking is set with `thinkingLevel`; `thinkingBudget`
  *   is the 2.5 way and is not sent. LOW keeps the short answers of the assistant fast and cheap.

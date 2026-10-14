@@ -67,7 +67,7 @@ Names only; copy `.env.example` and set the values (`.env.example` does not list
 | `PORT` | optional | port to listen on (the host sets it); falls back to `PORT_API` / `PORT_BATCH`, then 3000 |
 | `TRUST_PROXY_HOPS` | optional | proxies in front of the API (default 1 in production) so rate limits see the real client IP |
 | `RATE_LIMIT_GENERAL_PER_MINUTE`, `RATE_LIMIT_LOGIN_PER_15_MIN`, `RATE_LIMIT_SIGNUP_PER_HOUR`, `RATE_LIMIT_PASSWORD_PER_15_MIN` | optional | request limits per client IP (defaults 300, 10, 5, 5); in memory, one instance |
-| `AI_DAILY_CAP`, `AI_PER_KEY_DAILY_CAP` | optional | AI model calls per UTC day for the whole app (default 400) and AI operations per member or IP per day (default 30), kept in MongoDB |
+| `AI_DAILY_CAP`, `AI_PER_KEY_DAILY_CAP` | optional | AI model calls per UTC day for the whole app (default 200) and AI operations per member or IP per day (default 10), kept in MongoDB. Keep the first at or below what the free daily limits of your models add up to (see the free-tier note below) |
 | `UPLOAD_MAX_FILE_MB`, `UPLOAD_MAX_FILES` | optional | image upload limits (default 15 and 10) |
 | `LOG_LEVEL`, `MONGO_AUTO_INDEX` | optional | log level (default `warn` in production); `false` stops building indexes at startup |
 | `SEAT_HOLD_SECONDS` | optional | how long a seat hold lasts (1 to 3600, default 30) |
@@ -75,7 +75,7 @@ Names only; copy `.env.example` and set the values (`.env.example` does not list
 | `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | optional, for `npm run seed` | a second admin |
 | `AI_ENABLED`, `AI_PROVIDER`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | optional | AI assistant settings; it stays off unless `AI_ENABLED=true` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | optional | used when `AI_PROVIDER=anthropic` (default) |
-| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | optional | used when `AI_PROVIDER=gemini` |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS` | optional | used when `AI_PROVIDER=gemini`. `GEMINI_FALLBACK_MODELS` is an ordered, comma separated list of up to 3 models tried after `GEMINI_MODEL`, for example `gemini-3.1-flash-lite,gemini-2.5-flash-lite`. `GEMINI_FALLBACK_MODEL` (one name) is **deprecated** but still read as a one item list when the new variable is empty |
 | `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | for `seed:demo` | strong passwords of the demo accounts |
 | `DEMO_SEED_CONFIRM`, `DEMO_SEED_ALLOW_NON_DEMO_DB`, `ALLOW_DEMO_SEED` | for `seed:demo` and `reset:demo` | confirmation, non-empty database flag, production flag |
 | `NODE_ENV` | set by `npm run start:prod` and `start:prod:batch` | `production` turns off the GraphQL playground and introspection, picks `MONGO_PROD` and makes startup check the secrets (32+ random characters) and `CORS_ORIGINS` |
@@ -145,10 +145,33 @@ This repo is built with AI coding assistants under written rules, so their work 
 ## Check the AI
 
 ```bash
-npm run ai:check
+npm run ai:check            # quick: 1 tiny request per model
+npm run ai:check -- --full  # full: 3 real-shaped requests per model
 ```
 
-It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set, lists the Gemini models that support `generateContent` (your `GEMINI_MODEL` is marked), and then, for the primary model and the fallback (`GEMINI_FALLBACK_MODEL`), sends three requests: a tiny "Say hello", an assistant turn built like the real one (the real system prompt and tools, a fake tool result, no user data) and a moderation style JSON answer. Each line is `OK in N ms` or `FAILED after N ms: <explanation> [Google said: <short sanitized reason>]`. Exit code 0 means everything works, 1 means something failed. Google renames, overloads and retires models, so run it before every deploy and after changing a model name.
+It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMINI_API_KEY` (set / not set) and `GEMINI_MODEL` are set and the `GEMINI_FALLBACK_MODELS` list, lists the Gemini models that support `generateContent` (the primary is marked `<-- GEMINI_MODEL`, the fallbacks `<-- GEMINI_FALLBACK_MODELS #1`, `#2`, `#3`) and then checks the primary and **every** fallback model.
+
+**Requests per run** (free-tier quota is per model per day, so the default run is small; the output states the number before and after):
+
+| Run | Requests per model | Example: primary + 2 fallbacks |
+| --- | --- | --- |
+| `npm run ai:check` | 1 (a tiny "Say hello") | 3 requests |
+| `npm run ai:check -- --full` | 3: the tiny one, an assistant turn built like the real one (real system prompt and tools, a fake tool result, no user data; it can make 2 calls) and a moderation style JSON answer | 9 requests (10 if the assistant turn calls a tool) |
+
+Output format:
+
+```
+Quick check: 3 model(s) x 1 tiny request = 3 requests this run. Run `npm run ai:check -- --full` for the 3 real-shaped requests per model (9 requests).
+
+Checking the primary model gemini-3.5-flash:
+  tiny request: FAILED after 310 ms: quota (429): too many requests or the free quota is used up, wait or check your Google AI plan
+Checking the fallback 1 model gemini-3.1-flash-lite:
+  tiny request: OK in 8120 ms
+
+Requests sent to Google this run: 2.
+```
+
+Each line is `OK in N ms` or `FAILED after N ms: <explanation> [Google said: <short sanitized reason>]`. Exit code 0 means every model works, 1 means something failed. Google renames, overloads and retires models, so run it before every deploy and after changing a model name.
 
 | Result | Meaning |
 | --- | --- |
@@ -156,9 +179,15 @@ It reads `.env` (nothing secret is printed), shows whether `AI_PROVIDER`, `GEMIN
 | `GEMINI_MODEL "..." is not in the list` / `wrong model (404)` | The model name is wrong; use one of the IDs printed in the list (the closest ones are shown). |
 | `request refused (400)` | Google rejected the request itself; read the `[Google said: ...]` part (a model option it does not accept, a bad value, a bad key). |
 | `bad key or permission (401/403)` | The key is wrong, expired, restricted or has no access to the model (no fallback is tried). |
-| `quota (429)` | Too many requests or the free quota is used up; wait or check your Google plan. |
-| `Google is busy (503/504)` | The model is overloaded; try again, or set `GEMINI_FALLBACK_MODEL`. |
+| `quota (429)` | The free quota of *this model* is used up for today (it will not recover within minutes); the assistant skips it for 30 minutes and uses the next model of the chain. Check the limits at https://ai.dev/rate-limit. |
+| `Google is busy (503/504)` | The model is overloaded; try again, or add models to `GEMINI_FALLBACK_MODELS`. |
 | `timed out` | Google did not answer within `AI_TIMEOUT_MS` (default 15000; any value from 1000 works, it is not sent to Google as a deadline). |
+
+### Model chain and the free tier
+
+The assistant tries `GEMINI_MODEL`, then each model of `GEMINI_FALLBACK_MODELS` in order (decision #115). Google's free-tier quota is counted **per model per day**, so one used-up model does not stop the others. A `429` moves to the next model at once and the model is skipped for 30 minutes (no network call, kept in the API process memory); `503`, `504`, a timeout, `500`, `400` and `404` retry the primary once and then move on; `401`/`403` stop the chain (a key problem). When every model is out of quota users see "The AI is resting for today, please try again later." The whole chain shares the 40 s budget of #114.
+
+Free tier means a demo: it may be slow or busy. Keep the daily limits of your models in mind, check them at https://ai.dev/rate-limit (they change), and keep `AI_DAILY_CAP` at or below what they allow.
 
 When `AI_PROVIDER=gemini`, the API logs a warning at startup if `GEMINI_API_KEY` or `GEMINI_MODEL` is missing (it never calls Google at startup).
 
