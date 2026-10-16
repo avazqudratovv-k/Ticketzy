@@ -10,10 +10,18 @@ import { EventSeat } from 'apps/ticketzy-api/src/libs/dto/event/event-seat';
 import { SeatStatus } from 'apps/ticketzy-api/src/libs/enums/event.enum';
 import { OrderStatus, TicketTypeStatus } from 'apps/ticketzy-api/src/libs/enums/ticket.enum';
 import { Model } from 'mongoose';
+import { Notification } from 'apps/ticketzy-api/src/libs/dto/notification/notification';
+import { NotificationGroup, NotificationType } from 'apps/ticketzy-api/src/libs/enums/notification.enum';
+import { PayoutStatus } from 'apps/ticketzy-api/src/libs/enums/payout.enum';
+import { buildPayoutPipeline } from 'apps/ticketzy-api/src/libs/payout';
 import { getEventRank, getOrganizerRank } from './lib/rank';
 import { expireStaleOrders, releaseExpiredSeatHolds } from 'apps/ticketzy-api/src/libs/order-expiry';
 
 const RANK_WRITE_CHUNK = 500;
+/** a payout that became due longer ago than this is only marked as notified, never announced (DECISIONS #119) */
+export const PAYOUT_NOTICE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const PAYOUT_NOTICE_PAGE = 200;
+const PAYOUT_NOTICE_MAX_PAGES = 20;
 
 @Injectable()
 export class BatchService {
@@ -25,6 +33,7 @@ export class BatchService {
 		@InjectModel('Order') private readonly orderModel: Model<Order>,
 		@InjectModel('TicketType') private readonly ticketTypeModel: Model<TicketType>,
 		@InjectModel('EventSeat') private readonly eventSeatModel: Model<EventSeat>,
+		@InjectModel('Notification') private readonly notificationModel: Model<Notification>,
 	) {}
 
 	/**
@@ -110,6 +119,58 @@ export class BatchService {
 			}
 		}
 		if (ended) this.logger.debug(`Ended ${ended} event(s)`);
+	}
+
+	/**
+	 * "Payout is due" notices (DECISIONS #119). The payout status is computed, not stored (#77), so nothing happens when an event
+	 * becomes DUE; this job finds DUE events that were never claimed. The claim is one conditional update on the event
+	 * (`payoutDueNotifiedAt` still missing): only the run that wins it writes notifications, so two runs or two instances send
+	 * one notice per event. A payout that became due more than 7 days ago is claimed but not announced, which is also what
+	 * keeps the first run (and old demo data) from sending a burst. A notification that fails after the claim is lost, as
+	 * everywhere else (#22).
+	 */
+	public async batchNotifyDuePayouts(now: Date = new Date()): Promise<number> {
+		const oldestToAnnounce = now.getTime() - PAYOUT_NOTICE_MAX_AGE_MS;
+		let adminIds: unknown[] | undefined;
+		let announced = 0;
+
+		for (let page = 0; page < PAYOUT_NOTICE_MAX_PAGES; page++) {
+			const [result] = await this.eventModel
+				.aggregate(
+					buildPayoutPipeline({ now, payoutStatus: PayoutStatus.DUE, notNotifiedOnly: true, direction: -1, page: { skip: 0, limit: PAYOUT_NOTICE_PAGE } }),
+				)
+				.exec();
+			const rows: any[] = result?.list ?? [];
+
+			for (const row of rows) {
+				const claim = await this.eventModel
+					.updateOne({ _id: row.eventId, payoutDueNotifiedAt: null }, { $set: { payoutDueNotifiedAt: now } }, { timestamps: false })
+					.exec();
+				if (claim.modifiedCount !== 1) continue; // another run got it
+				if (new Date(row.payoutDate).getTime() < oldestToAnnounce) continue;
+
+				adminIds ??= (await this.memberModel.find({ memberType: MemberType.ADMIN, memberStatus: MemberStatus.ACTIVE }).select('_id').lean().exec()).map((admin) => admin._id);
+				try {
+					await this.notificationModel.insertMany(this.duePayoutNotifications(row, adminIds));
+					announced++;
+				} catch (err) {
+					this.logger.error(`Payout due notice NOT SENT for event ${row.eventId}: ${err.message}`);
+				}
+			}
+			if (rows.length < PAYOUT_NOTICE_PAGE) break;
+		}
+		if (announced) this.logger.debug(`Announced ${announced} due payout(s)`);
+		return announced;
+	}
+
+	/** the organizer is the author of both kinds (a job has no actor), so an admin's inbox shows whose payout it is */
+	private duePayoutNotifications(row: any, adminIds: unknown[]): Record<string, unknown>[] {
+		const net = Number(row.net).toLocaleString('en-US');
+		const base = { notificationType: NotificationType.PAYOUT_DUE, notificationGroup: NotificationGroup.EVENT, authorId: row.organizerId, eventId: row.eventId };
+		return [
+			{ ...base, receiverId: row.organizerId, notificationTitle: 'Your payout is due', notificationDesc: `Payout for ${row.eventTitle} is due: ${net} KRW` },
+			...adminIds.map((adminId) => ({ ...base, receiverId: adminId, notificationTitle: 'A payout is due', notificationDesc: `Payout for ${row.eventTitle} is due: ${net} KRW` })),
+		];
 	}
 
 	public getHello(): string {

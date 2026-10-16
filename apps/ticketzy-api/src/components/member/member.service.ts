@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException, Logger, 
 import { InjectModel } from '@nestjs/mongoose';
 import { GraphQLError } from 'graphql';
 import { Model, ObjectId } from 'mongoose';
-import { Member, Members } from '../../libs/dto/member/member';
+import { Member, Members, MyAccountState } from '../../libs/dto/member/member';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { MemberAuthType, MemberStatus, MemberType, unverifiedMemberStatuses } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
@@ -137,6 +137,28 @@ export class MemberService {
 		}
 		await this.useVisibleEventCount([targetMember]);
 		return targetMember;
+	}
+
+	/** the caller's own status and approval flag, one indexed read by token id; REJECTED and SUSPENDED callers get it too (#120) */
+	public async getMyAccountState(memberId: ObjectId): Promise<MyAccountState> {
+		const member = await this.memberModel.findById(memberId).select('memberStatus approvalCelebrationPending').lean().exec();
+		if (!member) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		return { memberStatus: member.memberStatus, approvalCelebrationPending: member.approvalCelebrationPending === true };
+	}
+
+	/**
+	 * Conditional update true to false on the caller's own organizer account (there is no id argument, so nobody can clear another
+	 * member's flag). A second call, or a call without a flag, matches nothing and is not an error.
+	 */
+	public async markApprovalCelebrationDone(memberId: ObjectId): Promise<MyAccountState> {
+		await this.memberModel
+			.updateOne(
+				{ _id: memberId, memberType: MemberType.ORGANIZER, approvalCelebrationPending: true },
+				{ $set: { approvalCelebrationPending: false } },
+				{ timestamps: false },
+			)
+			.exec();
+		return await this.getMyAccountState(memberId);
 	}
 
 	/**

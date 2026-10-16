@@ -146,7 +146,7 @@ export class DemoSeeder {
 		this.commentService = get(CommentService);
 		this.viewService = get(ViewService);
 		// the batch jobs are plain classes over models: the seed uses the real "end finished events" job, limited to its own events
-		this.batch = new BatchService(this.models.event, this.models.member, this.models.order, this.models.ticketType, this.models.eventSeat);
+		this.batch = new BatchService(this.models.event, this.models.member, this.models.order, this.models.ticketType, this.models.eventSeat, this.models.notification);
 		// a seeded conversation sends many messages in a second; the limit is per process and does not apply to this one
 		(this.conversationService as any).sendLimiter = { tryConsume: () => true };
 		this.skipModeration();
@@ -241,7 +241,11 @@ export class DemoSeeder {
 				memberPhone: account.phone,
 				memberDesc: account.desc,
 			});
-			if (account.outcome === 'verify') await this.organizerService.verifyOrganizerByAdmin(this.admin._id, _id as any);
+			if (account.outcome === 'verify') {
+				await this.organizerService.verifyOrganizerByAdmin(this.admin._id, _id as any);
+				// the seeded organizers were approved long ago: no celebration screen waits for them (#120)
+				await this.models.member.updateOne({ _id }, { $set: { approvalCelebrationPending: false } }, { timestamps: false } as any).exec();
+			}
 			if (account.outcome === 'reject') await this.organizerService.rejectOrganizerByAdmin(this.admin._id, { memberId: _id, reason: account.rejectReason } as any);
 			this.organizers[account.key] = await this.models.member.findById(_id).lean().exec();
 		}
@@ -609,6 +613,20 @@ export class DemoSeeder {
 			paid++;
 		}
 		this.log(`  payouts marked as paid: ${paid}`);
+		await this.markDuePayoutsNotified(events);
+	}
+
+	/**
+	 * The "payout is due" job (#119) would announce every seeded payout that is due at the moment of the seed. They are history,
+	 * so each one is claimed here, the way the job claims it (the 7 day rule alone would let a payout that became due 3 days ago
+	 * through). A payout that is not due yet is left alone: it is announced for real when it becomes due.
+	 */
+	private async markDuePayoutsNotified(events: PlanEvent[]): Promise<void> {
+		const ids = events
+			.filter((plan) => plan.status === EventStatus.ENDED && getPayoutDate(plan.endAt, VENUE_TIMEZONE).getTime() <= this.now.getTime())
+			.map((plan) => this.built.get(plan.key)?.event._id)
+			.filter(Boolean);
+		await this.models.event.updateMany({ _id: { $in: ids }, payoutDueNotifiedAt: null }, { $set: { payoutDueNotifiedAt: this.now } }, { timestamps: false } as any).exec();
 	}
 
 	/** ORGANIZER SOCIAL: profile views, likes and follows of the active organizers */

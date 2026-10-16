@@ -1,7 +1,7 @@
 import { Controller, Get, Logger } from '@nestjs/common';
 import { BatchService } from './batch.service';
 import { Cron, Interval, Timeout } from '@nestjs/schedule';
-import { BATCH_END_EVENTS, BATCH_EXPIRE_ORDERS, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS } from './lib/config';
+import { BATCH_END_EVENTS, BATCH_EXPIRE_ORDERS, BATCH_TOP_ORGANIZERS, BATCH_TOP_EVENTS, BATCH_DUE_PAYOUTS } from './lib/config';
 
 @Controller()
 export class BatchController {
@@ -54,6 +54,17 @@ export class BatchController {
     try {
       this.logger['context'] = BATCH_END_EVENTS;
       await this.batchService.batchEndEvents();
+    } catch (err) {
+      this.logger.error(err);
+    }
+  }
+
+  // payouts that became due get their notice, hourly at minute 50 (DECISIONS #119)
+  @Cron('00 50 * * * *', { name: BATCH_DUE_PAYOUTS })
+  public async batchNotifyDuePayouts() {
+    try {
+      this.logger['context'] = BATCH_DUE_PAYOUTS;
+      await this.batchService.batchNotifyDuePayouts();
     } catch (err) {
       this.logger.error(err);
     }

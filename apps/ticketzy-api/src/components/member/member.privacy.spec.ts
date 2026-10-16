@@ -30,6 +30,8 @@ const PUBLIC_FIELDS = [
 const ORGANIZER_PUBLIC_FIELDS = ['memberFullName', 'memberAddress'];
 /** the member themselves and admins only */
 const PRIVATE_FIELDS = ['memberEmail', 'memberPhone', 'memberWarnings', 'memberBlocks', 'deletedAt', 'rejectReason', 'commissionOverride'];
+/** the member themselves only: admins get null too (DECISIONS #120) */
+const SELF_ONLY_FIELDS = ['approvalCelebrationPending'];
 /** returned only by login and signup, which authenticate the caller by password */
 const TOKEN_FIELDS = ['accessToken'];
 
@@ -68,13 +70,13 @@ describe('Member field privacy', () => {
 	const read = (field: string, member: Member, context: any) => (resolver as any)[field](member, context);
 
 	it('lists every Member field in exactly one group (a new field must be classified)', () => {
-		const classified = [...PUBLIC_FIELDS, ...ORGANIZER_PUBLIC_FIELDS, ...PRIVATE_FIELDS, ...TOKEN_FIELDS];
+		const classified = [...PUBLIC_FIELDS, ...ORGANIZER_PUBLIC_FIELDS, ...PRIVATE_FIELDS, ...SELF_ONLY_FIELDS, ...TOKEN_FIELDS];
 		expect(new Set(classified).size).toBe(classified.length);
 		expect([...memberFieldNames()].sort()).toEqual([...classified].sort());
 	});
 
 	it('has a resolver gate for every private field and for the organizer-only fields', () => {
-		for (const field of [...PRIVATE_FIELDS, ...ORGANIZER_PUBLIC_FIELDS]) {
+		for (const field of [...PRIVATE_FIELDS, ...SELF_ONLY_FIELDS, ...ORGANIZER_PUBLIC_FIELDS]) {
 			expect(typeof (resolver as any)[field]).toBe('function');
 		}
 		for (const field of PUBLIC_FIELDS) expect((resolver as any)[field]).toBeUndefined();
@@ -89,6 +91,16 @@ describe('Member field privacy', () => {
 	it.each(PRIVATE_FIELDS)('%s is shown to the member themselves and to admins', (field) => {
 		expect(read(field, buyer, self(buyer))).not.toBeNull();
 		expect(read(field, buyer, admin)).not.toBeNull();
+	});
+
+	it.each(SELF_ONLY_FIELDS)('%s is shown to the member themselves only, not to guests, other members or admins', (field) => {
+		const pending = { ...organizer, approvalCelebrationPending: true } as unknown as Member;
+		expect(read(field, pending, self(pending))).toBe(true);
+		expect(read(field, pending, guest)).toBeNull();
+		expect(read(field, pending, stranger)).toBeNull();
+		expect(read(field, pending, admin)).toBeNull();
+		// an account that never had the flag reads as false for itself
+		expect(read(field, organizer, self(organizer))).toBe(false);
 	});
 
 	it('hides the full name and address of a buyer from guests and strangers', () => {

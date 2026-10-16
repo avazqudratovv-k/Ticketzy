@@ -387,3 +387,71 @@ describe('OrganizerService.getOrganizersByAdmin', () => {
 		expect(pipeline.find((s: any) => s.$project)).toEqual({ $project: { memberPassword: 0 } });
 	});
 });
+
+describe('OrganizerService approval celebration flag (DECISIONS #120)', () => {
+	let members: any[];
+	let model: any;
+	let service: OrganizerService;
+
+	const setup = (memberStatus: MemberStatus, extra: any = {}) => {
+		members = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus, ...extra }];
+		model = fakeMemberModel(members);
+		service = new OrganizerService(
+			model,
+			{ record: jest.fn().mockResolvedValue(undefined) } as any,
+			{ createNotification: jest.fn().mockResolvedValue(undefined) } as any,
+			{ setMemberRestricted: jest.fn() } as any,
+		);
+	};
+
+	it('verify (PENDING to ACTIVE) sets the flag in the same update as the status', async () => {
+		setup(MemberStatus.PENDING);
+		await service.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
+
+		expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+		expect(model.findOneAndUpdate.mock.calls[0][1].$set).toMatchObject({ memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: true });
+		expect(members[0].approvalCelebrationPending).toBe(true);
+	});
+
+	it('reinstating a REJECTED organizer is an approval and sets the flag', async () => {
+		setup(MemberStatus.REJECTED);
+		await service.reinstateOrganizerByAdmin(ADMIN as any, ORG as any);
+
+		expect(members[0]).toMatchObject({ memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: true });
+	});
+
+	it('reinstating a SUSPENDED organizer does not set the flag', async () => {
+		setup(MemberStatus.SUSPENDED);
+		await service.reinstateOrganizerByAdmin(ADMIN as any, ORG as any);
+
+		expect(members[0].memberStatus).toBe(MemberStatus.ACTIVE);
+		expect(members[0].approvalCelebrationPending).toBeUndefined();
+	});
+
+	it('reinstating a SUSPENDED organizer keeps no old flag (suspending cleared it)', async () => {
+		setup(MemberStatus.ACTIVE, { approvalCelebrationPending: true });
+		await service.suspendOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'Refund abuse' });
+		expect(members[0].approvalCelebrationPending).toBe(false);
+
+		await service.reinstateOrganizerByAdmin(ADMIN as any, ORG as any);
+		expect(members[0].approvalCelebrationPending).toBe(false);
+	});
+
+	it('reject never sets the flag', async () => {
+		setup(MemberStatus.PENDING);
+		await service.rejectOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'Incomplete profile' });
+
+		expect(members[0].approvalCelebrationPending).toBeUndefined();
+	});
+
+	it('still sends the ORGANIZER_VERIFIED notification on approval', async () => {
+		setup(MemberStatus.PENDING);
+		const notifications = { createNotification: jest.fn().mockResolvedValue(undefined) };
+		service = new OrganizerService(model, { record: jest.fn() } as any, notifications as any, { setMemberRestricted: jest.fn() } as any);
+		await service.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
+
+		expect(notifications.createNotification).toHaveBeenCalledWith(
+			expect.objectContaining({ notificationType: NotificationType.ORGANIZER_VERIFIED, receiverId: ORG }),
+		);
+	});
+});

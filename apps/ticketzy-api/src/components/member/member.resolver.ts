@@ -1,7 +1,8 @@
 import { Args, Context, Int, Mutation, Parent, Query, ResolveField, Resolver } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
-import { CommissionOverride, Member, Members } from '../../libs/dto/member/member';
+import { CommissionOverride, Member, Members, MyAccountState } from '../../libs/dto/member/member';
+import { NotificationGuard } from '../auth/guards/notification.guard';
 import { BadRequestException, Logger, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
@@ -83,6 +84,14 @@ export class MemberResolver {
 		return member.commissionOverride && this.isSelfOrAdmin(member, context) ? member.commissionOverride : null;
 	}
 
+	/** self only, admins included: the flag drives a screen of the organizer, nobody else has a use for it (#120) */
+	@ResolveField(() => Boolean, { nullable: true })
+	public approvalCelebrationPending(@Parent() member: Member, @Context() context: any): boolean | null {
+		const authMember = context?.req?.body?.authMember;
+		if (!authMember || String(authMember._id) !== String(member._id)) return null;
+		return member.approvalCelebrationPending === true;
+	}
+
 	@Mutation(() => Member)
 	public async signupUser(@Args('input') input: MemberInput, @Context() context: any): Promise<Member> {
 		this.logger.log('Mutation: signupUser');
@@ -117,6 +126,22 @@ export class MemberResolver {
 	public async checkAuthRoles(@AuthMember() authMember: Member): Promise<string> {
 		this.logger.log('Query: checkAuthRoles');
 		return `Hi ${authMember.memberNick ?? authMember.memberFullName ?? 'member'}, you are ${authMember.memberType} (memberId: ${authMember._id})`;
+	}
+
+	/** polled by the frontend about every 30 seconds next to getUnreadNotificationCount; a PENDING organizer passes, so do REJECTED and SUSPENDED */
+	@UseGuards(NotificationGuard)
+	@Query(() => MyAccountState)
+	public async getMyAccountState(@AuthMember('_id') memberId: ObjectId): Promise<MyAccountState> {
+		this.logger.log('Query: getMyAccountState');
+		return await this.memberService.getMyAccountState(memberId);
+	}
+
+	@Roles(MemberType.ORGANIZER)
+	@UseGuards(RolesGuard)
+	@Mutation(() => MyAccountState)
+	public async markApprovalCelebrationDone(@AuthMember('_id') memberId: ObjectId): Promise<MyAccountState> {
+		this.logger.log('Mutation: markApprovalCelebrationDone');
+		return await this.memberService.markApprovalCelebrationDone(memberId);
 	}
 
 	@UseGuards(AuthGuard)

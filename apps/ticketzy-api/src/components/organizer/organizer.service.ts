@@ -159,10 +159,23 @@ export class OrganizerService {
 		const update: T = { $set: { memberStatus: to } };
 		if (action === 'reject') update.$set.rejectReason = reason;
 		else if (action !== 'suspend') update.$unset = { rejectReason: '' };
+		// the approval celebration (#120): set in the same update as the approval, dropped when the account is suspended
+		if (action === 'verify') update.$set.approvalCelebrationPending = true;
+		if (action === 'suspend') update.$set.approvalCelebrationPending = false;
 
-		const result = await this.memberModel
-			.findOneAndUpdate({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: { $in: from } }, update, { new: false })
-			.exec();
+		let result = null;
+		if (action === 'reinstate') {
+			// REJECTED to ACTIVE is an approval and celebrates; SUSPENDED to ACTIVE is not (it falls through to the general update)
+			const approval = { $set: { ...update.$set, approvalCelebrationPending: true }, $unset: update.$unset };
+			result = await this.memberModel
+				.findOneAndUpdate({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.REJECTED }, approval, { new: false })
+				.exec();
+		}
+		if (!result) {
+			result = await this.memberModel
+				.findOneAndUpdate({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: { $in: from } }, update, { new: false })
+				.exec();
+		}
 
 		if (!result) {
 			const current = await this.memberModel.findOne({ _id: memberId, memberType: MemberType.ORGANIZER }).lean().exec();

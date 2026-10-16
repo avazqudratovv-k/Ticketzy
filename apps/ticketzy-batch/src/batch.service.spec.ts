@@ -22,7 +22,7 @@ describe('BatchService.batchEndEvents', () => {
 	beforeEach(() => {
 		eventModel = { find: jest.fn(), findOneAndUpdate: jest.fn() };
 		memberModel = { updateOne: jest.fn().mockReturnValue(exec({})) };
-		service = new BatchService(eventModel, memberModel, {} as any, {} as any, {} as any);
+		service = new BatchService(eventModel, memberModel, {} as any, {} as any, {} as any, {} as any);
 	});
 
 	it('looks only at APPROVED events whose endAt has passed', async () => {
@@ -94,7 +94,7 @@ describe('BatchService.batchExpireOrders', () => {
 		orders = new FakeModel();
 		seats = new FakeModel();
 		ticketTypeModel = { findOneAndUpdate: jest.fn().mockReturnValue(exec({ _id: 'tt' })), updateOne: jest.fn().mockReturnValue(exec({})) };
-		service = new BatchService({} as any, {} as any, orders as any, ticketTypeModel, seats as any);
+		service = new BatchService({} as any, {} as any, orders as any, ticketTypeModel, seats as any, {} as any);
 	});
 
 	it('expires PENDING_PAYMENT orders past expiresAt and releases their held seats', async () => {

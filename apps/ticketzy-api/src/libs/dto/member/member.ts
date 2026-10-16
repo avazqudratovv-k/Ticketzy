@@ -101,6 +101,10 @@ export class Member {
 	@Field(() => Date, { nullable: true })
 	deletedAt?: Date;
 
+	/** the member themselves only, not even admins (DECISIONS #120); null for everyone else, see MemberResolver */
+	@Field(() => Boolean, { nullable: true })
+	approvalCelebrationPending?: boolean;
+
 	@Field(() => Date)
 	createdAt: Date;
 
@@ -116,6 +120,16 @@ export class Member {
 
 	@Field(() => [MeFollowed], {nullable: true})
 	meFollowed?: MeFollowed[];
+}
+
+/** the small, cheap answer of `getMyAccountState`: what the frontend polls to notice an approval (always the caller's own) */
+@ObjectType()
+export class MyAccountState {
+	@Field(() => MemberStatus)
+	memberStatus: MemberStatus;
+
+	@Field(() => Boolean)
+	approvalCelebrationPending: boolean;
 }
 
 @ObjectType()

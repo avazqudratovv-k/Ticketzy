@@ -116,6 +116,15 @@ const MemberSchema = new Schema(
 			type: String,
 		},
 
+		/**
+		 * true from the moment an admin approves the organizer (PENDING or REJECTED to ACTIVE) until the organizer marks the
+		 * celebration as seen; missing or false for every other account (DECISIONS #120). Read only by the member themselves.
+		 */
+		approvalCelebrationPending: {
+			type: Boolean,
+			default: false,
+		},
+
 		/** commission percentage (0 to 100) that replaces the platform default for this organizer, optionally until endsAt */
 		commissionOverride: {
 			type: CommissionOverrideSchema,

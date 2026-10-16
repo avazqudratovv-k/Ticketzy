@@ -55,7 +55,7 @@ describe('BatchService ranking jobs never zero a rank', () => {
 			{ _id: 'e4', eventStatus: EventStatus.CANCELLED, eventLikes: 9, eventViews: 9, eventRank: 40 }, // not public: untouched
 		];
 		const { model, snapshots } = store(events, eventMatches);
-		const service = new BatchService(model, {} as any, {} as any, {} as any, {} as any);
+		const service = new BatchService(model, {} as any, {} as any, {} as any, {} as any, {} as any);
 		const hadRank = events.filter((event) => event.eventRank > 0).map((event) => event._id);
 
 		await service.batchTopEvents();
@@ -79,7 +79,7 @@ describe('BatchService ranking jobs never zero a rank', () => {
 			{ _id: 'u1', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, memberEvents: 0, memberLikes: 4, memberViews: 0, memberRank: 0 },
 		];
 		const { model, snapshots } = store(members, organizerMatches);
-		const service = new BatchService({} as any, model, {} as any, {} as any, {} as any);
+		const service = new BatchService({} as any, model, {} as any, {} as any, {} as any, {} as any);
 
 		await service.batchTopOrganizers();
 
@@ -91,12 +91,12 @@ describe('BatchService ranking jobs never zero a rank', () => {
 	it('writes nothing when no rank changed, and chunks large writes', async () => {
 		const same = [{ _id: 'e1', eventStatus: EventStatus.APPROVED, eventLikes: 1, eventViews: 1, eventRank: 3 }];
 		const first = store(same, eventMatches);
-		await new BatchService(first.model, {} as any, {} as any, {} as any, {} as any).batchTopEvents();
+		await new BatchService(first.model, {} as any, {} as any, {} as any, {} as any, {} as any).batchTopEvents();
 		expect(first.model.bulkWrite).not.toHaveBeenCalled();
 
 		const many = Array.from({ length: 1201 }, (_, i) => ({ _id: `e${i}`, eventStatus: EventStatus.APPROVED, eventLikes: 1, eventViews: 0, eventRank: 0 }));
 		const second = store(many, eventMatches);
-		await new BatchService(second.model, {} as any, {} as any, {} as any, {} as any).batchTopEvents();
+		await new BatchService(second.model, {} as any, {} as any, {} as any, {} as any, {} as any).batchTopEvents();
 		expect(second.model.bulkWrite.mock.calls.map((call) => call[0].length)).toEqual([500, 500, 201]);
 		expect(many.every((event) => event.eventRank === 2)).toBe(true);
 	});
@@ -105,7 +105,7 @@ describe('BatchService ranking jobs never zero a rank', () => {
 		const events = [{ _id: 'e1', eventStatus: EventStatus.APPROVED, eventLikes: 5, eventViews: 7, eventRank: 99 }];
 		const { model } = store(events, eventMatches);
 		model.bulkWrite.mockRejectedValue(new Error('db down'));
-		await expect(new BatchService(model, {} as any, {} as any, {} as any, {} as any).batchTopEvents()).rejects.toThrow('db down');
+		await expect(new BatchService(model, {} as any, {} as any, {} as any, {} as any, {} as any).batchTopEvents()).rejects.toThrow('db down');
 		expect(events[0].eventRank).toBe(99);
 	});
 });

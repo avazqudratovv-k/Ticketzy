@@ -352,3 +352,67 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 		});
 	});
 });
+
+describe('MemberService approval celebration (DECISIONS #120)', () => {
+	let stored: any;
+	let memberModel: any;
+	let service: MemberService;
+
+	beforeEach(() => {
+		stored = { _id: 'org-1', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: true };
+		memberModel = {
+			// like MongoDB: the update applies only when every part of the filter matches
+			updateOne: jest.fn((filter: any, update: any) => ({
+				exec: async () => {
+					const hit = Object.entries(filter).every(([key, value]) => stored[key] === value);
+					if (hit) Object.assign(stored, update.$set);
+					return { modifiedCount: hit ? 1 : 0 };
+				},
+			})),
+			findById: jest.fn((id: string) => ({ select: () => ({ lean: () => ({ exec: async () => (id === stored._id ? { ...stored } : null) }) }) })),
+		};
+		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+	});
+
+	it('clears the flag once with a conditional update true to false', async () => {
+		const result = await service.markApprovalCelebrationDone('org-1' as any);
+
+		expect(memberModel.updateOne.mock.calls[0][0]).toEqual({ _id: 'org-1', memberType: MemberType.ORGANIZER, approvalCelebrationPending: true });
+		expect(result).toEqual({ memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: false });
+	});
+
+	it('is idempotent: a second call changes nothing and does not fail', async () => {
+		await service.markApprovalCelebrationDone('org-1' as any);
+		const again = await service.markApprovalCelebrationDone('org-1' as any);
+
+		expect(again.approvalCelebrationPending).toBe(false);
+		expect(stored.approvalCelebrationPending).toBe(false);
+	});
+
+	it('only touches the caller\'s own account: another member\'s flag stays set', async () => {
+		const other = { _id: 'org-2', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: true };
+		memberModel.findById.mockImplementation((id: string) => ({ select: () => ({ lean: () => ({ exec: async () => ({ ...(id === 'org-2' ? other : stored) }) }) }) }));
+		await service.markApprovalCelebrationDone('org-2' as any);
+
+		// the id is always the token's; org-1 was not part of that call
+		expect(memberModel.updateOne.mock.calls[0][0]._id).toBe('org-2');
+		expect(stored.approvalCelebrationPending).toBe(true);
+	});
+
+	it('does nothing for a non-organizer account', async () => {
+		stored.memberType = MemberType.USER;
+		const result = await service.markApprovalCelebrationDone('org-1' as any);
+
+		expect(stored.approvalCelebrationPending).toBe(true);
+		expect(result.approvalCelebrationPending).toBe(true);
+	});
+
+	it('getMyAccountState reads a missing flag as false (every account before this feature)', async () => {
+		delete stored.approvalCelebrationPending;
+		expect(await service.getMyAccountState('org-1' as any)).toEqual({ memberStatus: MemberStatus.ACTIVE, approvalCelebrationPending: false });
+	});
+
+	it('getMyAccountState fails for an unknown member', async () => {
+		await expect(service.getMyAccountState('nobody' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+	});
+});

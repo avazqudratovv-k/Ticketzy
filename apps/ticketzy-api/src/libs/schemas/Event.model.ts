@@ -138,6 +138,11 @@ const EventSchema = new Schema(
 			type: EventModerationSchema,
 		},
 
+		/** set once by the batch job that sends the "payout is due" notifications; the claim that keeps it to one notice per event (#119) */
+		payoutDueNotifiedAt: {
+			type: Date,
+		},
+
 		deletedAt: {
 			type: Date,
 		},

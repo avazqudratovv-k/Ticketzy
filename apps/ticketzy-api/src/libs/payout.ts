@@ -54,6 +54,8 @@ export interface PayoutPipelineOptions {
 	page?: { skip: number; limit: number };
 	/** attach organizerNick and organizerEmail to the rows of the page (admin) */
 	withOrganizer?: boolean;
+	/** only events the "payout is due" job has not claimed yet (`payoutDueNotifiedAt` missing), see #119 */
+	notNotifiedOnly?: boolean;
 }
 
 /** the commission of the whole event is rounded once, half up, to whole won ($round would round halves to even) */
@@ -68,6 +70,7 @@ export const buildPayoutPipeline = (options: PayoutPipelineOptions): PipelineSta
 	const match: T = { eventStatus: { $in: payoutEventStatuses } };
 	if (options.eventId) match._id = options.eventId;
 	if (options.organizerId) match.organizerId = options.organizerId;
+	if (options.notNotifiedOnly) match.payoutDueNotifiedAt = null; // null also matches a missing field
 	if (options.titleRegex) match.$or = [{ eventTitle: options.titleRegex }, { 'eventTranslations.title': options.titleRegex }];
 
 	const dateMatch: T = {};

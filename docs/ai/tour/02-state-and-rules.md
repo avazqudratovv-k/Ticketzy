@@ -49,7 +49,7 @@ export const organizerTransitions = {
    REJECTED -------------+  (reinstate)
 ```
 
-Performed by `OrganizerService.changeStatus` (`components/organizer/organizer.service.ts`) as `findOneAndUpdate({ _id, memberType: ORGANIZER, memberStatus: { $in: from } }, update)`. `reject` stores `rejectReason`; `verify` and `reinstate` `$unset` it; `suspend` keeps no `rejectReason` change. Reasons are required for reject and suspend (`REJECT_REASON_REQUIRED`, `SUSPEND_REASON_REQUIRED`). A move from the wrong state: `INVALID_STATUS_TRANSITION`; unknown organizer: `NO_ORGANIZER_FOUND`. Each move writes an audit entry and a notification, and reject/suspend call `ConversationRealtime.setMemberRestricted(id, true)`.
+Performed by `OrganizerService.changeStatus` (`components/organizer/organizer.service.ts`) as `findOneAndUpdate({ _id, memberType: ORGANIZER, memberStatus: { $in: from } }, update)`. `reject` stores `rejectReason`; `verify` and `reinstate` `$unset` it; `suspend` keeps no `rejectReason` change. Reasons are required for reject and suspend (`REJECT_REASON_REQUIRED`, `SUSPEND_REASON_REQUIRED`). A move from the wrong state: `INVALID_STATUS_TRANSITION`; unknown organizer: `NO_ORGANIZER_FOUND`. `verify` and `reinstate` from REJECTED set `approvalCelebrationPending: true` in the same update (`reinstate` tries a REJECTED-only update first; from SUSPENDED it does not set it), `suspend` sets it to false (#120). Each move writes an audit entry and a notification, and reject/suspend call `ConversationRealtime.setMemberRestricted(id, true)`.
 
 Related: the commission override (`commissionOverride { rate 0..100, endsAt?, reason }`) is a field, not a state: set by `setCommissionOverrideByAdmin`, removed by `clearCommissionOverrideByAdmin` with one conditional `$unset` (filter requires an override to exist, `NO_COMMISSION_OVERRIDE` otherwise).
 
@@ -180,7 +180,7 @@ States: `NOT_YET_DUE`, `DUE`, `PAID_OUT`, `NOTHING_TO_PAY`. **Never stored.** Th
 3. `payoutDate > now` -> `NOT_YET_DUE`
 4. otherwise `DUE`
 
-The only write: `markPayoutPaidByAdmin` creates the `Payout` document (Flow 12). Only events in `payoutEventStatuses` = APPROVED, ENDED, CANCELLED have a row.
+The only write to payout state: `markPayoutPaidByAdmin` creates the `Payout` document (Flow 12). Separately, the batch job `batchNotifyDuePayouts` (hourly, minute 50) claims each DUE event once by setting `Event.payoutDueNotifiedAt` with a conditional update and sends the `PAYOUT_DUE` notices; a payout due more than 7 days ago is claimed but not announced (#119). The marker is not part of the status. Only events in `payoutEventStatuses` = APPROVED, ENDED, CANCELLED have a row.
 
 ### 1.11 Conversation (no status field)
 
@@ -220,7 +220,7 @@ Important: a guard only checks the *type and status*. Many operations add owners
 
 Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, **O** ACTIVE organizer, **A** ADMIN. Columns show who is let in by the guards; the last column shows service-level rules that narrow it further.
 
-### 2.2 Matrix per operation (99 operations: 42 queries, 57 mutations)
+### 2.2 Matrix per operation (101 operations: 43 queries, 58 mutations)
 
 `app.resolver.ts` has `sayHello`; the rest are listed by module. Q = Query, M = Mutation. "(M)" next to a `get...` name means it is declared as a Mutation in code (see oddities).
 
@@ -282,6 +282,8 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 **Sales (`sales.resolver.ts`)**: getEventSales, getEventAttendees, getMyEarnings (Q): `Roles(ORGANIZER)` + `RolesGuard` only (no `ActiveOrganizerGuard`), so a PENDING organizer passes the guard; `getEventSales` and `getEventAttendees` then require owning the event (`assertOwner`), `getMyEarnings` reads the caller's own events. Passes: O (and P, who has no data).
 
 **Social**: createComment (M), updateComment (M): AuthGuard (create only on a public event: APPROVED, organizer ACTIVE, else `NO_DATA_FOUND`, #117; update only your own ACTIVE comment). getComments (Q): WithoutGuard. removeCommentByAdmin (M): ADMIN. subscribe (M), unsubscribe (M): AuthGuard (follow targets must be ACTIVE organizers). getMemberFollowings (Q), getMemberFollowers (Q): WithoutGuard.
+
+**Account state (`member.resolver.ts`)**: getMyAccountState (Q): `NotificationGuard` (PENDING, REJECTED and SUSPENDED pass), always the caller's own. markApprovalCelebrationDone (M): Roles(ORGANIZER), always the caller's own, idempotent (#120).
 
 **Notifications / notices / audit**: getMyNotifications (Q), markNotificationRead (M), getUnreadNotificationCount (Q), markAllNotificationsRead (M): `NotificationGuard`. getNotices (Q): WithoutGuard. createNotice, updateNotice, removeNoticeByAdmin (M), getAllNoticesByAdmin (Q), getAuditLogsByAdmin (Q): ADMIN.
 

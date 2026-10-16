@@ -10,6 +10,7 @@ import MemberSchema from 'apps/ticketzy-api/src/libs/schemas/Member.model';
 import OrderSchema from 'apps/ticketzy-api/src/libs/schemas/Order.model';
 import TicketTypeSchema from 'apps/ticketzy-api/src/libs/schemas/TicketType.model';
 import EventSeatSchema from 'apps/ticketzy-api/src/libs/schemas/EventSeat.model';
+import NotificationSchema from 'apps/ticketzy-api/src/libs/schemas/Notification.model';
 import { validateEnv } from 'apps/ticketzy-api/src/libs/env.validation';
 
 @Module({

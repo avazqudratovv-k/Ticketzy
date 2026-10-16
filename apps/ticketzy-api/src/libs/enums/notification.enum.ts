@@ -17,6 +17,8 @@ export enum NotificationType {
 	ORDER_REFUNDED = 'ORDER_REFUNDED',
 	NEW_MESSAGE = 'NEW_MESSAGE',
 	PAYOUT_PAID = 'PAYOUT_PAID',
+	/** the payout date of an event has passed and nothing is paid yet; sent by the batch job to the organizer and the admins */
+	PAYOUT_DUE = 'PAYOUT_DUE',
 }
 registerEnumType(NotificationType, {
 	name: 'NotificationType',

@@ -41,6 +41,7 @@ Conversation 1--* Message
 | `memberRank` | number | 0 | written by the batch rank job |
 | `rejectReason` | string | | why an organizer was rejected |
 | `commissionOverride` | `{ rate 0..100, endsAt?, reason }` | none | admin override of the commission |
+| `approvalCelebrationPending` | boolean | false (missing on old accounts, read as false) | true from an approval (verify, or reinstate of a REJECTED organizer) until `markApprovalCelebrationDone`; readable by the member only (#120) |
 | `memberWarnings`, `memberBlocks` | number | 0 | declared and exposed to self/admin; no code increments them (see oddities) |
 | `deletedAt` | date | | declared; never written |
 
@@ -209,7 +210,7 @@ Written by `ConversationService`.
 
 ## 12. `notifications` (`Notification.model.ts`)
 
-Fields: `notificationType` (LIKE, COMMENT, ORDER_PAID, EVENT_REMINDER, ORGANIZER_VERIFIED/REJECTED/SUSPENDED/REINSTATED, COMMISSION_UPDATED, EVENT_APPROVED/REJECTED/CANCELLED, REFUND_COMPLETED, ORDER_REFUNDED, NEW_MESSAGE, PAYOUT_PAID), `notificationStatus` (WAIT default / READ), `notificationGroup` (MEMBER, EVENT, ORDER, CONVERSATION), `notificationTitle`, `notificationDesc`, `authorId`, `receiverId`, optional `eventId`, `orderId`, `conversationId`. Index `(receiverId, notificationStatus, createdAt: -1)`. Written only by `NotificationService.createNotification`. `EVENT_REMINDER` is in the enum; only the demo seeder (`demo-seeder.ts`, `extraNotifications`) creates one, no API code does.
+Fields: `notificationType` (LIKE, COMMENT, ORDER_PAID, EVENT_REMINDER, ORGANIZER_VERIFIED/REJECTED/SUSPENDED/REINSTATED, COMMISSION_UPDATED, EVENT_APPROVED/REJECTED/CANCELLED, REFUND_COMPLETED, ORDER_REFUNDED, NEW_MESSAGE, PAYOUT_PAID, PAYOUT_DUE), `notificationStatus` (WAIT default / READ), `notificationGroup` (MEMBER, EVENT, ORDER, CONVERSATION), `notificationTitle`, `notificationDesc`, `authorId`, `receiverId`, optional `eventId`, `orderId`, `conversationId`. Index `(receiverId, notificationStatus, createdAt: -1)`. Written only by `NotificationService.createNotification`. `EVENT_REMINDER` is in the enum; only the demo seeder (`demo-seeder.ts`, `extraNotifications`) creates one, no API code does.
 
 ## 13. `audit_logs` (`AuditLog.model.ts`)
 
