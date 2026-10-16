@@ -3,7 +3,7 @@ import * as request from 'supertest';
 import { CodedException } from './coded-exception';
 import { RateLimiter } from './rate-limiter';
 import { DEFAULT_RATE_LIMITS } from './env.validation';
-import { RateLimits, createGeneralRateLimitMiddleware, enforceLoginLimit, enforcePasswordLimit, enforceSignupLimit, getClientIp } from './rate-limit';
+import { CHECK_IN_CODE_PER_MINUTE, RateLimits, createGeneralRateLimitMiddleware, enforceCheckInCodeLimit, enforceLoginLimit, enforcePasswordLimit, enforceSignupLimit, getClientIp } from './rate-limit';
 
 const limits = (over: Partial<typeof DEFAULT_RATE_LIMITS> = {}) => new RateLimits({ ...DEFAULT_RATE_LIMITS, ...over });
 const req = (ip: string) => ({ ip });
@@ -67,6 +67,18 @@ describe('operation limits (C3-37)', () => {
 		enforcePasswordLimit(req('5.5.5.6'), 'm1', shared);
 		expect(catchError(() => enforcePasswordLimit(req('5.5.5.7'), 'm1', shared)).code).toBe('RATE_LIMITED');
 		expect(() => enforcePasswordLimit(req('5.5.5.8'), 'm2', shared)).not.toThrow();
+	});
+
+	it('check-in by ticket code: 60 per minute per organizer, then RATE_LIMITED with a retry hint', () => {
+		const shared = limits();
+		expect(CHECK_IN_CODE_PER_MINUTE).toBe(60);
+		for (let attempt = 0; attempt < 60; attempt++) enforceCheckInCodeLimit('org1', shared);
+		const error = catchError(() => enforceCheckInCodeLimit('org1', shared));
+		expect(error.code).toBe('RATE_LIMITED');
+		expect(error.retryAfterSeconds).toBeGreaterThan(0);
+		expect(() => enforceCheckInCodeLimit('org2', shared)).not.toThrow();
+		// the QR token path has no such limit and the other limits do not share its counter
+		expect(() => enforcePasswordLimit(req('7.7.7.7'), 'org1', shared)).not.toThrow();
 	});
 
 	it('the window rolls over', () => {

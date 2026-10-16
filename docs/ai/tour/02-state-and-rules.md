@@ -220,7 +220,7 @@ Important: a guard only checks the *type and status*. Many operations add owners
 
 Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, **O** ACTIVE organizer, **A** ADMIN. Columns show who is let in by the guards; the last column shows service-level rules that narrow it further.
 
-### 2.2 Matrix per operation (97 operations: 41 queries, 56 mutations)
+### 2.2 Matrix per operation (99 operations: 42 queries, 57 mutations)
 
 `app.resolver.ts` has `sayHello`; the rest are listed by module. Q = Query, M = Mutation. "(M)" next to a `get...` name means it is declared as a Mutation in code (see oddities).
 
@@ -235,7 +235,7 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 | getMember (Q) | WithoutGuard | G U P O A | target must be ACTIVE (a member can open their own page while PENDING) |
 | getOrganizers (Q) | WithoutGuard | all | ACTIVE organizers only |
 | likeTargetMember (M) | AuthGuard | U P O A | target ACTIVE |
-| imageUploader (M), imagesUploader (M) | AuthGuard (and a token before the multipart parse) | U P O A | target in `member`, `event`, `venue`; PNG/JPEG by magic bytes |
+| imageUploader (M), imagesUploader (M) | AuthGuard (and a token before the multipart parse) | U P O A | target in `member`, `event`, `venue`; PNG/JPEG by magic bytes; `imagesUploader` is all or nothing (one bad file removes the others it wrote, #117) |
 | getAllMembersByAdmin (M) | Roles(ADMIN) | A | |
 | updateMemberByAdmin (M) | Roles(ADMIN) | A | admin-safety rules of 1.1 |
 
@@ -273,7 +273,7 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 | getMyEventOrders (Q) | Roles(ORGANIZER) + ActiveOrganizerGuard | O | orders of own events; buyer shown as nick only |
 | getAllOrdersByAdmin (Q) | Roles(ADMIN) | A | |
 
-**Tickets (`ticket.resolver.ts`)**: getMyTickets (Q), getTicket (Q): AuthGuard -> own tickets. checkInTicket (M), checkInPreview (Q): Roles(ORGANIZER, ADMIN) + ActiveOrganizerGuard -> O A; a non-admin must be the event's organizer.
+**Tickets (`ticket.resolver.ts`)**: getMyTickets (Q), getTicket (Q): AuthGuard -> own tickets. checkInTicket (M), checkInPreview (Q): Roles(ORGANIZER, ADMIN) + ActiveOrganizerGuard -> O A; a non-admin must be the event's organizer. checkInTicketByCode (M), checkInPreviewByCode (Q): the same guards and rules, input `{ eventId, ticketCode }`, 60 per minute per member (#116).
 
 **Refunds (`refund.resolver.ts`)**: getRefundQuote (Q), requestRefund (M): AuthGuard, own orders. refundOrderByAdmin (M), retryEventRefundsByAdmin (M): Roles(ADMIN).
 
@@ -281,7 +281,7 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 
 **Sales (`sales.resolver.ts`)**: getEventSales, getEventAttendees, getMyEarnings (Q): `Roles(ORGANIZER)` + `RolesGuard` only (no `ActiveOrganizerGuard`), so a PENDING organizer passes the guard; `getEventSales` and `getEventAttendees` then require owning the event (`assertOwner`), `getMyEarnings` reads the caller's own events. Passes: O (and P, who has no data).
 
-**Social**: createComment (M), updateComment (M): AuthGuard (update only your own ACTIVE comment). getComments (Q): WithoutGuard. removeCommentByAdmin (M): ADMIN. subscribe (M), unsubscribe (M): AuthGuard (follow targets must be ACTIVE organizers). getMemberFollowings (Q), getMemberFollowers (Q): WithoutGuard.
+**Social**: createComment (M), updateComment (M): AuthGuard (create only on a public event: APPROVED, organizer ACTIVE, else `NO_DATA_FOUND`, #117; update only your own ACTIVE comment). getComments (Q): WithoutGuard. removeCommentByAdmin (M): ADMIN. subscribe (M), unsubscribe (M): AuthGuard (follow targets must be ACTIVE organizers). getMemberFollowings (Q), getMemberFollowers (Q): WithoutGuard.
 
 **Notifications / notices / audit**: getMyNotifications (Q), markNotificationRead (M), getUnreadNotificationCount (Q), markAllNotificationsRead (M): `NotificationGuard`. getNotices (Q): WithoutGuard. createNotice, updateNotice, removeNoticeByAdmin (M), getAllNoticesByAdmin (Q), getAuditLogsByAdmin (Q): ADMIN.
 

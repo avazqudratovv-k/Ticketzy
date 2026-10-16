@@ -8,7 +8,7 @@ import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
 import { EventSeat } from '../../libs/dto/event/event-seat';
 import { CheckInResult } from '../../libs/dto/ticket/check-in';
 import { EventStatus } from '../../libs/enums/event.enum';
-import { parseQrToken } from '../../libs/qr-token';
+import { normalizeTicketCode, parseQrToken } from '../../libs/qr-token';
 import { TicketsInquiry } from '../../libs/dto/ticket/ticket.input';
 import { Message } from '../../libs/enums/common.enum';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -80,8 +80,29 @@ export class TicketService {
 	/** Gate scan: validates the QR code and turns a VALID ticket into USED, exactly once. */
 	public async checkInTicket(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<CheckInResult> {
 		const ticket = await this.validateScan(memberId, memberType, qrToken, eventId);
+		return await this.markUsed(ticket);
+	}
 
-		// one conditional update: of two simultaneous scans only one matches VALID
+	/** The same checks as checkInTicket, and nothing is changed. */
+	public async checkInPreview(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<CheckInResult> {
+		const ticket = await this.validateScan(memberId, memberType, qrToken, eventId);
+		return await this.buildPreview(ticket);
+	}
+
+	/** Gate fallback when the camera fails: the ticket code printed under the QR code, for one event (#116). Same rules and same update as the QR path. */
+	public async checkInTicketByCode(memberId: ObjectId, memberType: MemberType, eventId: ObjectId, ticketCode: string): Promise<CheckInResult> {
+		const ticket = await this.validateCodeScan(memberId, memberType, eventId, ticketCode);
+		return await this.markUsed(ticket);
+	}
+
+	/** Preview by ticket code: the same checks as checkInTicketByCode, nothing is changed. */
+	public async checkInPreviewByCode(memberId: ObjectId, memberType: MemberType, eventId: ObjectId, ticketCode: string): Promise<CheckInResult> {
+		const ticket = await this.validateCodeScan(memberId, memberType, eventId, ticketCode);
+		return await this.buildPreview(ticket);
+	}
+
+	/** one conditional update: of two simultaneous scans only one matches VALID */
+	private async markUsed(ticket: Ticket): Promise<CheckInResult> {
 		const result = await this.ticketModel
 			.findOneAndUpdate(
 				{ _id: ticket._id, ticketStatus: TicketStatus.VALID },
@@ -97,9 +118,7 @@ export class TicketService {
 		return await this.buildResult(result);
 	}
 
-	/** The same checks as checkInTicket, and nothing is changed. */
-	public async checkInPreview(memberId: ObjectId, memberType: MemberType, qrToken: string, eventId?: ObjectId): Promise<CheckInResult> {
-		const ticket = await this.validateScan(memberId, memberType, qrToken, eventId);
+	private async buildPreview(ticket: Ticket): Promise<CheckInResult> {
 		const { qrToken: _hidden, ...visible } = ticket;
 		return await this.buildResult(visible as Ticket);
 	}
@@ -117,7 +136,30 @@ export class TicketService {
 		if (!ticket) throw new BadRequestException(Message.QR_INVALID);
 
 		if (eventId && String(ticket.eventId) !== String(eventId)) throw new BadRequestException(Message.TICKET_WRONG_EVENT);
+		return await this.assertScannable(ticket, memberId, memberType);
+	}
 
+	/**
+	 * By ticket code the event comes first: the scanner must own it (or be an admin), otherwise the answer is the same
+	 * generic not-found as for a bad format, an unknown code or a code of another event, so nothing reveals whether a code
+	 * exists. The remaining rules are the ones of the QR path.
+	 */
+	private async validateCodeScan(memberId: ObjectId, memberType: MemberType, eventId: ObjectId, ticketCode: string): Promise<Ticket> {
+		const code = normalizeTicketCode(ticketCode);
+		if (!code) throw new BadRequestException(Message.TICKET_CODE_NOT_FOUND);
+
+		const event = await this.eventModel.findOne({ _id: eventId }).select('organizerId').lean().exec();
+		if (!event || (memberType !== MemberType.ADMIN && String(event.organizerId) !== String(memberId))) {
+			throw new BadRequestException(Message.TICKET_CODE_NOT_FOUND);
+		}
+
+		const ticket = await this.ticketModel.findOne({ ticketCode: code, eventId }).lean().exec();
+		if (!ticket) throw new BadRequestException(Message.TICKET_CODE_NOT_FOUND);
+		return await this.assertScannable(ticket, memberId, memberType);
+	}
+
+	/** the rules both paths share: owning organizer (or admin), event APPROVED, ticket VALID */
+	private async assertScannable(ticket: Ticket, memberId: ObjectId, memberType: MemberType): Promise<Ticket> {
 		const event = await this.eventModel.findOne({ _id: ticket.eventId }).lean().exec();
 		if (!event) throw new BadRequestException(Message.QR_INVALID);
 		if (memberType !== MemberType.ADMIN && String(event.organizerId) !== String(memberId)) {

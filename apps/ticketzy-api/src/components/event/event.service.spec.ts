@@ -160,7 +160,7 @@ describe('EventService', () => {
 			aggregate: jest.fn().mockReturnValue(exec([{ list: [], metaCounter: [] }])),
 		};
 		venueModel = { distinct: jest.fn().mockResolvedValue(['v9']), exists: jest.fn().mockResolvedValue({ _id: 'v1' }), findById: jest.fn().mockReturnValue(lean(null)), findOne: jest.fn().mockReturnValue(lean({ _id: 'v1' })) };
-		eventSeatModel = { bulkWrite: jest.fn().mockResolvedValue({}), find: jest.fn() };
+		eventSeatModel = { bulkWrite: jest.fn().mockResolvedValue({}), find: jest.fn(), findOne: jest.fn().mockReturnValue({ select: () => lean(null) }) };
 		ticketTypeModel = { find: jest.fn(), aggregate: jest.fn().mockReturnValue(exec([])), bulkWrite: jest.fn().mockResolvedValue({}), countDocuments: jest.fn().mockReturnValue(exec(1)), deleteMany: jest.fn().mockReturnValue(exec({})) };
 		memberModel = { distinct: jest.fn().mockResolvedValue(['o9']), findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
 		memberService = { getMember: jest.fn().mockResolvedValue({ _id: 'org1' }), memberStatsEditor: jest.fn().mockResolvedValue({}) };
@@ -655,6 +655,46 @@ describe('EventService', () => {
 		it('only finds the organizer\'s own event', async () => {
 			await run(EventStatus.DRAFT);
 			expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', organizerId: 'org1' });
+		});
+
+		describe('seat layout lock (#117)', () => {
+			const OLD_VENUE = 'a'.repeat(24);
+			const NEW_VENUE = 'b'.repeat(24);
+			const edit = (status: EventStatus, patch: any, admin = false) => {
+				eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: status, venueId: OLD_VENUE, seatingType: SeatingType.RESERVED })));
+				eventModel.findOneAndUpdate.mockReturnValue(exec(draft()));
+				return admin ? service.updateEventByAdmin('admin-1' as any, { _id: 'e1', ...patch } as any) : service.updateEvent('org1' as any, { _id: 'e1', ...patch } as any);
+			};
+
+			it('refuses a venue change on an APPROVED event, for the organizer and for an admin', async () => {
+				await expect(edit(EventStatus.APPROVED, { venueId: NEW_VENUE })).rejects.toThrow(Message.EVENT_LAYOUT_LOCKED);
+				await expect(edit(EventStatus.APPROVED, { venueId: NEW_VENUE }, true)).rejects.toThrow(Message.EVENT_LAYOUT_LOCKED);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('refuses a seating type change on an APPROVED event', async () => {
+				await expect(edit(EventStatus.APPROVED, { seatingType: SeatingType.GENERAL })).rejects.toThrow(Message.EVENT_LAYOUT_LOCKED);
+			});
+
+			it('still allows other edits of an APPROVED event, and resending the same venue and seating type', async () => {
+				await expect(edit(EventStatus.APPROVED, { eventTitle: 'x', venueId: OLD_VENUE, seatingType: SeatingType.RESERVED })).resolves.toBeDefined();
+			});
+
+			it.each([EventStatus.DRAFT, EventStatus.REJECTED])('allows a venue change on a %s event without seats', async (status) => {
+				await expect(edit(status, { venueId: NEW_VENUE })).resolves.toBeDefined();
+				expect(eventSeatModel.findOne.mock.calls[0][0]).toEqual({ eventId: 'e1' });
+			});
+
+			it('refuses a venue change on a REJECTED event that still has seats from an earlier approval', async () => {
+				eventSeatModel.findOne.mockReturnValue({ select: () => lean({ _id: 's1' }) });
+				await expect(edit(EventStatus.REJECTED, { venueId: NEW_VENUE })).rejects.toThrow(Message.EVENT_LAYOUT_LOCKED);
+				expect(eventModel.findOneAndUpdate).not.toHaveBeenCalled();
+			});
+
+			it('does not look for seats when the layout is not touched', async () => {
+				await edit(EventStatus.REJECTED, { eventTitle: 'x' });
+				expect(eventSeatModel.findOne).not.toHaveBeenCalled();
+			});
 		});
 
 		it('admin content edit never changes the status of an APPROVED event', async () => {
@@ -1336,6 +1376,26 @@ describe('EventService', () => {
 			eventModel.findOne.mockReturnValue(exec(null));
 			await expect(service.likeTargetEvent('m1' as any, 'e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
 			expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+		});
+
+		describe('assertPublicEvent (comments)', () => {
+			it('only looks for APPROVED events and returns the event of an ACTIVE organizer', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED, organizerId: 'org1' })));
+				await expect(service.assertPublicEvent('e1' as any)).resolves.toMatchObject({ organizerId: 'org1' });
+				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+			});
+
+			it('answers NO_DATA_FOUND for a missing or non-APPROVED event', async () => {
+				eventModel.findOne.mockReturnValue(lean(null));
+				await expect(service.assertPublicEvent('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+				expect(memberService.getMember).not.toHaveBeenCalled();
+			});
+
+			it('answers NO_DATA_FOUND when the organizer is not ACTIVE', async () => {
+				eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED, organizerId: 'org1' })));
+				memberService.getMember.mockRejectedValue(new InternalServerErrorException(Message.NO_DATA_FOUND));
+				await expect(service.assertPublicEvent('e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+			});
 		});
 
 		it('getMyEvents lists every status of the organizer, or the one asked for', async () => {

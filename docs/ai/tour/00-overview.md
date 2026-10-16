@@ -166,7 +166,7 @@ The API validates configuration at startup in `libs/env.validation.ts` (`validat
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini key and model (default `gemini-2.5-flash`) |
 | `GEMINI_FALLBACK_MODELS` | up to 3 comma-separated fallback models; `GEMINI_FALLBACK_MODEL` (one name) is deprecated |
 | `AI_TIMEOUT_MS` (15000; 1000 to 120000), `AI_RATE_LIMIT_PER_MINUTE` (10) | per-attempt timeout, per-minute limit per member/IP |
-| `AI_DAILY_CAP` (200 in code), `AI_PER_KEY_DAILY_CAP` (10 in code) | daily AI caps kept in MongoDB. Decision #105 says 400 and 30; the code and `RUN_IN_PRODUCTION.md` say 200 and 10 (see oddities) |
+| `AI_DAILY_CAP` (200 in code), `AI_PER_KEY_DAILY_CAP` (10 in code) | daily AI caps kept in MongoDB. Decision #105 originally said 400 and 30; #118 corrects it to the 200 and 10 of the code and `RUN_IN_PRODUCTION.md` |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | only for `npm run seed` |
 | `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | only for `seed:demo` |
 | `DEMO_SEED_CONFIRM`, `DEMO_SEED_ALLOW_NON_DEMO_DB`, `ALLOW_DEMO_SEED` | safety switches of the demo commands |
@@ -239,6 +239,7 @@ Decision numbers:
 | 41 to 44, 51, 67 | venue layout model and validation; `tierKey`; `EventSeat` generation at approval; seat map visibility; layout lock; seat picker backend (`seats` by coordinates, `getSeatConfig`, `mine`) |
 | 45, 46, 47, 48, 49, 50 | seat holds; order flow and server-side pricing; commission tiers; `PaymentProvider` seam and `payOrder`; tickets and HMAC QR; expiry batch |
 | 52, 53 | QR token format `<ticketId>.<hmac>`; check-in order and `checkInPreview` |
+| 116 to 118 | check-in by ticket code; comment, upload and event-layout fixes; cron and AI cap doc corrections |
 | 54, 55, 56, 70, 110 | refunds per whole order; refund deadline rule; cancelled-event refunds; clock-independent refund tests; cancelled-event refunds now release seats |
 | 57 | `soldQuantity` for reserved events via `addSold`; sales/attendees/earnings queries |
 | 58, 59, 74 | organizer/admin chat, restricted accounts, sockets, admin starts a support conversation |

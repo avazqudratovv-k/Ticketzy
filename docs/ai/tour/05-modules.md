@@ -65,7 +65,7 @@ Notice the dependency direction: `EventModule` depends on `RefundModule` (to ref
 - `SeatService`: `holdSeats`, `releaseSeats`, `resolveSeatInput`, `getSeatConfig`, `findHeldSeats`, `markSold`, `revertSold`, `releaseOrderSeats`, `releaseSoldSeats`.
 - `OrderService`: `createCheckout`, `payOrder`, `cancelPendingOrder`, `getOrder`, `getMyOrders`, `getMyEventOrders`, `getAllOrdersByAdmin`.
 - `PaymentService`: `charge`, `record`, `refund`, `refundOrder`, `deleteRecords`.
-- `TicketService`: `getMyTickets`, `getTicket`, `checkInTicket`, `checkInPreview`.
+- `TicketService`: `getMyTickets`, `getTicket`, `checkInTicket`, `checkInPreview`, `checkInTicketByCode`, `checkInPreviewByCode` (the two code methods and the two QR methods share `assertScannable` and `markUsed`).
 - `RefundService`: `getRefundQuote`, `requestRefund`, `refundOrderByAdmin`, `refundOrdersForCancelledEvent`, `retryEventRefundsByAdmin`.
 - `SalesService`: `getEventSales`, `getEventAttendees`, `getMyEarnings`.
 - `PayoutService`: `getMyPayouts`, `getPayoutsByAdmin`, `markPayoutPaidByAdmin` (the aggregation pipeline is built by `buildPayoutPipeline` in `libs/payout.ts`).
@@ -91,7 +91,7 @@ A second NestJS application in the same monorepo (`nest-cli.json` project `ticke
 
 Each controller method wraps its call in try/catch and logs the error, so one failing job never stops the schedule. The decision text says ranks are computed first and written after, so a rank is never zero in between (#96; the old rollback job that zeroed ranks is gone). `batchEndEvents(onlyEventIds)` takes an id list so the demo seeder can end only its own events.
 
-**The crontab detail (see oddities).** `@nestjs/schedule` cron strings with six fields are `second minute hour day month weekday`. So `'20 00 * * * *'` means second 20 of minute 0 of every hour (hh:00:20), and `'40 00 * * * *'` is hh:00:40, **not** "minute 20" and "minute 40" as the comments, `AGENTS.md` and `RUN_IN_PRODUCTION.md` say. `'10 * * * * *'` (second 10 of every minute) and `'00 30 * * * *'` (hh:30:00) match their descriptions.
+**The crontab detail (see oddities).** `@nestjs/schedule` cron strings with six fields are `second minute hour day month weekday`. So `'20 00 * * * *'` means second 20 of minute 0 of every hour (hh:00:20), and `'40 00 * * * *'` is hh:00:40, **not** "minute 20" and "minute 40" (the wording the comments, `AGENTS.md` and `RUN_IN_PRODUCTION.md` used to have; corrected in decision #118). `'10 * * * * *'` (second 10 of every minute) and `'00 30 * * * *'` (hh:30:00) match their descriptions.
 
 **If the batch app never runs** (it may sleep on a free host), `RUN_IN_PRODUCTION.md` says: expiry is done by the API itself (decision #102); events stay APPROVED after `endAt`, `completedEvents` stops growing so commission tiers do not advance; ranks go stale.
 
@@ -125,7 +125,7 @@ Rules:
 
 ## 5. Uploads and storage paths
 
-- Operations: `imageUploader(file, target)` and `imagesUploader(files, target)` in `components/member/member.resolver.ts` (they live in the member module although they are generic). `target` must be in `validUploadTargets` = `['member', 'event', 'venue']` (`libs/config.ts`).
+- Operations: `imageUploader(file, target)` and `imagesUploader(files, target)` in `components/member/member.resolver.ts` (they live in the member module although they are generic). `target` must be in `validUploadTargets` = `['member', 'event', 'venue']` (`libs/config.ts`). `imagesUploader` calls `saveVerifiedImages`, which is all or nothing: files are verified and stored, and when any one fails the files already written in that request are deleted and the first error is thrown (decision #117). The frontend only uses the single-file `imageUploader`.
 - Chain: Express `createUploadAuthMiddleware` (token required for any `multipart/*` before parsing) -> `graphqlUploadExpress({ maxFileSize: UPLOAD_MAX_FILE_MB * 1,000,000, maxFiles })` -> `AuthGuard` -> `saveVerifiedImage(stream, target)`.
 - `saveVerifiedImage` reads the first 8 bytes and accepts only the PNG signature (`89 50 4E 47 0D 0A 1A 0A`) or the JPEG signature (`FF D8 FF`); the client's filename and MIME type are ignored. It creates `uploads/<target>/` if needed and writes `uploads/<target>/<uuid v4><.png|.jpg>` with a stream pipeline; on a write error the partial file is deleted and `UPLOAD_FAILED` is thrown. The returned string is the relative path; the stored value in documents is that path.
 - Files are served by `express.static('./uploads')` at `/uploads` (relative to the working directory), and `express.static('./demo-images')` at `/demo-images`. Both with `Cross-Origin-Resource-Policy: cross-origin` from helmet settings.
@@ -147,7 +147,7 @@ Rules:
 
 **How double scans are blocked.** The last step is the conditional `findOneAndUpdate({ _id, ticketStatus: VALID }, { ticketStatus: USED, checkedInAt })`. A second scan finds no `VALID` ticket and answers `TICKET_ALREADY_USED`. `checkInPreview` runs the same checks and writes nothing (a preview of a used ticket is an error, not a "used at 12:03" answer; decision #53).
 
-**Security properties and limits.** The token is useless without `QR_SECRET`; a forged id is detected by the signature; a copied screenshot of a valid code works until the ticket is used (any bearer of the text can be scanned once). Rotating `QR_SECRET` invalidates all issued tickets (`RUN_IN_PRODUCTION.md`). `ticketCode` (20 hex characters) is a separate random value shown to people, not used by check-in any more (the old `checkInTicket(ticketCode)` was replaced, decision #52).
+**Security properties and limits.** The token is useless without `QR_SECRET`; a forged id is detected by the signature; a copied screenshot of a valid code works until the ticket is used (any bearer of the text can be scanned once). Rotating `QR_SECRET` invalidates all issued tickets (`RUN_IN_PRODUCTION.md`). `ticketCode` (20 hex characters) is a separate random value shown to people. The signed token is the normal gate path; since decision #116 the code is accepted too, but only through `checkInTicketByCode` / `checkInPreviewByCode` with an event id (a code alone is never enough), rate limited to 60 per minute per organizer.
 
 ---
 

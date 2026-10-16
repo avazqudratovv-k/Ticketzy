@@ -14,7 +14,7 @@ export class BatchController {
     this.logger.debug('BATCH SERVER READY!');
   }
 
-  // ranking jobs run hourly (events at minute 20, organizers at minute 40); they compute new ranks and write them in place, no zeroing step
+  // ranking jobs run hourly (events at hh:00:20, organizers at hh:00:40: six-field cron, second first); they compute new ranks and write them in place, no zeroing step
   @Cron('20 00 * * * *', { name: BATCH_TOP_EVENTS })
   public async batchTopEvents() {
     try {

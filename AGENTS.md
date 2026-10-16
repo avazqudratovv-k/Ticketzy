@@ -47,7 +47,7 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 - Apps: `apps/ticketzy-api` and `apps/ticketzy-batch`. DTOs, enums and schemas live in `apps/ticketzy-api/src/libs`; modules in `src/components/<name>`.
 - Terms: the catalog entity is Event (with Venue, TicketType, Order, Ticket, EventSeat). The community board is gone; do not bring back old catalog terms.
 - Shared modules stay reusable: auth, member, like, view, comment (events only), follow (organizers only), socket.
-- The batch app (`apps/ticketzy-batch`) runs four jobs: ranks (events at minute 20, organizers at minute 40, computed then written in place, #96), order and seat-hold expiry (every minute, shared code in `libs/order-expiry.ts`; the API runs the same code lazily because the batch process may be asleep, #102), ending finished events (minute 30).
+- The batch app (`apps/ticketzy-batch`) runs four jobs: ranks (hourly, events at second 20 and organizers at second 40 of minute 0, computed then written in place, #96), order and seat-hold expiry (every minute, shared code in `libs/order-expiry.ts`; the API runs the same code lazily because the batch process may be asleep, #102), ending finished events (minute 30).
 - Ticket inventory changes are atomic (conditional `findOneAndUpdate`); there are no transactions (#17).
 
 ## Domain Rules (details in DECISIONS.md)

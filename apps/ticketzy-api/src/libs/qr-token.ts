@@ -26,3 +26,10 @@ export const parseQrToken = (token: unknown): string | null => {
 	if (!match) return null;
 	return verifyQrToken(match[1], match[2]) ? match[1] : null;
 };
+
+/** a ticket code as typed at the gate: spaces and dashes removed, upper case; null unless it is 20 hex characters */
+export const normalizeTicketCode = (input: unknown): string | null => {
+	if (typeof input !== 'string' || input.length > 100) return null;
+	const code = input.replace(/[\s-]/g, '').toUpperCase();
+	return /^[A-F0-9]{20}$/.test(code) ? code : null;
+};

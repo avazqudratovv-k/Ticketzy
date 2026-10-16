@@ -8,9 +8,11 @@ const MINUTE = 60_000;
 const QUARTER_HOUR = 15 * MINUTE;
 const HOUR = 60 * MINUTE;
 
+export const CHECK_IN_CODE_PER_MINUTE = 60;
+
 export const RATE_LIMITED_CODE = 'RATE_LIMITED';
 
-export type RateLimitName = 'general' | 'login' | 'loginEmail' | 'signup' | 'password';
+export type RateLimitName = 'general' | 'login' | 'loginEmail' | 'signup' | 'password' | 'checkInCode';
 
 /** the text a client sees; the number of seconds is the retry hint */
 export const rateLimitedMessage = (retryAfterSeconds: number): string => Message.RATE_LIMITED.replace('{seconds}', String(retryAfterSeconds));
@@ -36,6 +38,8 @@ export class RateLimits {
 			loginEmail: new RateLimiter(config.loginPer15Min * 2, QUARTER_HOUR),
 			signup: new RateLimiter(config.signupPerHour, HOUR),
 			password: new RateLimiter(config.passwordPer15Min, QUARTER_HOUR),
+			// ticket code check-ins and previews per organizer: a fixed number, a guessing guard rather than a tuning knob (#116)
+			checkInCode: new RateLimiter(CHECK_IN_CODE_PER_MINUTE, MINUTE),
 		};
 	}
 
@@ -101,3 +105,7 @@ export const enforcePasswordLimit = (req: any, actorId: unknown, limits: RateLim
 	limits.enforce('password', `member:${String(actorId)}`);
 	limits.enforce('password', `ip:${getClientIp(req)}`);
 };
+
+/** check-in and preview by ticket code: per acting member, so a guesser cannot walk the code space */
+export const enforceCheckInCodeLimit = (actorId: unknown, limits: RateLimits = getRateLimits()): void =>
+	limits.enforce('checkInCode', `member:${String(actorId)}`);

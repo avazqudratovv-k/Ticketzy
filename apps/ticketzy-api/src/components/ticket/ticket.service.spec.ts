@@ -213,4 +213,97 @@ describe('TicketService check-in', () => {
 			await expect(service.checkInPreview(ORG as any, MemberType.ORGANIZER, token())).rejects.toThrow(Message.TICKET_ALREADY_USED);
 		});
 	});
+
+	describe('by ticket code (#116)', () => {
+		const byCode = (code = 'CODE1', member: any = ORG, type = MemberType.ORGANIZER, eventId: any = EVENT) =>
+			service.checkInTicketByCode(member, type, eventId, code);
+		const previewByCode = (code = 'CODE1', member: any = ORG, type = MemberType.ORGANIZER, eventId: any = EVENT) =>
+			service.checkInPreviewByCode(member, type, eventId, code);
+		const CODE = 'ABCDEF0123456789ABCD';
+		beforeEach(() => {
+			tickets.docs[0].ticketCode = CODE;
+		});
+		const notFound = (promise: Promise<any>) => rejects(promise, Message.TICKET_CODE_NOT_FOUND);
+
+		it('the token path is unchanged: same operation, same result, tickets still check in by token', async () => {
+			const result: any = await scan();
+			expect(result).toMatchObject({ ticketStatus: TicketStatus.USED, buyerName: 'Ada Lovelace', ticketTypeName: 'VIP' });
+			await rejects(scan(), Message.TICKET_ALREADY_USED);
+			await rejects(scan('ABCDEF0123456789ABCD'), Message.QR_INVALID); // a ticket code is still refused as a token
+		});
+
+		it('checks in by code and gives the same result as the token path', async () => {
+			const viaCode: any = await byCode(CODE);
+			tickets.docs[0].ticketStatus = TicketStatus.VALID;
+			delete tickets.docs[0].checkedInAt;
+			const viaToken: any = await scan();
+			// FakeModel ignores the projection that hides qrToken in the shared update, so compare without it
+			const strip = (r: any) => ({ ...r, ticket: { ...r.ticket, checkedInAt: undefined, qrToken: undefined } });
+			expect(strip(viaCode)).toEqual(strip(viaToken));
+			expect(viaCode.ticketStatus).toBe(TicketStatus.USED);
+		});
+
+		it('normalizes the typed code: spaces, dashes and lower case', async () => {
+			await expect(byCode('abcd-ef01 2345-6789 abcd')).resolves.toMatchObject({ ticketStatus: TicketStatus.USED });
+		});
+
+		it.each(['', 'ABC', 'ZZZZZZZZZZZZZZZZZZZZ', 'ABCDEF0123456789ABCDE', 'ABCDEF0123456789ABC'])('a bad format (%p) is the generic not-found', async (code) => {
+			await notFound(byCode(code));
+			await notFound(previewByCode(code));
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+		});
+
+		it('a code of another event, an unknown code and a bad format give the identical answer', async () => {
+			tickets.docs.push({ _id: new ObjectId(), ticketCode: '11111111111111111111', ticketStatus: TicketStatus.VALID, eventId: OTHER_EVENT, ownerId: BUYER, ticketTypeId: TYPE });
+			const answers: string[] = [];
+			for (const code of ['11111111111111111111', '22222222222222222222', 'nonsense']) {
+				answers.push(await byCode(code).then(() => 'ok', (e) => `${e.constructor.name}:${e.message}`));
+			}
+			expect(new Set(answers).size).toBe(1);
+			expect(answers[0]).toContain(Message.TICKET_CODE_NOT_FOUND);
+			expect(tickets.docs[1].ticketStatus).toBe(TicketStatus.VALID);
+		});
+
+		it('only the owner of the event may use it; any other organizer gets the same not-found, an admin may', async () => {
+			await notFound(byCode(CODE, OTHER_ORG));
+			await notFound(previewByCode(CODE, OTHER_ORG));
+			expect(tickets.docs[0].ticketStatus).toBe(TicketStatus.VALID);
+			await expect(byCode(CODE, ADMIN, MemberType.ADMIN)).resolves.toBeDefined();
+		});
+
+		it('an unknown event is the generic not-found', async () => {
+			await notFound(byCode(CODE, ORG, MemberType.ORGANIZER, new ObjectId()));
+		});
+
+		it('double check-in by code is refused, also when two requests pass the checks together', async () => {
+			const results = await Promise.allSettled([byCode(CODE), byCode(CODE)]);
+			expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+			expect((results.find((r) => r.status === 'rejected') as any).reason.message).toBe(Message.TICKET_ALREADY_USED);
+			await rejects(byCode(CODE), Message.TICKET_ALREADY_USED);
+			await rejects(scan(), Message.TICKET_ALREADY_USED); // the token path sees the same ticket as used
+		});
+
+		it('checking in by token then by code (and the other way) is refused too', async () => {
+			await scan();
+			await rejects(byCode(CODE), Message.TICKET_ALREADY_USED);
+		});
+
+		it('applies the same status rules: refunded ticket, event not APPROVED', async () => {
+			tickets.docs[0].ticketStatus = TicketStatus.REFUNDED;
+			await rejects(byCode(CODE), Message.TICKET_REFUNDED);
+			tickets.docs[0].ticketStatus = TicketStatus.VALID;
+			events.docs[0].eventStatus = EventStatus.CANCELLED;
+			await rejects(byCode(CODE), Message.EVENT_NOT_OPEN_FOR_CHECKIN);
+			await rejects(previewByCode(CODE), Message.EVENT_NOT_OPEN_FOR_CHECKIN);
+		});
+
+		it('preview by code changes nothing and shows the same data', async () => {
+			const result: any = await previewByCode(CODE);
+			expect(result).toMatchObject({ ticketStatus: TicketStatus.VALID, buyerName: 'Ada Lovelace', seat: { sectionKey: 'A', row: 3, number: 7 } });
+			expect(result.ticket.qrToken).toBeUndefined();
+			expect(tickets.docs[0].checkedInAt).toBeUndefined();
+			await byCode(CODE);
+			await rejects(previewByCode(CODE), Message.TICKET_ALREADY_USED);
+		});
+	});
 });

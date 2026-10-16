@@ -345,6 +345,14 @@ export class EventService {
 		return result;
 	}
 
+	/** the event if it is public (APPROVED, organizer ACTIVE, #28, #30), otherwise NO_DATA_FOUND, the same answer as a missing event */
+	public async assertPublicEvent(eventId: ObjectId): Promise<Event> {
+		const target: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
+		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		await this.memberService.getMember(null, target.organizerId); // hidden when the organizer is not ACTIVE
+		return target;
+	}
+
 	public async likeTargetEvent(memberId: ObjectId, likeRefId: ObjectId): Promise<Event> {
 		const target: Event = await this.eventModel
 			.findOne({ _id: likeRefId, eventStatus: publicEventStatus })
@@ -697,6 +705,7 @@ export class EventService {
 			input.saleStartAt ?? before.saleStartAt,
 			input.saleEndAt ?? before.saleEndAt,
 		);
+		await this.assertSeatLayoutUnlocked(before, input);
 		if (input.venueId) await this.assertVenueUsable(input.venueId);
 		// only when the slot moves: an unrelated edit of an event that already overlaps (old data) is not blocked
 		if (input.venueId || input.startAt || input.endAt) {
@@ -715,6 +724,20 @@ export class EventService {
 			.exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;
+	}
+
+	/**
+	 * `venueId` and `seatingType` decide the seat layout (#117). Changing either is refused once the event is APPROVED, and
+	 * also while EventSeat rows exist (an event that was approved, edited and then rejected keeps its seats). DRAFT,
+	 * REJECTED without seats and (not editable anyway) PENDING may change them. Sending the current value is not a change.
+	 */
+	private async assertSeatLayoutUnlocked(before: Event, input: EventUpdate): Promise<void> {
+		const venueChanges = input.venueId !== undefined && String(input.venueId) !== String(before.venueId);
+		const seatingChanges = input.seatingType !== undefined && input.seatingType !== before.seatingType;
+		if (!venueChanges && !seatingChanges) return;
+		if (before.eventStatus === EventStatus.APPROVED) throw new BadRequestException(Message.EVENT_LAYOUT_LOCKED);
+		const seat = await this.eventSeatModel.findOne({ eventId: before._id }).select('_id').lean().exec();
+		if (seat) throw new BadRequestException(Message.EVENT_LAYOUT_LOCKED);
 	}
 
 	private assertValidDates(startAt: Date, endAt: Date, saleStartAt?: Date, saleEndAt?: Date): void {

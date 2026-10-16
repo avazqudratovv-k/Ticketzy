@@ -99,7 +99,7 @@ The API refuses to start, and prints every problem at once by variable **name**,
 
 ## The batch process
 
-The batch app runs four jobs: ranks (events at minute 20, organizers at minute 40), order and seat-hold expiry (every minute), ending finished events (minute 30). Options:
+The batch app runs four jobs: ranks (hourly: events at 20 seconds and organizers at 40 seconds past the full hour, `'20 00 * * * *'` and `'40 00 * * * *'`), order and seat-hold expiry (every minute), ending finished events (minute 30). Options:
 
 1. **Second Render service** (a background worker or web service, start command `npm run start:prod:batch`, same `MONGO_PROD`). A free web service sleeps and then runs nothing; a paid worker runs always.
 2. **External scheduler** calling the batch web service's `GET /` every few minutes to wake it (it runs its jobs while awake).

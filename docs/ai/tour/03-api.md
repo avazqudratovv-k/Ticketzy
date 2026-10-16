@@ -96,6 +96,7 @@ In-memory sliding windows, one `RateLimiter` per kind, per process. With more th
 | loginEmail | email | 20 / 15 min (twice the login number) | same call |
 | signup | IP | 5 / hour | `enforceSignupLimit` in `signupUser`, `signupOrganizer` |
 | password | member id and IP | 5 / 15 min | `enforcePasswordLimit` when `updateMember` / `updateMemberByAdmin` carries `memberPassword` |
+| checkInCode | member id | 60 / minute (fixed, not configurable) | `enforceCheckInCodeLimit` in `checkInTicketByCode` and `checkInPreviewByCode`; the QR token operations have no such limit (#116) |
 | AI per minute | member id or IP | 10 / minute | `AiClientService.begin` |
 | message | member id | 10 / 10 s | `ConversationService.sendLimiter` |
 | typing | member id | 30 / 10 s | socket gateway |
@@ -134,7 +135,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `getOrganizers(input)` Q | all | `OrganizersInquiry`: page/limit, `sort` in `availableOrganizerSorts`, `direction`, `search.text?` | `Members` (ACTIVE organizers; `memberEvents` replaced by the count of APPROVED events) | none | |
 | `likeTargetMember(memberId)` M | U P O A | id | `Member` | toggle `likes` row; `memberLikes` +-1 | `NO_DATA_FOUND`, `SOMETHING_WENT_WRONG` |
 | `imageUploader(file, target)` M | U P O A | upload; `target` in `member`/`event`/`venue` | path string `uploads/<target>/<uuid>.<ext>` | file on disk | `UPLOAD_FAILED`, `BAD_REQUEST`, `PROVIDE_ALLOWED_FORMAT` |
-| `imagesUploader(files, target)` M | U P O A | list of uploads | list of paths; a failed file leaves a hole (`undefined`) and is logged | files | `BAD_REQUEST` |
+| `imagesUploader(files, target)` M | U P O A | list of uploads | list of paths in input order; all or nothing: if any file fails, the files this request already wrote are deleted and the request fails (#117) | files | `BAD_REQUEST`, `PROVIDE_ALLOWED_FORMAT`, `UPLOAD_FAILED` |
 | `getAllMembersByAdmin(input)` M | A | `MembersInquiry`: sort in `availableMemberSorts`, `search.memberStatus?`, `memberType?`, `text?` (nick regex) | `Members` | none | |
 | `updateMemberByAdmin(input)` M | A | `MemberUpdate` with `_id` | `Member` | update; audit `MEMBER_UPDATED_BY_ADMIN` (field names; for status also `toStatus`) | `CANNOT_ASSIGN_ADMIN_ROLE`, `CANNOT_CHANGE_OWN_ACCESS`, `CANNOT_RESET_ADMIN_PASSWORD` (audited `ADMIN_PASSWORD_RESET_BLOCKED`), `CANNOT_CHANGE_ADMIN_ACCESS`, `USE_ORGANIZER_OPERATIONS`, `RATE_LIMITED`, `UPDATE_FAILED` |
 
@@ -164,7 +165,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | Operation | Who | Input and validation | Returns | Effect | Errors |
 |---|---|---|---|---|---|
 | `createEvent` M | O | `EventInput`: `eventCategory`, `seatingType?` (default GENERAL), `eventTitle` 3-100, `eventDesc?` 5-2000, `eventTranslations?[{locale,title 3-100,description? 5-2000}]`, `eventImages[]` required, `venueId`, `startAt`, `endAt`, `saleStartAt?`, `saleEndAt?` | `Event` (DRAFT) | insert; organizer `memberEvents` +1 | `BAD_REQUEST` (end before start), `SALES_*`, `NO_DATA_FOUND` (venue not ACTIVE), `VENUE_ALREADY_BOOKED`, `CREATE_FAILED` |
-| `updateEvent` M | O | `EventUpdate { _id, ...all optional }` | `Event` | see Flow 4; APPROVED goes to PENDING | `UPDATE_FAILED`, `EVENT_NOT_EDITABLE`, sales/venue errors |
+| `updateEvent` M | O | `EventUpdate { _id, ...all optional }` | `Event` | see Flow 4; APPROVED goes to PENDING | `UPDATE_FAILED`, `EVENT_NOT_EDITABLE`, `EVENT_LAYOUT_LOCKED` (venue or seating type of an APPROVED event or one with seats), sales/venue errors |
 | `submitEventForApproval(eventId)` M | O | id | `Event` (PENDING) | status; AI moderation in the background | `NO_DATA_FOUND`, `INVALID_EVENT_TRANSITION`, `EVENT_SUBMIT_*`, `SEAT_TIER_MISSING`, `VENUE_ALREADY_BOOKED` |
 | `cancelMyEvent` M | O | `EventReasonInput { eventId, reason (max 500, trimmed) }` | `Event` (CANCELLED) | Flow 11 | `EVENT_CANCEL_REASON_REQUIRED`, `NOT_ALLOWED_REQUEST`, `EVENT_ALREADY_CLOSED`, `INVALID_EVENT_TRANSITION` |
 | `getMyEvents` Q | O | `OrganizerEventsInquiry`: sort in `availableEventSorts`, `search.eventStatus?` | `Events` with organizer, venue, seat counts | none | |
@@ -218,6 +219,8 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `getTicket(ticketId)` Q | any logged in | id | `Ticket` | none | `NO_DATA_FOUND` (also for another member's ticket) |
 | `checkInTicket(qrToken, eventId?)` M | O A | strings | `CheckInResult` | VALID to USED | `QR_INVALID`, `TICKET_WRONG_EVENT`, `TICKET_WRONG_ORGANIZER`, `EVENT_NOT_OPEN_FOR_CHECKIN`, `TICKET_ALREADY_USED`, `TICKET_REFUNDED`, `TICKET_NOT_VALID` |
 | `checkInPreview(qrToken, eventId?)` Q | O A | same | `CheckInResult` | none | same |
+| `checkInTicketByCode(input: CheckInByCodeInput!)` M | O A | `{ eventId: String!, ticketCode: String! }` (code normalized: spaces and dashes removed, upper case, 20 hex) | `CheckInResult` | VALID to USED, same update as `checkInTicket` | `TICKET_CODE_NOT_FOUND` (bad format, unknown code, other event, event not yours: all identical), `EVENT_NOT_OPEN_FOR_CHECKIN`, `TICKET_ALREADY_USED`, `TICKET_REFUNDED`, `TICKET_NOT_VALID`, `RATE_LIMITED` |
+| `checkInPreviewByCode(input: CheckInByCodeInput!)` Q | O A | same | `CheckInResult` | none | same |
 
 ### B.9 Refunds (`components/refund`)
 
@@ -243,7 +246,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 
 | Operation | Who | Input and validation | Returns | Effect | Errors |
 |---|---|---|---|---|---|
-| `createComment` M | any logged in | `CommentInput { commentGroup (EVENT), commentContent 1-500, commentRefId }` (`memberId` set by the server) | `Comment` | insert; `eventComments` +1; notification `COMMENT` to the organizer | `CREATE_FAILED` |
+| `createComment` M | any logged in | `CommentInput { commentGroup (EVENT), commentContent 1-500, commentRefId }` (`memberId` set by the server) | `Comment` | insert; `eventComments` +1; notification `COMMENT` to the organizer; refused before the insert when the event is missing, not APPROVED or its organizer is not ACTIVE (#117) | `NO_DATA_FOUND`, `CREATE_FAILED` |
 | `updateComment` M | any logged in | `CommentUpdate { _id, commentStatus?, commentContent? 1-500 }` | `Comment` | only the author's ACTIVE comment; `commentStatus: DELETE` is a soft delete and lowers `eventComments` | `UPDATE_FAILED` |
 | `getComments(input)` Q | all | `CommentsInquiry`: sort in `availableCommentSorts`, `search.commentRefId` | `Comments` (ACTIVE, with `memberData`) | none | `NO_DATA_FOUND` |
 | `removeCommentByAdmin(commentId)` M | A | id | `Comment` | hard delete; `eventComments` -1 unless it was already soft-deleted; audit `COMMENT_REMOVED_BY_ADMIN` | `REMOVE_FAILED` |

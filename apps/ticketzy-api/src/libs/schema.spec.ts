@@ -26,13 +26,24 @@ describe('GraphQL schema (built without a database)', () => {
 		schema = await moduleRef.get(GraphQLSchemaFactory).create(loadResolvers());
 	});
 
-	it('builds, and still has the 97 operations (41 queries, 56 mutations): none was renamed or dropped', () => {
-		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(41);
-		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(56);
+	it('builds, and still has the 99 operations (42 queries, 57 mutations): none was renamed or dropped', () => {
+		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(42);
+		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(57);
 		for (const name of ['getEvents', 'getMember', 'getAllMembersByAdmin', 'updateMemberByAdmin', 'payOrder', 'imageUploader']) {
 			const fields = { ...schema.getQueryType()!.getFields(), ...schema.getMutationType()!.getFields() };
 			expect(fields[name]).toBeDefined();
 		}
+	});
+
+	it('keeps the QR check-in operations exactly as they were and adds the ticket code ones beside them (#116)', () => {
+		const args = (type: any, name: string) => Object.fromEntries(type.getFields()[name].args.map((arg: any) => [arg.name, String(arg.type)]));
+		expect(args(schema.getMutationType(), 'checkInTicket')).toEqual({ qrToken: 'String!', eventId: 'String' });
+		expect(args(schema.getQueryType(), 'checkInPreview')).toEqual({ qrToken: 'String!', eventId: 'String' });
+		expect(String(schema.getMutationType()!.getFields().checkInTicket.type)).toBe('CheckInResult!');
+		expect(args(schema.getMutationType(), 'checkInTicketByCode')).toEqual({ input: 'CheckInByCodeInput!' });
+		expect(args(schema.getQueryType(), 'checkInPreviewByCode')).toEqual({ input: 'CheckInByCodeInput!' });
+		const input = schema.getType('CheckInByCodeInput') as any;
+		expect(Object.fromEntries(Object.entries(input.getFields()).map(([k, f]: any) => [k, String(f.type)]))).toEqual({ eventId: 'String!', ticketCode: 'String!' });
 	});
 
 	it('exposes the private Member fields as nullable (they answer null to everyone but the owner and admins)', () => {

@@ -45,6 +45,7 @@ export enum Message {
 	INVALID_ORDER_DATE_RANGE = 'The start date must not be after the end date!',
 
 	INVALID_EVENT_TRANSITION = 'This event status change is not allowed from the current status!',
+	EVENT_LAYOUT_LOCKED = 'The venue and the seating type cannot change after the seats of this event were generated!',
 	EVENT_NOT_EDITABLE = 'This event cannot be edited in its current status!',
 	EVENT_REJECT_REASON_REQUIRED = 'A reason is required to reject an event!',
 	EVENT_CANCEL_REASON_REQUIRED = 'A reason is required to cancel an event!',
@@ -94,6 +95,7 @@ export enum Message {
 	ORDER_NOT_PAYABLE = 'This order can no longer be paid!',
 
 	QR_INVALID = 'This QR code is not valid!',
+	TICKET_CODE_NOT_FOUND = 'No ticket was found for this code!',
 	TICKET_WRONG_EVENT = 'This ticket is for another event!',
 	TICKET_WRONG_ORGANIZER = 'This ticket belongs to an event of another organizer!',
 	TICKET_ALREADY_USED = 'This ticket was already checked in!',

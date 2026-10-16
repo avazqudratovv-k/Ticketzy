@@ -2,7 +2,7 @@ import { Args, Context, Int, Mutation, Parent, Query, ResolveField, Resolver } f
 import { MemberService } from './member.service';
 import { OrganizersInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { CommissionOverride, Member, Members } from '../../libs/dto/member/member';
-import { Logger, UseGuards } from '@nestjs/common';
+import { BadRequestException, Logger, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { ObjectId } from 'mongoose';
@@ -10,7 +10,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { MemberType } from '../../libs/enums/member.enum';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { MemberUpdate } from '../../libs/dto/member/member.update';
-import { saveVerifiedImage, shapeIntoMongoObjectId, validUploadTargets } from '../../libs/config';
+import { saveVerifiedImage, saveVerifiedImages, shapeIntoMongoObjectId, validUploadTargets } from '../../libs/config';
 import { WithoutGuard } from '../auth/guards/without.guard';
 import { GraphQLUpload, FileUpload } from 'graphql-upload';
 import { Message } from '../../libs/enums/common.enum';
@@ -211,17 +211,12 @@ export class MemberResolver {
 
 		if (!validUploadTargets.includes(target)) throw new Error(Message.BAD_REQUEST);
 
-		const uploadedImages = [];
-		const promisedList = files.map(async (img: Promise<FileUpload>, index: number): Promise<Promise<void>> => {
-			try {
-				const { createReadStream } = await img;
-				uploadedImages[index] = await saveVerifiedImage(createReadStream(), target);
-			} catch (err) {
-				this.logger.error(`Error, file rejected: ${err.message}`);
-			}
-		});
-
-		await Promise.all(promisedList);
-		return uploadedImages;
+		// all or nothing: one rejected file removes the files already written and fails the request (#117)
+		try {
+			return await saveVerifiedImages(files, target);
+		} catch (err) {
+			this.logger.error(`Error, upload rejected: ${err.message}`);
+			throw new BadRequestException(err.message === Message.UPLOAD_FAILED ? Message.UPLOAD_FAILED : Message.PROVIDE_ALLOWED_FORMAT);
+		}
 	}
 }

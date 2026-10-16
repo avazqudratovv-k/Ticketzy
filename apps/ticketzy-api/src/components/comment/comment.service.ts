@@ -27,6 +27,8 @@ export class CommentService {
     ) {}
 
     public async createComment(memberId: ObjectId, input: CommentInput): Promise<Comment> {
+        // comments exist on public events only; a missing, hidden or unapproved event answers NO_DATA_FOUND
+        const event = await this.eventService.assertPublicEvent(input.commentRefId);
         input.memberId = memberId;
 
         let result = null;
@@ -46,13 +48,12 @@ export class CommentService {
         };
 
         // comments exist on events only (CommentGroup has a single value)
-        const event = await this.eventService.eventStatsEditor({
+        await this.eventService.eventStatsEditor({
             _id: input.commentRefId,
             targetKey: 'eventComments',
             modifier: 1,
         });
-        if (event)
-            await this.notificationService.createNotification({
+        await this.notificationService.createNotification({
                 ...notice,
                 notificationGroup: NotificationGroup.EVENT,
                 receiverId: event.organizerId,

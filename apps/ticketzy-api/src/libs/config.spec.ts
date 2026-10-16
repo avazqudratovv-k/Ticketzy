@@ -1,6 +1,7 @@
 import { Readable } from 'stream';
 import { existsSync, readdirSync, rmSync } from 'fs';
-import { detectImageExtension, escapeRegExp, saveVerifiedImage } from './config';
+import { detectImageExtension, escapeRegExp, saveVerifiedImage, saveVerifiedImages } from './config';
+import { normalizeTicketCode } from './qr-token';
 import { validateEnv } from './env.validation';
 
 const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -35,6 +36,51 @@ describe('image magic bytes', () => {
 			);
 			expect(readdirSync(`uploads/${target}`).length).toBe(before);
 		});
+	});
+});
+
+describe('saveVerifiedImages is all or nothing (#117)', () => {
+	const target = 'spec-upload-batch';
+	const files = (...contents: Buffer[]) => contents.map((content) => Promise.resolve({ createReadStream: () => Readable.from([content]) }));
+	const listing = () => (existsSync(`uploads/${target}`) ? readdirSync(`uploads/${target}`) : []);
+	afterAll(() => rmSync(`uploads/${target}`, { recursive: true, force: true }));
+
+	it('stores every file and keeps the order', async () => {
+		const urls = await saveVerifiedImages(files(png, jpeg), target);
+		expect(urls).toHaveLength(2);
+		expect(urls[0]).toMatch(/\.png$/);
+		expect(urls[1]).toMatch(/\.jpg$/);
+		urls.forEach((url) => expect(existsSync(url)).toBe(true));
+		rmSync(`uploads/${target}`, { recursive: true, force: true });
+	});
+
+	it('one bad file rejects the request and removes the files already written', async () => {
+		const before = listing().length;
+		await expect(saveVerifiedImages(files(png, Buffer.from('<?php echo 1; ?>'), jpeg), target)).rejects.toThrow('Please provide jpg, jpeg or png images!');
+		expect(listing().length).toBe(before);
+	});
+
+	it('a file whose upload promise fails also rolls everything back', async () => {
+		const before = listing().length;
+		const list = [...files(png, jpeg), Promise.reject(new Error('stream broke'))];
+		await expect(saveVerifiedImages(list as any, target)).rejects.toThrow('stream broke');
+		expect(listing().length).toBe(before);
+	});
+
+	it('removes what the injected saver wrote when a later file fails', async () => {
+		const save = jest.fn().mockResolvedValueOnce('uploads/spec-upload-batch/gone.png').mockRejectedValueOnce(new Error('disk full'));
+		await expect(saveVerifiedImages(files(png, png), target, save)).rejects.toThrow('disk full');
+		expect(save).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('normalizeTicketCode (#116)', () => {
+	it('removes spaces and dashes, upper-cases, and needs exactly 20 hex characters', () => {
+		expect(normalizeTicketCode('abcd-ef01 2345-6789 abcd')).toBe('ABCDEF0123456789ABCD');
+		expect(normalizeTicketCode(' ABCDEF0123456789ABCD ')).toBe('ABCDEF0123456789ABCD');
+		for (const bad of ['', 'ABC', 'ABCDEF0123456789ABCDE', 'GGGGGGGGGGGGGGGGGGGG', null, undefined, 42, {}, 'A'.repeat(500)]) {
+			expect(normalizeTicketCode(bad)).toBeNull();
+		}
 	});
 });
 

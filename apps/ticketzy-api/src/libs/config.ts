@@ -78,6 +78,30 @@ export const saveVerifiedImage = async (stream: Readable, target: string): Promi
 	return url;
 };
 
+/**
+ * All or nothing (#117): every file is verified and stored; if any one fails, the files this call already wrote are
+ * removed and the first failure is thrown, so a rejected request leaves no orphan on disk. Order is kept.
+ */
+export const saveVerifiedImages = async (
+	files: Promise<{ createReadStream: () => Readable }>[],
+	target: string,
+	save: (stream: Readable, target: string) => Promise<string> = saveVerifiedImage,
+): Promise<string[]> => {
+	const settled = await Promise.allSettled(
+		files.map(async (file) => {
+			const { createReadStream } = await file;
+			return await save(createReadStream(), target);
+		}),
+	);
+	const failure = settled.find((entry): entry is PromiseRejectedResult => entry.status === 'rejected');
+	if (failure) {
+		const written = settled.filter((entry): entry is PromiseFulfilledResult<string> => entry.status === 'fulfilled').map((entry) => entry.value);
+		await Promise.all(written.map((url) => unlink(url).catch(() => undefined)));
+		throw failure.reason;
+	}
+	return settled.map((entry) => (entry as PromiseFulfilledResult<string>).value);
+};
+
 /** user text must never reach new RegExp unescaped (regex injection / ReDoS) */
 export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

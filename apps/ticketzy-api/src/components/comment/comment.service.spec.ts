@@ -1,3 +1,5 @@
+import { InternalServerErrorException } from '@nestjs/common';
+import { Message } from '../../libs/enums/common.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
@@ -20,16 +22,31 @@ describe('comments are for events only', () => {
 		}
 	});
 
-	it('createComment counts the comment on the event and notifies its organizer', async () => {
-		const commentModel: any = { create: jest.fn(async (doc) => ({ _id: 'c1', ...doc })) };
-		const eventService: any = { eventStatsEditor: jest.fn().mockResolvedValue({ organizerId: 'o1' }) };
-		const notificationService: any = { createNotification: jest.fn() };
-		const service = new CommentService(commentModel, eventService, notificationService, {} as any);
+	describe('createComment', () => {
+		const make = (assertPublicEvent: jest.Mock) => {
+			const commentModel: any = { create: jest.fn(async (doc) => ({ _id: 'c1', ...doc })) };
+			const eventService: any = { assertPublicEvent, eventStatsEditor: jest.fn().mockResolvedValue({}) };
+			const notificationService: any = { createNotification: jest.fn() };
+			return { commentModel, eventService, notificationService, service: new CommentService(commentModel, eventService, notificationService, {} as any) };
+		};
+		const input = { commentGroup: CommentGroup.EVENT, commentContent: 'hi', commentRefId: 'e1' as any };
 
-		await service.createComment('u1' as any, { commentGroup: CommentGroup.EVENT, commentContent: 'hi', commentRefId: 'e1' as any });
+		it('counts the comment on a public event and notifies its organizer', async () => {
+			const { service, eventService, notificationService } = make(jest.fn().mockResolvedValue({ organizerId: 'o1' }));
+			await service.createComment('u1' as any, { ...input });
 
-		expect(eventService.eventStatsEditor).toHaveBeenCalledWith({ _id: 'e1', targetKey: 'eventComments', modifier: 1 });
-		expect(notificationService.createNotification).toHaveBeenCalledWith(expect.objectContaining({ receiverId: 'o1', eventId: 'e1' }));
+			expect(eventService.assertPublicEvent).toHaveBeenCalledWith('e1');
+			expect(eventService.eventStatsEditor).toHaveBeenCalledWith({ _id: 'e1', targetKey: 'eventComments', modifier: 1 });
+			expect(notificationService.createNotification).toHaveBeenCalledWith(expect.objectContaining({ receiverId: 'o1', eventId: 'e1' }));
+		});
+
+		it('refuses a missing or non-public event (draft, pending, unapproved organizer) before anything is written', async () => {
+			const { service, commentModel, eventService, notificationService } = make(jest.fn().mockRejectedValue(new InternalServerErrorException(Message.NO_DATA_FOUND)));
+			await expect(service.createComment('u1' as any, { ...input })).rejects.toThrow(Message.NO_DATA_FOUND);
+			expect(commentModel.create).not.toHaveBeenCalled();
+			expect(eventService.eventStatsEditor).not.toHaveBeenCalled();
+			expect(notificationService.createNotification).not.toHaveBeenCalled();
+		});
 	});
 
 	describe('deleting a comment counts it down on the event', () => {
