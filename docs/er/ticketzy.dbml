@@ -1,0 +1,553 @@
+// Ticketzy database ER diagram (dbdiagram.io DBML)
+// Source of truth: apps/ticketzy-api/src/libs/schemas/*.model.ts (the batch app registers the same schemas).
+// Conventions: _id, createdAt and updatedAt are listed on every collection (Mongoose timestamps), __v is skipped.
+// "[not null]" means Mongoose `required: true`. Embedded subdocuments are shown as json fields with the shape in the note.
+// Ref lines: only fields declared with `ref:` in Mongoose, plus the logical (stored id, no `ref:`) ones, each marked in a comment.
+
+Project ticketzy {
+  database_type: 'MongoDB'
+  Note: 'MongoDB (Mongoose) — refs are application-level, not database foreign keys'
+}
+
+// ---------------------------------------------------------------- Accounts
+
+Table members {
+  _id ObjectId [pk]
+  memberType string [default: 'USER', note: 'enum MemberType: USER | ORGANIZER | ADMIN']
+  memberStatus string [default: 'ACTIVE', note: 'enum MemberStatus: PENDING | ACTIVE | REJECTED | SUSPENDED | DELETE']
+  memberAuthType string [default: 'EMAIL', note: 'enum MemberAuthType: PHONE | EMAIL']
+  memberEmail string [not null, note: 'lowercase, trimmed, regex checked; unique only together with deletedAt (see indexes)']
+  memberPhone string [note: 'unique with deletedAt, sparse (see indexes)']
+  memberNick string [unique, note: 'unique sparse index; a deleted nick stays reserved']
+  memberPassword string [not null, note: 'select: false (never returned by default)']
+  memberFullName string
+  memberImage string [default: '']
+  memberAddress string
+  memberDesc string
+  memberEvents int [default: 0]
+  completedEvents int [default: 0]
+  memberLikes int [default: 0]
+  memberViews int [default: 0]
+  memberComments int [default: 0]
+  memberRank int [default: 0]
+  rejectReason string
+  approvalCelebrationPending boolean [default: false]
+  commissionOverride json [note: 'embedded subdocument, no _id: { rate number 0..100 required, endsAt date, reason string required }']
+  memberWarnings int [default: 0]
+  memberBlocks int [default: 0]
+  deletedAt date [note: 'soft delete tag; admin-only']
+  emailReusableAt date [note: 'deletedAt + 30 days; admin-only']
+  previousAccountId ObjectId [note: 'LOGICAL ref to members._id (no ref declared): the deleted account whose email this one reused']
+  reusedByMemberId ObjectId [note: 'LOGICAL ref to members._id (no ref declared): the new account that reused this deleted email']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (memberEmail, deletedAt) [unique, name: 'memberEmail_1_deletedAt_1', note: 'one live member per email']
+    (memberPhone, deletedAt) [unique, name: 'memberPhone_1_deletedAt_1', note: 'sparse; one live member per phone']
+    (memberType, memberStatus, createdAt) [note: 'createdAt is descending; organizer lists and rank job']
+  }
+
+  Note: 'collection: members'
+}
+
+// ---------------------------------------------------------------- Events and venues
+
+Table venues {
+  _id ObjectId [pk]
+  venueName string [not null]
+  venueType string [not null, note: 'enum VenueType: STADIUM | THEATER | CLUB | HALL | OPEN_AIR | ONLINE']
+  venueCity string [not null]
+  venueAddress string [not null]
+  venueCoordinates "number[]"
+  venueTimezone string [default: 'Asia/Seoul']
+  venueLayout json [note: 'embedded, no _id: { sections: [ { key string req, name string req, kind enum SectionKind SEATED|STANDING req, rows number 1..100 req, seatsPerRow number 1..100 req, capacity number min 1, x number default 0, y number default 0, rotation number default 0, spacing enum SectionSpacing COMPACT|NORMAL|WIDE default NORMAL, tierKey string } ] } (sections are embedded subdocuments without _id; tierKey links to ticketTypes.tierKey of an event, logically)']
+  venueCapacity int [not null, note: 'computed from venueLayout by the server']
+  venueImages "string[]" [default: `[]`]
+  venueStatus string [default: 'ACTIVE', note: 'enum VenueStatus: ACTIVE | CLOSED | DELETE']
+  memberId ObjectId [not null, note: 'ref Member (owner/creator)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (venueCity, venueName, venueAddress) [unique]
+    (venueStatus, venueCity)
+  }
+
+  Note: 'collection: venues'
+}
+
+Table events {
+  _id ObjectId [pk]
+  eventCategory string [not null, note: 'enum EventCategory: CONCERT | SPORT | FOOTBALL | COMEDY | THEATER | CONFERENCE | FESTIVAL | OTHER']
+  eventStatus string [default: 'DRAFT', note: 'enum EventStatus: DRAFT | PENDING | APPROVED | REJECTED | CANCELLED | ENDED']
+  seatingType string [default: 'GENERAL', note: 'enum SeatingType: GENERAL | RESERVED']
+  eventTitle string [not null]
+  eventDesc string
+  eventImages "string[]" [not null]
+  eventTranslations json [default: `[]`, note: 'embedded array, no _id: [ { locale enum EventLocale en|ko|ru|uz req, title string req, description string } ]']
+  eventMinPrice int [default: 0]
+  eventViews int [default: 0]
+  eventLikes int [default: 0]
+  eventComments int [default: 0]
+  eventRank int [default: 0]
+  organizerId ObjectId [not null, note: 'ref Member']
+  venueId ObjectId [not null, note: 'ref Venue']
+  startAt date [not null]
+  endAt date [not null]
+  saleStartAt date
+  saleEndAt date
+  rejectReason string
+  cancelReason string
+  eventModeration json [note: 'embedded, no _id (AI moderation): { checked boolean, flags [ { type enum ModerationFlagType DUPLICATE|SUSPICIOUS|INAPPROPRIATE|MISLEADING_PRICE req, reason string, confidence number 0..1 } ], reason string, confidence number 0..1, model string, checkedAt date }']
+  payoutDueNotifiedAt date [note: 'set once by the batch job (decision 119)']
+  deletedAt date
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (organizerId, venueId, eventTitle, startAt) [unique]
+    (eventCategory, eventStatus, startAt)
+    (eventStatus, createdAt) [note: 'createdAt descending']
+    (eventStatus, endAt) [note: 'batch job that ends finished events']
+    (venueId, startAt) [note: 'venue conflict checks']
+  }
+
+  Note: 'collection: events. eventTotalSeats / eventSoldSeats are mentioned in the docs but are NOT fields of this schema (computed in libs/seat-counts.ts).'
+}
+
+// ---------------------------------------------------------------- Sales and tickets
+
+Table ticketTypes {
+  _id ObjectId [pk]
+  eventId ObjectId [not null, note: 'ref Event']
+  ticketTypeName string [not null]
+  ticketPrice int [not null, note: 'min 0']
+  ticketCurrency string [not null, note: 'enum TicketCurrency: USD | EUR | KRW | UZS (the app only accepts KRW)']
+  tierKey string [note: 'logical link to venues.venueLayout.sections[].key tierKey of SEATED sections']
+  totalQuantity int [not null, note: 'min 0']
+  soldQuantity int [default: 0, note: 'min 0']
+  maxPerOrder int [not null, note: 'min 1']
+  saleStartAt date
+  saleEndAt date
+  ticketTypeStatus string [default: 'ACTIVE', note: 'enum TicketTypeStatus: ACTIVE | PAUSED | SOLD_OUT']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (eventId, ticketTypeName) [unique]
+    (eventId, tierKey) [unique, note: 'partial index: only where tierKey is a string']
+  }
+
+  Note: 'collection: ticketTypes'
+}
+
+Table eventSeats {
+  _id ObjectId [pk]
+  eventId ObjectId [not null, note: 'ref Event']
+  ticketTypeId ObjectId [not null, note: 'ref TicketType']
+  sectionKey string [not null]
+  "row" int [not null, note: 'min 1']
+  "number" int [not null, note: 'min 1']
+  seatStatus string [default: 'AVAILABLE', note: 'enum SeatStatus: AVAILABLE | HELD | SOLD']
+  heldBy ObjectId [note: 'ref Member (buyer holding the seat)']
+  heldUntil date
+  orderId ObjectId [note: 'ref Order']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (eventId, sectionKey, row, number) [unique]
+    (eventId, seatStatus)
+    (seatStatus, heldUntil) [note: 'batch sweep of expired holds']
+    (eventId, heldBy)
+  }
+
+  Note: 'collection: eventSeats'
+}
+
+Table orders {
+  _id ObjectId [pk]
+  orderNumber string [not null, unique]
+  orderStatus string [default: 'PENDING_PAYMENT', note: 'enum OrderStatus: PENDING_PAYMENT | PAID | FAILED | CANCELLED | EXPIRED | REFUNDED']
+  buyerId ObjectId [not null, note: 'ref Member']
+  eventId ObjectId [not null, note: 'ref Event']
+  items json [not null, note: 'embedded array, no _id: [ { ticketTypeId ObjectId req ref TicketType, quantity number min 1 req, unitPrice number req } ]']
+  seatIds "ObjectId[]" [default: `[]`, note: 'array of ref EventSeat (reserved seating)']
+  currency string
+  subtotal int [not null]
+  commissionRate decimal [not null, note: 'percent, snapshot at order time']
+  commissionAmount int [not null]
+  totalAmount int [not null]
+  expiresAt date [not null]
+  paidAt date
+  refundedAt date
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (buyerId, createdAt) [note: 'createdAt descending']
+    (eventId, orderStatus)
+    (orderStatus, expiresAt) [note: 'order expiry job']
+  }
+
+  Note: 'collection: orders'
+}
+
+Table tickets {
+  _id ObjectId [pk]
+  ticketCode string [not null, unique]
+  ticketStatus string [default: 'VALID', note: 'enum TicketStatus: VALID | USED | REFUNDED | CANCELLED']
+  qrToken string [not null, note: 'HMAC of the ticket id with QR_SECRET']
+  seatId ObjectId [note: 'ref EventSeat (reserved seating only)']
+  orderId ObjectId [not null, note: 'ref Order']
+  ticketTypeId ObjectId [not null, note: 'ref TicketType']
+  eventId ObjectId [not null, note: 'ref Event']
+  ownerId ObjectId [not null, note: 'ref Member']
+  checkedInAt date
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (ownerId, createdAt) [note: 'createdAt descending']
+    orderId
+    (eventId, ticketStatus)
+  }
+
+  Note: 'collection: tickets'
+}
+
+Table payments {
+  _id ObjectId [pk]
+  orderId ObjectId [not null, note: 'ref Order']
+  paymentProvider string [not null, note: 'enum PaymentProvider: MANUAL | MOCK | STRIPE | PAYME | CLICK']
+  providerRef string [not null, unique]
+  paymentStatus string [default: 'INITIATED', note: 'enum PaymentStatus: INITIATED | CAPTURED | FAILED | REFUNDED']
+  amount int [not null]
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (orderId, paymentStatus)
+  }
+
+  Note: 'collection: payments'
+}
+
+Table refunds {
+  _id ObjectId [pk]
+  orderId ObjectId [not null, unique, note: 'ref Order; unique: one refund per order']
+  eventId ObjectId [not null, note: 'ref Event']
+  buyerId ObjectId [not null, note: 'ref Member']
+  amount int [not null]
+  currency string
+  refundStatus string [default: 'PENDING', note: 'enum RefundStatus: PENDING | COMPLETED | FAILED']
+  refundSource string [not null, note: 'enum RefundSource: BUYER | ADMIN | EVENT_CANCELLED']
+  reason string
+  requestedBy ObjectId [note: 'ref Member; unset for refunds of a cancelled event']
+  requestedAt date [not null]
+  completedAt date
+  stockReleased boolean [default: false]
+  lockedAt date
+  failureReason string
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (eventId, refundStatus)
+  }
+
+  Note: 'collection: refunds'
+}
+
+// ---------------------------------------------------------------- Engagement
+
+Table likes {
+  _id ObjectId [pk]
+  likeGroup string [not null, note: 'enum LikeGroup: MEMBER | EVENT']
+  likeRefId ObjectId [not null, note: 'POLYMORPHIC LOGICAL ref: members._id or events._id depending on likeGroup (no ref declared)']
+  memberId ObjectId [not null, note: 'ref Member (who liked)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (memberId, likeRefId, likeGroup) [unique]
+  }
+
+  Note: 'collection: likes'
+}
+
+Table views {
+  _id ObjectId [pk]
+  viewGroup string [not null, note: 'enum ViewGroup: MEMBER | EVENT']
+  viewRefId ObjectId [not null, note: 'POLYMORPHIC LOGICAL ref: members._id or events._id depending on viewGroup (no ref declared)']
+  memberId ObjectId [not null, note: 'ref Member (who viewed)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (memberId, viewRefId, viewGroup) [unique]
+  }
+
+  Note: 'collection: views'
+}
+
+Table comments {
+  _id ObjectId [pk]
+  commentStatus string [default: 'ACTIVE', note: 'enum CommentStatus: ACTIVE | DELETE']
+  commentGroup string [not null, note: 'enum CommentGroup: EVENT (only value)']
+  commentContent string [not null]
+  commentRefId ObjectId [not null, note: 'LOGICAL ref to events._id (no ref declared)']
+  memberId ObjectId [not null, note: 'LOGICAL ref to members._id (no ref declared on this schema)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (commentRefId, commentGroup, commentStatus, createdAt) [note: 'createdAt descending']
+  }
+
+  Note: 'collection: comments'
+}
+
+Table notifications {
+  _id ObjectId [pk]
+  notificationType string [not null, note: 'enum NotificationType: LIKE | COMMENT | ORDER_PAID | EVENT_REMINDER | ORGANIZER_VERIFIED | ORGANIZER_REJECTED | ORGANIZER_SUSPENDED | ORGANIZER_REINSTATED | COMMISSION_UPDATED | EVENT_APPROVED | EVENT_REJECTED | EVENT_CANCELLED | REFUND_COMPLETED | ORDER_REFUNDED | NEW_MESSAGE | PAYOUT_PAID | PAYOUT_DUE']
+  notificationStatus string [default: 'WAIT', note: 'enum NotificationStatus: WAIT | READ']
+  notificationGroup string [not null, note: 'enum NotificationGroup: MEMBER | EVENT | ORDER | CONVERSATION']
+  notificationTitle string [not null]
+  notificationDesc string
+  authorId ObjectId [not null, note: 'ref Member']
+  receiverId ObjectId [not null, note: 'ref Member']
+  eventId ObjectId [note: 'ref Event']
+  orderId ObjectId [note: 'ref Order']
+  conversationId ObjectId [note: 'ref Conversation']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (receiverId, notificationStatus, createdAt) [note: 'createdAt descending']
+  }
+
+  Note: 'collection: notifications'
+}
+
+Table conversations {
+  _id ObjectId [pk]
+  eventId ObjectId [note: 'ref Event; absent for the general support conversation. Unique via partial index (only when it is an objectId)']
+  isSupport boolean [default: false]
+  organizerId ObjectId [not null, note: 'ref Member']
+  adminId ObjectId [default: null, note: 'ref Member; the first admin who replied']
+  lastMessageAt date [default: `now()`, note: 'Date.now']
+  unreadForOrganizer int [default: 0, note: 'min 0']
+  unreadForAdmin int [default: 0, note: 'min 0; shared by all admins']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    eventId [unique, note: 'partial: only where eventId is an objectId; one conversation per event']
+    organizerId [unique, note: 'partial: only where isSupport = true; one support conversation per organizer']
+    (organizerId, lastMessageAt) [note: 'lastMessageAt descending']
+    lastMessageAt [note: 'descending']
+  }
+
+  Note: 'collection: conversations'
+}
+
+Table messages {
+  _id ObjectId [pk]
+  conversationId ObjectId [not null, note: 'ref Conversation']
+  senderId ObjectId [not null, note: 'ref Member']
+  body string [not null, note: 'trimmed, max length 2000']
+  readAt date
+  createdAt date [note: 'timestamps: createdAt only']
+
+  indexes {
+    (conversationId, createdAt) [note: 'createdAt descending']
+  }
+
+  Note: 'collection: messages. This schema has no updatedAt.'
+}
+
+Table notices {
+  _id ObjectId [pk]
+  noticeCategory string [not null, note: 'enum NoticeCategory: FAQ | TERMS | INQUIRY']
+  noticeStatus string [default: 'ACTIVE', note: 'enum NoticeStatus: HOLD | ACTIVE | DELETE']
+  noticeTitle string [not null]
+  noticeContent string [not null]
+  memberId ObjectId [not null, note: 'ref Member (the admin author)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (noticeStatus, createdAt) [note: 'createdAt descending']
+  }
+
+  Note: 'collection: notices'
+}
+
+// ---------------------------------------------------------------- Admin and payouts
+
+Table payouts {
+  _id ObjectId [pk]
+  eventId ObjectId [not null, unique, note: 'ref Event; unique: an event is paid out once']
+  organizerId ObjectId [not null, note: 'ref Member']
+  gross int [not null, note: 'min 0']
+  commission int [not null, note: 'min 0']
+  net int [not null, note: 'min 1']
+  orderCount int [not null, note: 'min 1']
+  paidAt date [not null]
+  paidBy ObjectId [not null, note: 'ref Member (the admin who marked it paid)']
+  "note" string [note: 'max length 300']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    (organizerId, paidAt) [note: 'paidAt descending']
+  }
+
+  Note: 'collection: payouts. A document exists only after an admin marks the payout paid.'
+}
+
+Table audit_logs {
+  _id ObjectId [pk]
+  actorId ObjectId [not null, note: 'ref Member (admin)']
+  action string [not null, note: 'enum AuditAction: ORGANIZER_VERIFIED | ORGANIZER_REJECTED | ORGANIZER_SUSPENDED | ORGANIZER_REINSTATED | COMMISSION_OVERRIDE_SET | COMMISSION_OVERRIDE_CLEARED | EVENT_APPROVED | EVENT_REJECTED | EVENT_CANCELLED | ORDER_REFUNDED_BY_ADMIN | EVENT_REFUNDS_PROCESSED | EVENT_MODERATION_RUN | PAYOUT_MARKED_PAID | MEMBER_UPDATED_BY_ADMIN | ADMIN_PASSWORD_RESET_BLOCKED | EVENT_UPDATED_BY_ADMIN | EVENT_REMOVED_BY_ADMIN | COMMENT_REMOVED_BY_ADMIN | NOTICE_CREATED | NOTICE_UPDATED | NOTICE_REMOVED | SUPPORT_CONVERSATION_STARTED | ACCOUNT_DELETED_BY_OWNER']
+  targetType string [not null, note: 'enum AuditTargetType: MEMBER | EVENT | ORDER | NOTICE | COMMENT | CONVERSATION']
+  targetId ObjectId [not null, note: 'POLYMORPHIC LOGICAL ref: id of a member, event, order, notice, comment or conversation depending on targetType (no ref declared)']
+  meta json [default: `{}`, note: 'Mixed; field names only, never values (decision 94)']
+  createdAt date
+  updatedAt date
+
+  indexes {
+    createdAt [note: 'descending']
+    (targetId, createdAt) [note: 'createdAt descending']
+    (actorId, createdAt) [note: 'createdAt descending']
+  }
+
+  Note: 'collection: audit_logs'
+}
+
+Table ai_usage {
+  _id ObjectId [pk]
+  usageKey string [not null, unique, note: 'global:<day> or key:<day>:<member or ip>']
+  day string [not null, note: 'UTC day YYYY-MM-DD']
+  count int [default: 0]
+  expireAt date [not null, note: 'TTL index, expireAfterSeconds 0']
+
+  indexes {
+    expireAt [note: 'TTL index, expireAfterSeconds: 0']
+  }
+
+  Note: 'collection: ai_usage. Schema has timestamps: false, so no createdAt/updatedAt.'
+}
+
+Table demo_seed_records {
+  _id ObjectId [pk]
+  runId string [not null]
+  recordType string [not null, note: 'enum: Member | Venue | Event']
+  recordId ObjectId [not null, note: 'POLYMORPHIC LOGICAL ref: members, venues or events depending on recordType']
+  createdAt date [note: 'timestamps: createdAt only']
+
+  indexes {
+    (recordType, recordId) [unique]
+  }
+
+  Note: 'collection: demo_seed_records. Written only by npm run seed:demo; the API never reads it.'
+}
+
+Table follows {
+  _id ObjectId [pk]
+
+  Note: 'LEGACY collection `follows` (feature removed, decision 122). Schema is strict:false with no fields and autoIndex:false; documents stay in the database untouched. Registered only by demo-app.ts for reset:demo.'
+}
+
+// ---------------------------------------------------------------- Refs
+// Real ObjectId refs (declared with `ref:` in Mongoose)
+
+Ref: events.organizerId > members._id
+Ref: events.venueId > venues._id
+Ref: venues.memberId > members._id
+Ref: ticketTypes.eventId > events._id
+Ref: eventSeats.eventId > events._id
+Ref: eventSeats.ticketTypeId > ticketTypes._id
+Ref: eventSeats.heldBy > members._id
+Ref: eventSeats.orderId > orders._id
+Ref: orders.buyerId > members._id
+Ref: orders.eventId > events._id
+Ref: tickets.orderId > orders._id
+Ref: tickets.ticketTypeId > ticketTypes._id
+Ref: tickets.eventId > events._id
+Ref: tickets.ownerId > members._id
+Ref: tickets.seatId > eventSeats._id
+Ref: payments.orderId > orders._id
+Ref: refunds.orderId - orders._id
+Ref: refunds.eventId > events._id
+Ref: refunds.buyerId > members._id
+Ref: refunds.requestedBy > members._id
+Ref: payouts.eventId - events._id
+Ref: payouts.organizerId > members._id
+Ref: payouts.paidBy > members._id
+Ref: likes.memberId > members._id
+Ref: views.memberId > members._id
+Ref: notifications.authorId > members._id
+Ref: notifications.receiverId > members._id
+Ref: notifications.eventId > events._id
+Ref: notifications.orderId > orders._id
+Ref: notifications.conversationId > conversations._id
+Ref: conversations.eventId - events._id
+Ref: conversations.organizerId > members._id
+Ref: conversations.adminId > members._id
+Ref: messages.conversationId > conversations._id
+Ref: messages.senderId > members._id
+Ref: notices.memberId > members._id
+Ref: audit_logs.actorId > members._id
+
+// Embedded array of refs (orders.seatIds[] -> eventSeats) and embedded subdocument ref (orders.items[].ticketTypeId -> ticketTypes)
+// cannot be drawn as a column-level FK; the many-to-many orders <-> eventSeats is carried by eventSeats.orderId above.
+
+// Logical refs (stored id, no `ref:` declared in Mongoose)
+
+Ref: comments.commentRefId > events._id
+Ref: comments.memberId > members._id
+Ref: members.previousAccountId > members._id
+Ref: members.reusedByMemberId > members._id
+// likes.likeRefId / views.viewRefId (members or events), audit_logs.targetId (six targets) and demo_seed_records.recordId
+// are polymorphic, so they are not drawn as a Ref.
+
+// ---------------------------------------------------------------- Groups
+
+TableGroup Accounts {
+  members
+}
+
+TableGroup "Events and venues" {
+  venues
+  events
+}
+
+TableGroup "Sales and tickets" {
+  ticketTypes
+  eventSeats
+  orders
+  tickets
+  payments
+  refunds
+}
+
+TableGroup Engagement {
+  likes
+  views
+  comments
+  notifications
+  conversations
+  messages
+}
+
+TableGroup "Admin and payouts" {
+  payouts
+  notices
+  audit_logs
+  ai_usage
+  demo_seed_records
+  follows
+}

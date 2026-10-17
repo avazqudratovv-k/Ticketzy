@@ -1,0 +1,322 @@
+erDiagram
+    members ||--o{ events : "organizerId"
+    venues ||--o{ events : "venueId"
+    members ||--o{ venues : "memberId"
+    events ||--o{ ticketTypes : "eventId"
+    events ||--o{ eventSeats : "eventId"
+    ticketTypes ||--o{ eventSeats : "ticketTypeId"
+    members |o--o{ eventSeats : "heldBy"
+    orders |o--o{ eventSeats : "orderId"
+    members ||--o{ orders : "buyerId"
+    events ||--o{ orders : "eventId"
+    orders ||--o{ tickets : "orderId"
+    ticketTypes ||--o{ tickets : "ticketTypeId"
+    events ||--o{ tickets : "eventId"
+    members ||--o{ tickets : "ownerId"
+    eventSeats |o--o{ tickets : "seatId"
+    orders ||--o{ payments : "orderId"
+    orders ||--o| refunds : "orderId"
+    events ||--o{ refunds : "eventId"
+    members ||--o{ refunds : "buyerId"
+    members |o--o{ refunds : "requestedBy"
+    events ||--o| payouts : "eventId"
+    members ||--o{ payouts : "organizerId"
+    members ||--o{ payouts : "paidBy"
+    members ||--o{ likes : "memberId"
+    members ||--o{ views : "memberId"
+    members ||--o{ notifications : "authorId"
+    members ||--o{ notifications : "receiverId"
+    events |o--o{ notifications : "eventId"
+    orders |o--o{ notifications : "orderId"
+    conversations |o--o{ notifications : "conversationId"
+    events ||--o| conversations : "eventId"
+    members ||--o{ conversations : "organizerId"
+    members |o--o{ conversations : "adminId"
+    conversations ||--o{ messages : "conversationId"
+    members ||--o{ messages : "senderId"
+    members ||--o{ notices : "memberId"
+    members ||--o{ audit_logs : "actorId"
+    events ||--o{ comments : "commentRefId"
+    members ||--o{ comments : "memberId"
+    members |o--o{ members : "previousAccountId"
+    members |o--o{ members : "reusedByMemberId"
+
+    members {
+        ObjectId _id PK
+        string memberType "optional"
+        string memberStatus "optional"
+        string memberAuthType "optional"
+        string memberEmail
+        string memberPhone "optional"
+        string memberNick UK "optional"
+        string memberPassword
+        string memberFullName "optional"
+        string memberImage "optional"
+        string memberAddress "optional"
+        string memberDesc "optional"
+        int memberEvents "optional"
+        int completedEvents "optional"
+        int memberLikes "optional"
+        int memberViews "optional"
+        int memberComments "optional"
+        int memberRank "optional"
+        string rejectReason "optional"
+        boolean approvalCelebrationPending "optional"
+        json commissionOverride "embedded"
+        int memberWarnings "optional"
+        int memberBlocks "optional"
+        date deletedAt "optional"
+        date emailReusableAt "optional"
+        ObjectId previousAccountId FK "logical ref"
+        ObjectId reusedByMemberId FK "logical ref"
+        date createdAt
+        date updatedAt
+    }
+    venues {
+        ObjectId _id PK
+        string venueName
+        string venueType
+        string venueCity
+        string venueAddress
+        numberArray venueCoordinates "optional"
+        string venueTimezone "optional"
+        json venueLayout "embedded"
+        int venueCapacity
+        stringArray venueImages "optional"
+        string venueStatus "optional"
+        ObjectId memberId FK
+        date createdAt
+        date updatedAt
+    }
+    events {
+        ObjectId _id PK
+        string eventCategory
+        string eventStatus "optional"
+        string seatingType "optional"
+        string eventTitle
+        string eventDesc "optional"
+        stringArray eventImages
+        json eventTranslations "embedded"
+        int eventMinPrice "optional"
+        int eventViews "optional"
+        int eventLikes "optional"
+        int eventComments "optional"
+        int eventRank "optional"
+        ObjectId organizerId FK
+        ObjectId venueId FK
+        date startAt
+        date endAt
+        date saleStartAt "optional"
+        date saleEndAt "optional"
+        string rejectReason "optional"
+        string cancelReason "optional"
+        json eventModeration "embedded"
+        date payoutDueNotifiedAt "optional"
+        date deletedAt "optional"
+        date createdAt
+        date updatedAt
+    }
+    ticketTypes {
+        ObjectId _id PK
+        ObjectId eventId FK
+        string ticketTypeName
+        int ticketPrice
+        string ticketCurrency
+        string tierKey "optional"
+        int totalQuantity
+        int soldQuantity "optional"
+        int maxPerOrder
+        date saleStartAt "optional"
+        date saleEndAt "optional"
+        string ticketTypeStatus "optional"
+        date createdAt
+        date updatedAt
+    }
+    eventSeats {
+        ObjectId _id PK
+        ObjectId eventId FK
+        ObjectId ticketTypeId FK
+        string sectionKey
+        int row
+        int number
+        string seatStatus "optional"
+        ObjectId heldBy FK "optional"
+        date heldUntil "optional"
+        ObjectId orderId FK "optional"
+        date createdAt
+        date updatedAt
+    }
+    orders {
+        ObjectId _id PK
+        string orderNumber UK
+        string orderStatus "optional"
+        ObjectId buyerId FK
+        ObjectId eventId FK
+        json items "embedded"
+        ObjectIdArray seatIds "optional"
+        string currency "optional"
+        int subtotal
+        decimal commissionRate
+        int commissionAmount
+        int totalAmount
+        date expiresAt
+        date paidAt "optional"
+        date refundedAt "optional"
+        date createdAt
+        date updatedAt
+    }
+    tickets {
+        ObjectId _id PK
+        string ticketCode UK
+        string ticketStatus "optional"
+        string qrToken
+        ObjectId seatId FK "optional"
+        ObjectId orderId FK
+        ObjectId ticketTypeId FK
+        ObjectId eventId FK
+        ObjectId ownerId FK
+        date checkedInAt "optional"
+        date createdAt
+        date updatedAt
+    }
+    payments {
+        ObjectId _id PK
+        ObjectId orderId FK
+        string paymentProvider
+        string providerRef UK
+        string paymentStatus "optional"
+        int amount
+        date createdAt
+        date updatedAt
+    }
+    refunds {
+        ObjectId _id PK
+        ObjectId orderId FK
+        ObjectId eventId FK
+        ObjectId buyerId FK
+        int amount
+        string currency "optional"
+        string refundStatus "optional"
+        string refundSource
+        string reason "optional"
+        ObjectId requestedBy FK "optional"
+        date requestedAt
+        date completedAt "optional"
+        boolean stockReleased "optional"
+        date lockedAt "optional"
+        string failureReason "optional"
+        date createdAt
+        date updatedAt
+    }
+    likes {
+        ObjectId _id PK
+        string likeGroup
+        ObjectId likeRefId "logical ref"
+        ObjectId memberId FK
+        date createdAt
+        date updatedAt
+    }
+    views {
+        ObjectId _id PK
+        string viewGroup
+        ObjectId viewRefId "logical ref"
+        ObjectId memberId FK
+        date createdAt
+        date updatedAt
+    }
+    comments {
+        ObjectId _id PK
+        string commentStatus "optional"
+        string commentGroup
+        string commentContent
+        ObjectId commentRefId FK "logical ref"
+        ObjectId memberId FK "logical ref"
+        date createdAt
+        date updatedAt
+    }
+    notifications {
+        ObjectId _id PK
+        string notificationType
+        string notificationStatus "optional"
+        string notificationGroup
+        string notificationTitle
+        string notificationDesc "optional"
+        ObjectId authorId FK
+        ObjectId receiverId FK
+        ObjectId eventId FK "optional"
+        ObjectId orderId FK "optional"
+        ObjectId conversationId FK "optional"
+        date createdAt
+        date updatedAt
+    }
+    conversations {
+        ObjectId _id PK
+        ObjectId eventId FK "optional"
+        boolean isSupport "optional"
+        ObjectId organizerId FK
+        ObjectId adminId FK "optional"
+        date lastMessageAt "optional"
+        int unreadForOrganizer "optional"
+        int unreadForAdmin "optional"
+        date createdAt
+        date updatedAt
+    }
+    messages {
+        ObjectId _id PK
+        ObjectId conversationId FK
+        ObjectId senderId FK
+        string body
+        date readAt "optional"
+        date createdAt
+    }
+    notices {
+        ObjectId _id PK
+        string noticeCategory
+        string noticeStatus "optional"
+        string noticeTitle
+        string noticeContent
+        ObjectId memberId FK
+        date createdAt
+        date updatedAt
+    }
+    payouts {
+        ObjectId _id PK
+        ObjectId eventId FK
+        ObjectId organizerId FK
+        int gross
+        int commission
+        int net
+        int orderCount
+        date paidAt
+        ObjectId paidBy FK
+        string note "optional"
+        date createdAt
+        date updatedAt
+    }
+    audit_logs {
+        ObjectId _id PK
+        ObjectId actorId FK
+        string action
+        string targetType
+        ObjectId targetId "logical ref"
+        json meta "embedded"
+        date createdAt
+        date updatedAt
+    }
+    ai_usage {
+        ObjectId _id PK
+        string usageKey UK
+        string day
+        int count "optional"
+        date expireAt
+    }
+    demo_seed_records {
+        ObjectId _id PK
+        string runId
+        string recordType
+        ObjectId recordId "logical ref"
+        date createdAt
+    }
+    follows {
+        ObjectId _id PK
+    }
