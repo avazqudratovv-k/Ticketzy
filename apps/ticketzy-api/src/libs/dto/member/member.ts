@@ -90,9 +90,21 @@ export class Member {
 	@Field(() => Int, { nullable: true })
 	memberBlocks?: number;
 
-	/** only returned to the member themselves and to admins, see MemberResolver */
+	/** admins only (DECISIONS #123, #90), see MemberResolver */
 	@Field(() => Date, { nullable: true })
 	deletedAt?: Date;
+
+	/** admins only: deletedAt + 30 days, the first moment the email may open a new account */
+	@Field(() => Date, { nullable: true })
+	emailReusableAt?: Date;
+
+	/** admins only: on a new account that reused the email of a deleted one */
+	@Field(() => String, { nullable: true })
+	previousAccountId?: ObjectId;
+
+	/** admins only: on a deleted account whose email was reused */
+	@Field(() => String, { nullable: true })
+	reusedByMemberId?: ObjectId;
 
 	/** the member themselves only, not even admins (DECISIONS #120); null for everyone else, see MemberResolver */
 	@Field(() => Boolean, { nullable: true })

@@ -361,6 +361,29 @@ export class OrderService {
 	}
 
 	/**
+	 * Account deletion (#123): every unpaid order of the buyer becomes CANCELLED and gives its seats or stock back. Paid orders
+	 * are not touched. Each order is one conditional update (PENDING_PAYMENT only), so a payment that wins the race keeps its
+	 * order; an order that fails to release is logged and left for the expiry job, which frees it within the hold time.
+	 */
+	public async cancelAllPendingOrdersOf(memberId: ObjectId): Promise<number> {
+		const pending = await this.orderModel.find({ buyerId: memberId, orderStatus: OrderStatus.PENDING_PAYMENT }).lean().exec();
+		let cancelled = 0;
+		for (const candidate of pending) {
+			const order = await this.orderModel
+				.findOneAndUpdate({ _id: candidate._id, buyerId: memberId, orderStatus: OrderStatus.PENDING_PAYMENT }, { orderStatus: OrderStatus.CANCELLED }, { new: true })
+				.exec();
+			if (!order) continue;
+			cancelled++;
+			try {
+				await this.releaseResources(order);
+			} catch (err) {
+				this.logger.error(`Resources of cancelled order ${order._id} not released: ${(err as Error)?.message ?? 'error'}`);
+			}
+		}
+		return cancelled;
+	}
+
+	/**
 	 * The buyer's own abandoned checkouts become EXPIRED (and give their seats or stock back) when the buyer looks at their
 	 * orders, so an old PENDING_PAYMENT never shows up after its time even when the batch app is asleep (DECISIONS #102).
 	 * Same conditional update as `payOrder` uses, so repeating it is harmless; a failure here never fails the read.

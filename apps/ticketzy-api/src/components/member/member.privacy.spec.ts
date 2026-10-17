@@ -26,7 +26,9 @@ const PUBLIC_FIELDS = [
 /** public only for ORGANIZER accounts (organization name and address), private for everyone else */
 const ORGANIZER_PUBLIC_FIELDS = ['memberFullName', 'memberAddress'];
 /** the member themselves and admins only */
-const PRIVATE_FIELDS = ['memberEmail', 'memberPhone', 'memberWarnings', 'memberBlocks', 'deletedAt', 'rejectReason', 'commissionOverride'];
+const PRIVATE_FIELDS = ['memberEmail', 'memberPhone', 'memberWarnings', 'memberBlocks', 'rejectReason', 'commissionOverride'];
+/** admins only: not even the member themselves (DECISIONS #123, #90) */
+const ADMIN_ONLY_FIELDS = ['deletedAt', 'emailReusableAt', 'previousAccountId', 'reusedByMemberId'];
 /** the member themselves only: admins get null too (DECISIONS #120) */
 const SELF_ONLY_FIELDS = ['approvalCelebrationPending'];
 /** returned only by login and signup, which authenticate the caller by password */
@@ -50,6 +52,9 @@ const buyer = {
 	memberWarnings: 2,
 	memberBlocks: 1,
 	deletedAt: new Date('2026-01-01'),
+	emailReusableAt: new Date('2026-01-31'),
+	previousAccountId: 'old-account',
+	reusedByMemberId: 'new-account',
 	rejectReason: 'private reason',
 	commissionOverride: { rate: 3, reason: 'x' },
 } as unknown as Member;
@@ -67,13 +72,13 @@ describe('Member field privacy', () => {
 	const read = (field: string, member: Member, context: any) => (resolver as any)[field](member, context);
 
 	it('lists every Member field in exactly one group (a new field must be classified)', () => {
-		const classified = [...PUBLIC_FIELDS, ...ORGANIZER_PUBLIC_FIELDS, ...PRIVATE_FIELDS, ...SELF_ONLY_FIELDS, ...TOKEN_FIELDS];
+		const classified = [...PUBLIC_FIELDS, ...ORGANIZER_PUBLIC_FIELDS, ...PRIVATE_FIELDS, ...ADMIN_ONLY_FIELDS, ...SELF_ONLY_FIELDS, ...TOKEN_FIELDS];
 		expect(new Set(classified).size).toBe(classified.length);
 		expect([...memberFieldNames()].sort()).toEqual([...classified].sort());
 	});
 
 	it('has a resolver gate for every private field and for the organizer-only fields', () => {
-		for (const field of [...PRIVATE_FIELDS, ...SELF_ONLY_FIELDS, ...ORGANIZER_PUBLIC_FIELDS]) {
+		for (const field of [...PRIVATE_FIELDS, ...ADMIN_ONLY_FIELDS, ...SELF_ONLY_FIELDS, ...ORGANIZER_PUBLIC_FIELDS]) {
 			expect(typeof (resolver as any)[field]).toBe('function');
 		}
 		for (const field of PUBLIC_FIELDS) expect((resolver as any)[field]).toBeUndefined();
@@ -88,6 +93,15 @@ describe('Member field privacy', () => {
 	it.each(PRIVATE_FIELDS)('%s is shown to the member themselves and to admins', (field) => {
 		expect(read(field, buyer, self(buyer))).not.toBeNull();
 		expect(read(field, buyer, admin)).not.toBeNull();
+	});
+
+	it.each(ADMIN_ONLY_FIELDS)('%s is shown to admins only, not to guests, other members or the member themselves', (field) => {
+		expect(read(field, buyer, admin)).not.toBeNull();
+		expect(read(field, buyer, guest)).toBeNull();
+		expect(read(field, buyer, stranger)).toBeNull();
+		expect(read(field, buyer, self(buyer))).toBeNull();
+		expect(read(field, organizer, self(organizer))).toBeNull();
+		expect(read(field, buyer, { req: {} })).toBeNull();
 	});
 
 	it.each(SELF_ONLY_FIELDS)('%s is shown to the member themselves only, not to guests, other members or admins', (field) => {

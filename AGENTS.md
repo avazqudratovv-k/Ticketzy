@@ -21,6 +21,7 @@ npm run seed:demo          # demo data (needs DEMO_SEED_CONFIRM and four DEMO_*_
 npm run reset:demo         # removes only what seed:demo tracked
 npm run check:demo         # read-only consistency report of the demo data
 npm run report:currency    # read-only report of ticket types that are not in KRW (#95), needs the database
+npm run migrate:member-indexes  # one-off: swaps the unique email/phone indexes of members (#124); dry run, add `-- --apply` (needs MEMBER_INDEX_MIGRATION_CONFIRM); never run it against a real database without the owner
 npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit
 npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 ```
@@ -52,7 +53,8 @@ npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
 
 ## Domain Rules (details in DECISIONS.md)
 
-- Member privacy: only the fields listed in #90 are public; `memberPhone`, `memberEmail`, warnings, blocks, `deletedAt` are for the member and admins, full name and address only for organizers. A new `Member` `@Field` must be classified in `member.privacy.spec.ts`.
+- Account deletion (#123, #124): `deleteMyAccount` / `getMyAccountDeletionCheck` (`components/account`) soft delete (status DELETE plus tags, nothing removed); organizers with events in review, not ended or payouts not paid are refused (`ACCOUNT_DELETE_BLOCKED` with `reasons`); the email is reusable 30 days later (`EMAIL_RECENTLY_DELETED` before), uniqueness is per live member (`libs/member-indexes.ts`); a deleted nick stays reserved; admins cannot set or change DELETE.
+- Member privacy: only the fields listed in #90 are public; `memberPhone`, `memberEmail`, warnings, blocks are for the member and admins, the deletion tags (`deletedAt`, `emailReusableAt`, `previousAccountId`, `reusedByMemberId`) for admins only (#123), full name and address only for organizers. A new `Member` `@Field` must be classified in `member.privacy.spec.ts`.
 - Payments: `PAYMENT_MODE=simulated|disabled`, required in production (#92). No real provider exists; `payOrder` is the mock. Ticket types are KRW only, one currency per event (#95).
 - Uploads: multipart requests need a valid bearer token before they are parsed (`libs/upload-guard.ts`, #98). Admins cannot reset another admin's password (#93).
 - Payouts: one per event, due event end + 3 days in the venue timezone, status computed (never stored), a `Payout` document is created only when an admin marks it paid. `libs/payout.ts`, `components/payout` (#76 to #78).

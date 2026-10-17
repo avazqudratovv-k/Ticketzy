@@ -1,5 +1,6 @@
 import { Schema } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../enums/member.enum';
+import { MEMBER_EMAIL_INDEX, MEMBER_PHONE_INDEX } from '../member-indexes';
 
 const CommissionOverrideSchema = new Schema(
 	{
@@ -30,9 +31,9 @@ const MemberSchema = new Schema(
 			default: MemberAuthType.EMAIL,
 		},
 
+		// unique among live accounts only: see the compound index below (DECISIONS #123)
 		memberEmail: {
 			type: String,
-			index: { unique: true },
 			required: true,
 			lowercase: true,
 			trim: true,
@@ -41,7 +42,6 @@ const MemberSchema = new Schema(
 
 		memberPhone: {
 			type: String,
-			index: { unique: true, sparse: true },
 		},
 
 		memberNick: {
@@ -130,12 +130,32 @@ const MemberSchema = new Schema(
 			default: 0,
 		},
 
+		/** set when the owner deletes the account (DECISIONS #123); a live account has none. Admin-only tag. */
 		deletedAt: {
 			type: Date,
+		},
+
+		/** deletedAt + 30 days: the first moment the email of a deleted account may open a new account. Admin-only tag. */
+		emailReusableAt: {
+			type: Date,
+		},
+
+		/** on a new account that reused the email of a deleted one: that deleted account. Admin-only tag. */
+		previousAccountId: {
+			type: Schema.Types.ObjectId,
+		},
+
+		/** on a deleted account whose email was reused: the new account. Admin-only tag. */
+		reusedByMemberId: {
+			type: Schema.Types.ObjectId,
 		},
 	},
 	{ timestamps: true, collection: 'members' },
 );
+
+// one live member per email and per phone; deleted accounts keep theirs (DECISIONS #123, libs/member-indexes.ts)
+MemberSchema.index(MEMBER_EMAIL_INDEX.key, { name: MEMBER_EMAIL_INDEX.name, unique: true });
+MemberSchema.index(MEMBER_PHONE_INDEX.key, { name: MEMBER_PHONE_INDEX.name, unique: true, sparse: true });
 
 // organizer lists (getOrganizers, getOrganizersByAdmin, the rank job) filter by type and status
 MemberSchema.index({ memberType: 1, memberStatus: 1, createdAt: -1 });

@@ -7,6 +7,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { NotificationStatus, NotificationType } from '../../libs/enums/notification.enum';
 import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
+import { maskDeletedMember } from '../../libs/account-deletion';
 
 /** people are not told about their own likes and comments; system messages (e.g. ORDER_PAID) may go to the author */
 const selfNotifiedTypes = [NotificationType.LIKE, NotificationType.COMMENT, NotificationType.NEW_MESSAGE];
@@ -54,6 +55,8 @@ export class NotificationService {
 			.exec();
 
 		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		// the author of a notification may have deleted their account since (#123)
+		for (const notification of result[0].list) notification.authorData = maskDeletedMember(notification.authorData);
 		return result[0];
 	}
 

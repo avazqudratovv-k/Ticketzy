@@ -86,7 +86,7 @@ ticketzy/
 └── node_modules/
 ```
 
-Inside `apps/ticketzy-api/src/components/` (22 feature modules, listed in `components.module.ts`):
+Inside `apps/ticketzy-api/src/components/` (23 feature modules, listed in `components.module.ts`):
 
 | Folder | What it owns |
 |---|---|
@@ -102,6 +102,7 @@ Inside `apps/ticketzy-api/src/components/` (22 feature modules, listed in `compo
 | `ticket` | ticket reads, QR check-in |
 | `refund` | buyer, admin, and cancelled-event refunds |
 | `payout` | organizer payout list and "mark paid" |
+| `account` | delete one's own account (soft delete), the deletion check (#123) |
 | `sales` | organizer sales numbers |
 | `conversation` | organizer/admin chat service + realtime rooms |
 | `notification`, `notice`, `audit-log` | in-app notifications, public notices, admin audit trail |
@@ -125,6 +126,7 @@ npm run seed:demo          # fill a database with demo data (guarded)
 npm run reset:demo         # remove only what seed:demo tracked
 npm run check:demo         # read-only consistency report
 npm run report:currency    # read-only report of ticket types not in KRW
+npm run migrate:member-indexes  # one-off index swap for account deletion (#124); dry run, then -- --apply
 npm run ai:check           # real requests to the AI vendor (uses the key in .env)
 npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit
 npx tsc -p apps/ticketzy-batch/tsconfig.app.json --noEmit
@@ -156,7 +158,7 @@ The API validates configuration at startup in `libs/env.validation.ts` (`validat
 | `PORT`, `PORT_API`, `PORT_BATCH` | listen port: `PORT`, then `PORT_API` (batch: `PORT_BATCH`), then 3000 |
 | `TRUST_PROXY_HOPS` | proxies in front of the API (1 in production, else 0; max 5) |
 | `RATE_LIMIT_GENERAL_PER_MINUTE` (300), `RATE_LIMIT_LOGIN_PER_15_MIN` (10), `RATE_LIMIT_SIGNUP_PER_HOUR` (5), `RATE_LIMIT_PASSWORD_PER_15_MIN` (5) | in-memory rate limits |
-| `SEAT_HOLD_SECONDS` | length of a seat hold / unpaid general order (30; 1 to 3600) |
+| `SEAT_HOLD_SECONDS` | length of a seat hold / unpaid general order (120; 1 to 3600) |
 | `UPLOAD_MAX_FILE_MB` (15; 1 to 50), `UPLOAD_MAX_FILES` (10; 1 to 20) | upload limits |
 | `LOG_LEVEL` | `error`, `warn`, `log`, `debug`, `verbose` (warn in production, verbose otherwise) |
 | `MONGO_AUTO_INDEX` | `false` stops index building at startup (default true) |
@@ -248,6 +250,7 @@ Decision numbers:
 | 64, 65, 66, 113 | distinct login error codes; small fixes (search, comment counters, public counts); comment length; nick length and `VALIDATION_FAILED` with field names |
 | 68, 69, 71, 72, 73, 75 | order/ticket queries return event+venue; organizer cancel and `getMyEventOrders`; sales window validation; admin safety rules; no admin promotion; second admin seed |
 | 76, 77, 78 | payout rules, computed payout status, `markPayoutPaidByAdmin` |
+| 123, 124, 125 | account deletion (soft delete) and its blockers; email reusable after 30 days with per-live-member uniqueness; `SEAT_HOLD_SECONDS` default 120 |
 | 79 | `eventTotalSeats` / `eventSoldSeats` on event lists |
 | 80, 81, 82 | only `USER` can buy; protected operations; existing non-USER orders left alone |
 | 83, 84 | venue double-booking refused; admin-only `possibleVenueConflicts` |

@@ -34,13 +34,14 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | 15000, 10 | per-request timeout (our own abort, not a Google deadline) and per-minute limit per member or IP |
 | `AI_DAILY_CAP` | 200 | AI model calls per UTC day for the whole app, kept in MongoDB; `0` turns the AI off. Every attempt counts (a retry, a fallback model, a 429), a model skipped during its cooldown does not. One assistant question makes 1 to 5 calls. Keep it at or below what the daily limits of the models in the chain add up to |
 | `AI_PER_KEY_DAILY_CAP` | 10 | AI operations per member or IP per UTC day (about 10 to 50 model calls at most), so a few visitors cannot use up the shared cap |
-| `SEAT_HOLD_SECONDS` | 30 | length of a seat hold and an unpaid general-admission order (1 to 3600); use 300 for a demo |
+| `SEAT_HOLD_SECONDS` | 120 | length of a seat hold and an unpaid general-admission order (1 to 3600); use 300 for a demo |
 | `UPLOAD_MAX_FILE_MB`, `UPLOAD_MAX_FILES` | 15, 10 | image upload limits |
 | `LOG_LEVEL` | `warn` in production | `error`, `warn`, `log`, `debug` or `verbose` |
 | `MONGO_AUTO_INDEX` | `true` | `false` stops the API building indexes at startup (set it after the first deploy if cold starts matter) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | none | only for `npm run seed` (the admin accounts); remove `ADMIN_PASSWORD` from the host afterwards |
 | `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | none | only for `npm run seed:demo`: strong passwords (12+ characters, three kinds, no common words) of the demo accounts; remove them from the host afterwards |
 | `DEMO_SEED_CONFIRM` | none | only for `seed:demo` and `reset:demo`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use |
+| `MEMBER_INDEX_MIGRATION_CONFIRM` | none | only for `npm run migrate:member-indexes -- --apply`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use (see "Upgrading member indexes") |
 | `DEMO_SEED_ALLOW_NON_DEMO_DB` | `false` | `true` lets the demo commands run against a database that already holds data the seed did not create |
 | `ALLOW_DEMO_SEED` | `false` | the demo commands refuse `NODE_ENV=production` unless this is `true` |
 
@@ -58,6 +59,35 @@ The API refuses to start, and prints every problem at once by variable **name**,
 4. `npm run check:demo` first (read only) to see what is there, then `npm run seed:demo`; later `npm run reset:demo`. A failing rule of the check lists the offending events (id, title, the numbers compared), never personal data.
 5. A failed seed names the scenario that failed and leaves its data; just run `npm run seed:demo` again (it removes the earlier run first). Moderation is skipped during the seed (#109).
 6. Seeded events are in the future: run the seed again to refresh the dates. The seed sets `SEAT_HOLD_SECONDS=300` and `PAYMENT_MODE=simulated` for its own process only. Unset the variables afterwards.
+
+## Upgrading member indexes (account deletion, decision #124)
+
+A deleted account keeps its email, so the old rule "one member per email" (a unique index on `memberEmail` alone, and the same on `memberPhone`) is replaced by "one live member per email" (unique on `memberEmail` + `deletedAt`, and sparse unique on `memberPhone` + `deletedAt`). A **new** database needs nothing: the API builds the new indexes at its first start. An **existing** database (the demo database, production) still has the old indexes, and while they exist a deleted account's email cannot be used by a new account (the sign-up answers the duplicate message). The script `npm run migrate:member-indexes` swaps them:
+
+- it creates the two new indexes first and drops the two old ones only after both exist, so there is never a moment without a uniqueness guarantee;
+- it changes **indexes only**, never a document; running it again changes nothing; if a creation fails, nothing is dropped;
+- the new indexes are looser than the old ones, so existing data can never violate them;
+- without `--apply` it is a dry run that prints the plan. With `--apply` it refuses unless `MEMBER_INDEX_MIGRATION_CONFIRM` names the database variable in use. It prints index names and the variable name only, never a connection string. Dropping and creating indexes on a small `members` collection takes seconds; take an Atlas snapshot first if you want a restore point anyway.
+
+The variable follows `NODE_ENV`: without `NODE_ENV=production` it uses `MONGO_DEV`, with it `MONGO_PROD` (the same rule as `npm run seed`). Put the connection string in `.env` (or the shell) as for the other scripts. Run it from your own machine; it is not part of the deployed service.
+
+Demo database (when it is the one in `MONGO_DEV`):
+
+```bash
+npm run migrate:member-indexes                                                   # 1. dry run: read the plan
+MEMBER_INDEX_MIGRATION_CONFIRM=MONGO_DEV npm run migrate:member-indexes -- --apply   # 2. run it
+npm run migrate:member-indexes                                                   # 3. optional: every step should now say "keep"
+```
+
+Later, on production (Atlas, `MONGO_PROD`), before or right after the deploy of this version (the old code also works with the new indexes):
+
+```bash
+NODE_ENV=production npm run migrate:member-indexes
+NODE_ENV=production MEMBER_INDEX_MIGRATION_CONFIRM=MONGO_PROD npm run migrate:member-indexes -- --apply
+NODE_ENV=production npm run migrate:member-indexes
+```
+
+If the demo data lives in `MONGO_PROD` (as in "Demo data on Atlas"), use the production commands for it. Afterwards the `members` collection shows `memberEmail_1_deletedAt_1` and `memberPhone_1_deletedAt_1` and no longer `memberEmail_1` or `memberPhone_1`.
 
 ## Render
 
@@ -137,6 +167,7 @@ The backend sends no email at all: there is no mail library, no mail setting, an
 - [ ] `SECRET_TOKEN` and `QR_SECRET` are different random values of 32+ characters.
 - [ ] `CORS_ORIGINS` is the exact Vercel origin; the frontend's `NEXT_PUBLIC_API_GRAPHQL_URL`, `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_WS_URL` point at the API.
 - [ ] Atlas user has `readWrite` on one database; the allowlist is decided; `MONGO_PROD` has the right database name.
+- [ ] Existing database: `npm run migrate:member-indexes -- --apply` run once (see "Upgrading member indexes").
 - [ ] Admin created with `npm run seed`; `ADMIN_PASSWORD` removed from the host afterwards.
 - [ ] Render health check path is `/health`.
 - [ ] After deploy: `GET /health` is 200, `GET /ready` is 200, GraphQL `introspection` is refused, a login with a wrong password 11 times in a row answers `RATE_LIMITED`.

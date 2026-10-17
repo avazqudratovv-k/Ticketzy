@@ -9,6 +9,8 @@ import { LoginInput, MemberInput } from '../../libs/dto/member/member.input';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 
 const query = (value: any) => ({ select: () => ({ exec: jest.fn().mockResolvedValue(value) }) });
+/** find().select().sort().lean().exec() as signup reads the holders of an email */
+const holders = (rows: any[]) => ({ select: () => ({ sort: () => ({ lean: () => ({ exec: jest.fn().mockResolvedValue(rows) }) }) }) });
 
 describe('MemberService signup and login', () => {
 	let memberModel: any;
@@ -18,7 +20,12 @@ describe('MemberService signup and login', () => {
 	const input = (): MemberInput => ({ memberEmail: 'a@b.com', memberPassword: 'longenough1', memberNick: 'nick' });
 
 	beforeEach(() => {
-		memberModel = { create: jest.fn(async (doc) => ({ _id: 'm1', ...doc })), findOne: jest.fn() };
+		memberModel = {
+			create: jest.fn(async (doc) => ({ _id: 'm1', ...doc })),
+			findOne: jest.fn(),
+			find: jest.fn(() => holders([])),
+			updateOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue({}) })),
+		};
 		authService = new AuthService({ signAsync: jest.fn().mockResolvedValue('token') } as any, {} as any);
 		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any);
 	});
@@ -45,6 +52,104 @@ describe('MemberService signup and login', () => {
 	it('maps a duplicate key error to one clear message', async () => {
 		memberModel.create.mockRejectedValue({ code: 11000, message: 'E11000' });
 		await expect(service.signupUser(input())).rejects.toThrow(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
+	});
+
+	describe('email of a deleted account (DECISIONS #123)', () => {
+		const DAY = 24 * 60 * 60 * 1000;
+		const deleted = (id: string, deletedAgoDays: number, extra: any = {}) => {
+			const deletedAt = new Date(Date.now() - deletedAgoDays * DAY);
+			return { _id: id, memberStatus: MemberStatus.DELETE, deletedAt, emailReusableAt: new Date(deletedAt.getTime() + 30 * DAY), ...extra };
+		};
+
+		it('refuses a live account email with the usual message and creates nothing', async () => {
+			memberModel.find.mockReturnValue(holders([{ _id: 'live', memberStatus: MemberStatus.ACTIVE }]));
+			await expect(service.signupUser(input())).rejects.toThrow(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
+			expect(memberModel.create).not.toHaveBeenCalled();
+		});
+
+		it('refuses within 30 days with EMAIL_RECENTLY_DELETED and a message without dates', async () => {
+			memberModel.find.mockReturnValue(holders([deleted('old', 29)]));
+			const err: any = await service.signupUser(input()).catch((e) => e);
+
+			expect(err.code).toBe('EMAIL_RECENTLY_DELETED');
+			expect(err.message).toBe(
+				'This email belonged to a deleted account and cannot be used for a new account yet. Please try again later or use another email.',
+			);
+			expect(err.message).not.toMatch(/\d/);
+			expect(memberModel.create).not.toHaveBeenCalled();
+		});
+
+		it('computes the wait from deletedAt when emailReusableAt is missing', async () => {
+			memberModel.find.mockReturnValue(holders([deleted('old', 5, { emailReusableAt: undefined })]));
+			await expect(service.signupUser(input())).rejects.toMatchObject({ code: 'EMAIL_RECENTLY_DELETED' });
+		});
+
+		it('allows the same email after emailReusableAt and tags both accounts', async () => {
+			memberModel.find.mockReturnValue(holders([deleted('old', 31)]));
+			const result: any = await service.signupUser(input());
+
+			expect(memberModel.create.mock.calls[0][0]).toMatchObject({ memberEmail: 'a@b.com', previousAccountId: 'old' });
+			expect(result.previousAccountId).toBe('old');
+			expect(memberModel.updateOne).toHaveBeenCalledWith(
+				{ _id: 'old', memberStatus: MemberStatus.DELETE },
+				{ $set: { reusedByMemberId: 'm1' } },
+				{ timestamps: false },
+			);
+		});
+
+		it('is allowed exactly at emailReusableAt', async () => {
+			memberModel.find.mockReturnValue(holders([deleted('old', 30)]));
+			await expect(service.signupUser(input())).resolves.toBeDefined();
+		});
+
+		it('lets the newest deleted account decide and tags that one', async () => {
+			// a second account was created on the same email and deleted again: the older one is long past its wait
+			memberModel.find.mockReturnValue(holders([deleted('newer', 3), deleted('older', 100, { reusedByMemberId: 'newer' })]));
+			await expect(service.signupUser(input())).rejects.toMatchObject({ code: 'EMAIL_RECENTLY_DELETED' });
+
+			memberModel.find.mockReturnValue(holders([deleted('newer', 40), deleted('older', 100, { reusedByMemberId: 'newer' })]));
+			await service.signupUser(input());
+			expect(memberModel.create.mock.calls[0][0].previousAccountId).toBe('newer');
+		});
+
+		it('looks the email up trimmed and lowercased, like the unique index stores it', async () => {
+			await service.signupUser({ ...input(), memberEmail: '  A@B.com ' });
+			expect(memberModel.find).toHaveBeenCalledWith({ memberEmail: 'a@b.com' });
+		});
+
+		it('a brand new email gets no tags and no update of any other account', async () => {
+			await service.signupUser(input());
+			expect(memberModel.create.mock.calls[0][0]).not.toHaveProperty('previousAccountId');
+			expect(memberModel.updateOne).not.toHaveBeenCalled();
+		});
+
+		it('a failed reusedByMemberId write does not undo the sign-up', async () => {
+			memberModel.find.mockReturnValue(holders([deleted('old', 31)]));
+			memberModel.updateOne.mockReturnValue({ exec: jest.fn().mockRejectedValue(new Error('down')) });
+			await expect(service.signupUser(input())).resolves.toBeDefined();
+		});
+
+		it('sign-in only ever matches a non-deleted account, and a deleted-only email looks like an unknown email', async () => {
+			memberModel.findOne.mockReturnValue(query(null));
+			const err: any = await service.login({ memberEmail: 'a@b.com', memberPassword: 'correct-password' }).catch((e) => e);
+
+			expect(memberModel.findOne).toHaveBeenCalledWith({ memberEmail: 'a@b.com', memberStatus: { $ne: MemberStatus.DELETE } });
+			expect(err).toBeInstanceOf(UnauthorizedException);
+			expect(err.message).toBe(Message.WRONG_EMAIL_OR_PASSWORD);
+		});
+
+		it('sign-in picks the new account when an old deleted one has the same email (the filter excludes the deleted one)', async () => {
+			const live = { _id: 'new', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, memberPassword: await authService.hashPassword('correct-password') };
+			memberModel.findOne.mockImplementation((filter: any) => {
+				const rows = [
+					{ _id: 'old', memberStatus: MemberStatus.DELETE, memberPassword: live.memberPassword },
+					live,
+				].filter((row) => filter.memberStatus.$ne !== row.memberStatus);
+				return query(rows[0] ?? null);
+			});
+			const result: any = await service.login({ memberEmail: 'a@b.com', memberPassword: 'correct-password' });
+			expect(result._id).toBe('new');
+		});
 	});
 
 	describe('login', () => {
@@ -225,6 +330,22 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 			Message.CANNOT_ASSIGN_ADMIN_ROLE,
 		);
 		expect(memberModel.findOne).not.toHaveBeenCalled();
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
+	it('an admin cannot set DELETE (accounts are deleted by their owner only, #123), before any database call', async () => {
+		const { memberModel, service } = build({ _id: 'u1', memberType: MemberType.USER });
+
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: 'u1' as any, memberStatus: MemberStatus.DELETE })).rejects.toThrow(
+			Message.CANNOT_SET_DELETED_STATUS,
+		);
+		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+
+	it('an admin cannot bring back or re-role a deleted account (its email may belong to a new account)', async () => {
+		const { memberModel, service } = build({ _id: 'u1', memberType: MemberType.USER, memberStatus: MemberStatus.DELETE });
+
+		await expect(service.updateMemberByAdmin(ADMIN as any, { _id: 'u1' as any, memberStatus: MemberStatus.ACTIVE })).rejects.toThrow(Message.ACCOUNT_IS_DELETED);
 		expect(memberModel.findOneAndUpdate).not.toHaveBeenCalled();
 	});
 

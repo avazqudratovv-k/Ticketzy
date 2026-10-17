@@ -19,6 +19,8 @@ import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { Event } from '../../libs/dto/event/event';
 import { publicEventFilter } from '../../libs/event-visibility';
 import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
+import { CodedException } from '../../libs/coded-exception';
+import { getReusableAtOf } from '../../libs/account-deletion';
 
 @Injectable()
 export class MemberService {
@@ -45,6 +47,8 @@ export class MemberService {
 	}
 
 	private async signup(input: MemberInput, memberType: MemberType, memberStatus: MemberStatus): Promise<Member> {
+		const memberEmail = String(input.memberEmail ?? '').trim().toLowerCase();
+		const previous = await this.checkEmailAvailable(memberEmail);
 		const memberPassword = await this.authService.hashPassword(input.memberPassword);
 		try {
 			const result = await this.memberModel.create({
@@ -56,7 +60,9 @@ export class MemberService {
 				memberType,
 				memberStatus,
 				memberAuthType: MemberAuthType.EMAIL,
+				...(previous ? { previousAccountId: previous._id } : {}),
 			});
+			if (previous) await this.markEmailReused(previous._id, result._id);
 			result.accessToken = await this.authService.createToken(result);
 			return result;
 		} catch (err) {
@@ -66,10 +72,47 @@ export class MemberService {
 		}
 	}
 
+	/**
+	 * Accounts that deleted themselves keep their email (DECISIONS #123). A live account with the email is the usual
+	 * "already used" answer; if only deleted accounts have it, the newest one decides: before its `emailReusableAt` the
+	 * sign-up is refused with EMAIL_RECENTLY_DELETED (no date in the text), after it the email is free again and the deleted
+	 * account is returned so the new one can be tagged. The unique index still decides a race between two sign-ups.
+	 */
+	private async checkEmailAvailable(memberEmail: string): Promise<{ _id: ObjectId } | null> {
+		const holders = await this.memberModel
+			.find({ memberEmail })
+			.select('memberStatus deletedAt emailReusableAt')
+			.sort({ deletedAt: -1 })
+			.lean()
+			.exec();
+		if (!holders.length) return null;
+		if (holders.some((holder) => holder.memberStatus !== MemberStatus.DELETE)) {
+			throw new BadRequestException(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
+		}
+		const newest = holders[0];
+		const reusableAt = getReusableAtOf(newest);
+		if (reusableAt && reusableAt.getTime() > Date.now()) {
+			throw new CodedException(Message.EMAIL_RECENTLY_DELETED, 'EMAIL_RECENTLY_DELETED', 400);
+		}
+		return { _id: newest._id as unknown as ObjectId };
+	}
+
+	/** the deleted account learns who took its email; a failure only costs this admin tag, so it is logged and the sign-up stands */
+	private async markEmailReused(deletedId: ObjectId, newMemberId: ObjectId): Promise<void> {
+		try {
+			await this.memberModel
+				.updateOne({ _id: deletedId, memberStatus: MemberStatus.DELETE }, { $set: { reusedByMemberId: newMemberId } }, { timestamps: false })
+				.exec();
+		} catch (err) {
+			this.logger.error(`reusedByMemberId NOT SET on deleted member ${deletedId}: ${err.message}`);
+		}
+	}
+
 	public async login(input: LoginInput): Promise<Member> {
 		const { memberEmail, memberPassword } = input;
+		// a deleted account never matches: its email may belong to a new account, and a token or password of the old one is dead (#123)
 		const response: Member = await this.memberModel
-			.findOne({ memberEmail: memberEmail })
+			.findOne({ memberEmail: memberEmail, memberStatus: { $ne: MemberStatus.DELETE } })
 			.select('+memberPassword')
 			.exec();
 
@@ -259,8 +302,12 @@ export class MemberService {
 		const isSelf = String(input._id) === String(adminId);
 		// an admin cannot lock themselves out or promote / demote themselves
 		if (changesAccess && isSelf) throw new BadRequestException(Message.CANNOT_CHANGE_OWN_ACCESS);
+		// accounts are deleted by their owner only (#123)
+		if (input.memberStatus === MemberStatus.DELETE) throw new BadRequestException(Message.CANNOT_SET_DELETED_STATUS);
 		if (changesAccess || input.memberPassword) {
-			const target = await this.memberModel.findOne({ _id: input._id }).select('memberType').lean().exec();
+			const target = await this.memberModel.findOne({ _id: input._id }).select('memberType memberStatus').lean().exec();
+			// a deleted account cannot be brought back or re-roled: its email may already belong to a new account
+			if (changesAccess && target?.memberStatus === MemberStatus.DELETE) throw new BadRequestException(Message.ACCOUNT_IS_DELETED);
 			// no admin takes over another admin's account by setting a password; the attempt is audited (DECISIONS #93)
 			if (input.memberPassword && !isSelf && target?.memberType === MemberType.ADMIN) {
 				await this.auditLogService.record({

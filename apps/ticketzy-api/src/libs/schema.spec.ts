@@ -26,9 +26,9 @@ describe('GraphQL schema (built without a database)', () => {
 		schema = await moduleRef.get(GraphQLSchemaFactory).create(loadResolvers());
 	});
 
-	it('builds, and has the 97 operations (41 queries, 56 mutations): none was renamed or dropped (101 before the follow feature went, #122)', () => {
-		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(41);
-		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(56);
+	it('builds, and has the 99 operations (42 queries, 57 mutations): none was renamed or dropped (101 before the follow feature went, #122; two account deletion operations, #123)', () => {
+		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(42);
+		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(57);
 		for (const name of ['getEvents', 'getMember', 'getAllMembersByAdmin', 'updateMemberByAdmin', 'payOrder', 'imageUploader']) {
 			const fields = { ...schema.getQueryType()!.getFields(), ...schema.getMutationType()!.getFields() };
 			expect(fields[name]).toBeDefined();
@@ -64,9 +64,26 @@ describe('GraphQL schema (built without a database)', () => {
 		expect(Object.fromEntries(Object.entries(input.getFields()).map(([k, f]: any) => [k, String(f.type)]))).toEqual({ eventId: 'String!', ticketCode: 'String!' });
 	});
 
+	it('has the account deletion operations with their inputs and outputs (#123)', () => {
+		const fields = (type: any, name: string) => type.getFields()[name];
+		const args = (type: any, name: string) => Object.fromEntries(type.getFields()[name].args.map((arg: any) => [arg.name, String(arg.type)]));
+		expect(args(schema.getMutationType(), 'deleteMyAccount')).toEqual({ input: 'DeleteAccountInput!' });
+		expect(String(fields(schema.getMutationType(), 'deleteMyAccount').type)).toBe('AccountDeletionResult!');
+		expect(args(schema.getQueryType(), 'getMyAccountDeletionCheck')).toEqual({});
+		expect(String(fields(schema.getQueryType(), 'getMyAccountDeletionCheck').type)).toBe('AccountDeletionCheck!');
+		const input = schema.getType('DeleteAccountInput') as any;
+		expect(Object.fromEntries(Object.entries(input.getFields()).map(([k, f]: any) => [k, String(f.type)]))).toEqual({ confirmation: 'String!' });
+		const check = schema.getType('AccountDeletionCheck') as GraphQLObjectType;
+		expect(Object.fromEntries(Object.entries(check.getFields()).map(([k, f]) => [k, String(f.type)]))).toEqual({
+			canDelete: 'Boolean!',
+			blockers: '[DeletionBlocker!]!',
+			unusedUpcomingTickets: 'Int!',
+		});
+	});
+
 	it('exposes the private Member fields as nullable (they answer null to everyone but the owner and admins)', () => {
 		const member = schema.getType('Member') as GraphQLObjectType;
-		for (const name of ['memberPhone', 'memberFullName', 'memberAddress', 'memberWarnings', 'memberBlocks', 'deletedAt', 'memberEmail']) {
+		for (const name of ['memberPhone', 'memberFullName', 'memberAddress', 'memberWarnings', 'memberBlocks', 'deletedAt', 'emailReusableAt', 'previousAccountId', 'reusedByMemberId', 'memberEmail']) {
 			const field = member.getFields()[name];
 			expect(field).toBeDefined();
 			expect(field.type).not.toBeInstanceOf(GraphQLNonNull);

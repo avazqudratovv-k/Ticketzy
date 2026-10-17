@@ -1,10 +1,10 @@
 import { DEFAULT_SEAT_HOLD_SECONDS, getAiConfig, getAiStartupWarnings, getPaymentMode, getSeatHoldSeconds, parsePaymentMode, parseSeatHoldSeconds, validateEnv } from './env.validation';
 
 describe('SEAT_HOLD_SECONDS', () => {
-	it('defaults to 30 when unset or blank', () => {
+	it('defaults to 120 when unset or blank', () => {
 		expect(parseSeatHoldSeconds(undefined)).toBe(DEFAULT_SEAT_HOLD_SECONDS);
-		expect(parseSeatHoldSeconds('')).toBe(30);
-		expect(getSeatHoldSeconds({})).toBe(30);
+		expect(parseSeatHoldSeconds('')).toBe(120);
+		expect(getSeatHoldSeconds({})).toBe(120);
 	});
 
 	it('accepts a whole number from 1 to 3600', () => {

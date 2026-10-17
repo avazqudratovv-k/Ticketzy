@@ -2,10 +2,10 @@
 export const getMongoUriKey = (nodeEnv: string | undefined = process.env.NODE_ENV): string =>
 	nodeEnv === 'production' ? 'MONGO_PROD' : 'MONGO_DEV';
 
-export const DEFAULT_SEAT_HOLD_SECONDS = 30;
+export const DEFAULT_SEAT_HOLD_SECONDS = 120;
 export const MAX_SEAT_HOLD_SECONDS = 3600;
 
-/** SEAT_HOLD_SECONDS is optional (default 30); when it is set it must be a whole number from 1 to 3600 */
+/** SEAT_HOLD_SECONDS is optional (default 120); when it is set it must be a whole number from 1 to 3600 */
 export const parseSeatHoldSeconds = (raw: unknown): number => {
 	if (raw === undefined || raw === null || String(raw).trim() === '') return DEFAULT_SEAT_HOLD_SECONDS;
 	const text = String(raw).trim();

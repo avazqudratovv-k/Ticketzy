@@ -111,12 +111,12 @@ describe('seat holds', () => {
 		expect(seatOf(1).heldUntil).toEqual(hold.heldUntil);
 	});
 
-	it('defaults to a 30 second hold', async () => {
+	it('defaults to a 120 second hold', async () => {
 		const { seatService, seatOf } = build();
 		const hold = await seatService.holdSeats(M1 as any, EVENT as any, [seatOf(1)._id]);
 		const seconds = (hold.heldUntil.getTime() - Date.now()) / 1000;
-		expect(seconds).toBeGreaterThan(28);
-		expect(seconds).toBeLessThanOrEqual(30);
+		expect(seconds).toBeGreaterThan(118);
+		expect(seconds).toBeLessThanOrEqual(120);
 	});
 
 	it('releases the seats claimed in the call when a later seat is taken, and leaves the other member\'s seat alone', async () => {
@@ -277,7 +277,7 @@ describe('seat holds', () => {
 
 			const hold = await seatService.holdSeats(M1 as any, EVENT as any, ids);
 			expect(hold.seats.map((s) => s.number)).toEqual([2, 1]);
-			expect(hold.holdSeconds).toBe(30);
+			expect(hold.holdSeconds).toBe(120);
 
 			const again = await seatService.resolveSeatInput(EVENT as any, null, [at(1)]);
 			await expect(seatService.holdSeats(M2 as any, EVENT as any, again)).rejects.toThrow(Message.SEAT_JUST_TAKEN);

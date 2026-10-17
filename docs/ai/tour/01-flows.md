@@ -18,14 +18,15 @@ Three NestJS ideas you need first, because every flow uses them:
 2. `enforceSignupLimit(context.req)` (`libs/rate-limit.ts`) counts the call against the per-IP signup window (default 5 per hour). Over the limit it throws `CodedException` with code `RATE_LIMITED` and `retryAfterSeconds`.
 3. The ValidationPipe checks `MemberInput` (`libs/dto/member/member.input.ts`): `memberEmail` (`IsEmail`, lower-cased and trimmed by `normalizeEmail`), `memberPassword` (min 8), optional `memberNick` (3 to 50), `memberFullName` (3 to 100). A failure becomes `VALIDATION_FAILED` with the field names (`libs/validation.ts`).
 4. `MemberService.signup` (`components/member/member.service.ts`) hashes the password with `AuthService.hashPassword` (bcryptjs, a generated salt).
-5. `memberModel.create({... memberType, memberStatus, memberAuthType: EMAIL })`. The **server** picks the role: `signupUser` passes `USER` + `ACTIVE`, `signupOrganizer` passes `ORGANIZER` + `PENDING`. The input has no role field (decision #23).
+5. Before the hash, `checkEmailAvailable` reads the members with this email: a live one gives `USED_MEMBER_EMAIL_NICK_OR_PHONE`; only deleted ones: before the newest one's `emailReusableAt` (deletion + 30 days) the sign-up is refused with `EMAIL_RECENTLY_DELETED` (#124), after it the new member is tagged `previousAccountId` and the deleted one `reusedByMemberId`.
+5b. `memberModel.create({... memberType, memberStatus, memberAuthType: EMAIL })`. The **server** picks the role: `signupUser` passes `USER` + `ACTIVE`, `signupOrganizer` passes `ORGANIZER` + `PENDING`. The input has no role field (decision #23).
 6. A duplicate email, nick or phone hits a unique index (`Member.model.ts`) and Mongo error code 11000; `signup` converts it to `BadRequestException(USED_MEMBER_EMAIL_NICK_OR_PHONE)`.
 7. `AuthService.createToken` signs `{ _id, memberType }` with `SECRET_TOKEN`, valid 1 day (`auth.module.ts`: `expiresIn: '1d'`). The mutation returns the `Member` with `accessToken`. Private fields (email, phone) are hidden by field resolvers in `member.resolver.ts` unless the viewer is the member or an admin.
 
 **Sign in** (`login`)
 
 1. `MemberResolver.login` calls `enforceLoginLimit(req, memberEmail)`: one window per IP (10 per 15 min) and one per email (twice as many) so a distributed guess still hits one account.
-2. `MemberService.login` loads the member with `select('+memberPassword')` (the password field is `select: false` in the schema).
+2. `MemberService.login` loads the member (never a `DELETE` one, so a deleted account's email looks unknown) with `select('+memberPassword')` (the password field is `select: false` in the schema).
 3. `AuthService.comparePasswords` always runs bcrypt, against a dummy hash when the email is unknown, so a missing account costs the same time as a wrong password.
 4. Unknown email or wrong password: `UnauthorizedException(WRONG_EMAIL_OR_PASSWORD)` (same text for both).
 5. If the status is `REJECTED`, `SUSPENDED` or `DELETE` (`unverifiedMemberStatuses`, `member.enum.ts`) the answer is a `GraphQLError` with code `ACCOUNT_NOT_VERIFIED` (it must be a `GraphQLError`, not an `HttpException`, or Apollo would overwrite the code, decision #64). `PENDING` organizers *can* log in.

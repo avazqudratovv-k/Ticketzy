@@ -12,7 +12,7 @@ export const CHECK_IN_CODE_PER_MINUTE = 60;
 
 export const RATE_LIMITED_CODE = 'RATE_LIMITED';
 
-export type RateLimitName = 'general' | 'login' | 'loginEmail' | 'signup' | 'password' | 'checkInCode';
+export type RateLimitName = 'general' | 'login' | 'loginEmail' | 'signup' | 'password' | 'checkInCode' | 'accountDelete';
 
 /** the text a client sees; the number of seconds is the retry hint */
 export const rateLimitedMessage = (retryAfterSeconds: number): string => Message.RATE_LIMITED.replace('{seconds}', String(retryAfterSeconds));
@@ -40,6 +40,8 @@ export class RateLimits {
 			password: new RateLimiter(config.passwordPer15Min, QUARTER_HOUR),
 			// ticket code check-ins and previews per organizer: a fixed number, a guessing guard rather than a tuning knob (#116)
 			checkInCode: new RateLimiter(CHECK_IN_CODE_PER_MINUTE, MINUTE),
+			// account deletion counts like a password change (#123): same number, its own bucket
+			accountDelete: new RateLimiter(config.passwordPer15Min, QUARTER_HOUR),
 		};
 	}
 
@@ -104,6 +106,12 @@ export const enforceSignupLimit = (req: any, limits: RateLimits = getRateLimits(
 export const enforcePasswordLimit = (req: any, actorId: unknown, limits: RateLimits = getRateLimits()): void => {
 	limits.enforce('password', `member:${String(actorId)}`);
 	limits.enforce('password', `ip:${getClientIp(req)}`);
+};
+
+/** deleting an account: per acting member and per IP, the same numbers as a password change (#123) */
+export const enforceAccountDeleteLimit = (req: any, actorId: unknown, limits: RateLimits = getRateLimits()): void => {
+	limits.enforce('accountDelete', `member:${String(actorId)}`);
+	limits.enforce('accountDelete', `ip:${getClientIp(req)}`);
 };
 
 /** check-in and preview by ticket code: per acting member, so a guesser cannot walk the code space */

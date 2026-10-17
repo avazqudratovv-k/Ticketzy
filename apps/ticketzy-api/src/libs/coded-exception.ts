@@ -32,3 +32,13 @@ export class ValidationFailedException extends CodedException {
 		super(message, 'VALIDATION_FAILED', 400);
 	}
 }
+
+/** a blocked account deletion; `reasons` is the list of what has to finish first (event titles of the organizer's own events) (#123) */
+export class AccountDeletionBlockedException extends CodedException {
+	constructor(
+		message: string,
+		public readonly reasons: { reason: string; count: number; eventNames: string[] }[],
+	) {
+		super(message, 'ACCOUNT_DELETE_BLOCKED', 400);
+	}
+}

@@ -8,7 +8,7 @@
 
 ## 1. The module map
 
-`AppModule` (`app.module.ts`) imports `ConfigModule.forRoot({ validate })` (environment check), `GraphQLModule.forRootAsync` (Apollo), `ComponentsModule` (the 22 feature modules), `DatabaseModule` (Mongo connection) and `SocketModule` (WebSocket). Controllers: `AppController`, `HealthController`.
+`AppModule` (`app.module.ts`) imports `ConfigModule.forRoot({ validate })` (environment check), `GraphQLModule.forRootAsync` (Apollo), `ComponentsModule` (the 23 feature modules), `DatabaseModule` (Mongo connection) and `SocketModule` (WebSocket). Controllers: `AppController`, `HealthController`.
 
 `DatabaseModule` (`database/database.module.ts`) connects with `MongooseModule.forRootAsync`: URI from `process.env[getMongoUriKey()]`, options from `libs/mongo-options.ts`: `serverSelectionTimeoutMS 8000`, `connectTimeoutMS 10000`, `socketTimeoutMS 45000`, `maxPoolSize 10`, `retryAttempts 5`, `retryDelay 3000`, `autoIndex` from `MONGO_AUTO_INDEX`, and `bufferTimeoutMS 8000` set through `connectionFactory`. It logs `MongoDB disconnected` / `reconnected` at warn level (the only trace of an outage in a quiet production log).
 
@@ -19,6 +19,7 @@ Feature modules, what they import (from `components/*/*.module.ts`), and what th
 | `AuthModule` | `HttpModule`, `JwtModule` (secret `SECRET_TOKEN`, 1 day) | `AuthService` | tokens and member loading; the guards are plain classes that take `AuthService` |
 | `MemberModule` | Auth, View, Like, AuditLog | `MemberService` | accounts, profiles, uploads, admin member edits |
 | `OrganizerModule` | Auth, AuditLog, Notification, Conversation | none | organizer approval and commission override |
+| `AccountModule` | Auth, Order, Seat, Payout, AuditLog | `AccountService` | deleting one's own account (#123) |
 | `VenueModule` | Auth | `VenueService` | venues and layouts |
 | `EventModule` | Auth, View, Member, Like, Notification, AuditLog, Refund, Ai | `EventService` | event lifecycle |
 | `TicketTypeModule` | Auth | `TicketTypeService` | price tiers and atomic stock |
@@ -50,6 +51,7 @@ Notice the dependency direction: `EventModule` depends on `RefundModule` (to ref
 ### Member and organizer
 
 - `MemberService`: `signupUser`, `signupOrganizer`, `login`, `updateMember`, `getMember`, `getOrganizers`, `likeTargetMember`, `getAllMembersByAdmin`, `updateMemberByAdmin`, `memberStatsEditor` (the generic counter `$inc`), `checkSubscription`. Also hides stored counts: `useVisibleEventCount` replaces `memberEvents` on organizer profiles with the number of APPROVED events.
+- `AccountService` (`components/account`, #123): `getDeletionCheck`, `getBlockers`, `countUnusedUpcomingTickets`, `deleteAccount`. Uses `PayoutService.getOpenPayoutsOf`, `SeatService.releaseAllHoldsOf`, `OrderService.cancelAllPendingOrdersOf`. `MemberService.signup` / `login` carry the email reuse rule (#124).
 - `OrganizerService`: `getOrganizersByAdmin`, `verify/reject/suspend/reinstateOrganizerByAdmin` (via one private `changeStatus`), `setCommissionOverrideByAdmin`, `clearCommissionOverrideByAdmin`. Depends on `ConversationRealtime` to cut sockets off.
 
 ### Catalog
@@ -230,4 +232,5 @@ Both daily counters **fail closed**: when MongoDB cannot be read the request is 
 | `npm run seed` | `seed.ts`, `libs/admin-seed.ts` | creates the first ADMIN when none exists; `ensureExtraAdmin` inserts a second from `ADMIN2_*`; never updates; prints no password |
 | `npm run seed:demo` / `reset:demo` / `check:demo` | `seed-demo.ts`, `reset-demo.ts`, `check-demo.ts` | see `06-quality.md` |
 | `npm run report:currency` | `report-currency.ts`, `libs/currency.ts` | read-only list of ticket types that are not in KRW |
+| `npm run migrate:member-indexes` | `migrate-member-indexes.ts`, `libs/member-index-migration.ts`, `libs/member-indexes.ts` | one-off swap of the unique `members` email and phone indexes for the ones that allow a deleted account's email to be reused (#124); dry run by default, `-- --apply` needs `MEMBER_INDEX_MIGRATION_CONFIRM`; changes indexes only |
 | `npm run ai:check` | `ai-check.ts` | AI setup check, real calls |

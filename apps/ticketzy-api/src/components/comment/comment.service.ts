@@ -11,6 +11,7 @@ import { CommentGroup, CommentStatus } from '../../libs/enums/comment.enum';
 import { CommentUpdate } from '../../libs/dto/comment/comment.update';
 import { Comments, Comment } from '../../libs/dto/comment/comment';
 import { lookupMember } from '../../libs/config';
+import { maskDeletedMember } from '../../libs/account-deletion';
 import { T } from '../../libs/types/common';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
@@ -108,6 +109,8 @@ export class CommentService {
     ]).exec();
     if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 
+    // a deleted member's comments stay, shown as "Deleted user" (#123)
+    for (const comment of result[0].list) comment.memberData = maskDeletedMember(comment.memberData);
     return result[0];
     }
 

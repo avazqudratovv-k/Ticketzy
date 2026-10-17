@@ -41,6 +41,23 @@ export class PayoutService {
 		});
 	}
 
+	/**
+	 * Account deletion (#123): the organizer's payouts that are not finished, NOT_YET_DUE and DUE (NOTHING_TO_PAY and PAID_OUT
+	 * do not count). Same pipeline and same status rule as the payout list, so the two always agree. Count is the full number,
+	 * titles are the first rows.
+	 */
+	public async getOpenPayoutsOf(organizerId: ObjectId, titleLimit: number): Promise<{ count: number; eventNames: string[] }> {
+		const now = new Date();
+		const owner = shapeIntoMongoObjectId(organizerId);
+		const read = async (payoutStatus: PayoutStatus) =>
+			await this.list({ now, organizerId: owner, payoutStatus, direction: 1, page: { skip: 0, limit: titleLimit } });
+		const [notYetDue, due] = await Promise.all([read(PayoutStatus.NOT_YET_DUE), read(PayoutStatus.DUE)]);
+		return {
+			count: (notYetDue.metaCounter?.[0]?.total ?? 0) + (due.metaCounter?.[0]?.total ?? 0),
+			eventNames: [...due.list, ...notYetDue.list].map((row) => row.eventTitle),
+		};
+	}
+
 	public async getPayoutsByAdmin(input: PayoutsByAdminInquiry): Promise<Payouts> {
 		if (input.dateFrom && input.dateTo && input.dateFrom.getTime() > input.dateTo.getTime()) {
 			throw new BadRequestException(Message.PAYOUT_INVALID_DATE_RANGE);

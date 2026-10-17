@@ -29,8 +29,8 @@ Conversation 1--* Message
 | `memberType` | enum USER/ORGANIZER/ADMIN | USER | role; set only by the server |
 | `memberStatus` | enum PENDING/ACTIVE/REJECTED/SUSPENDED/DELETE | ACTIVE | account state (`02-state-and-rules.md` 1.1) |
 | `memberAuthType` | enum PHONE/EMAIL | EMAIL | how the account signed up; always EMAIL in current code |
-| `memberEmail` | string | required, lowercase, trimmed, regex-checked, **unique index** | login id |
-| `memberPhone` | string | unique, sparse | optional phone |
+| `memberEmail` | string | required, lowercase, trimmed, regex-checked; unique among live members (index on `memberEmail` + `deletedAt`, #124) | login id; a deleted account keeps it |
+| `memberPhone` | string | sparse unique together with `deletedAt` (#124) | optional phone |
 | `memberNick` | string | unique, sparse | nickname; for organizers it is the organization name (decision #113) |
 | `memberPassword` | string | required, `select: false` | bcrypt hash; never returned unless a query adds `+memberPassword` |
 | `memberFullName`, `memberAddress`, `memberDesc` | string | | profile; full name and address are public only for organizers |
@@ -43,9 +43,12 @@ Conversation 1--* Message
 | `commissionOverride` | `{ rate 0..100, endsAt?, reason }` | none | admin override of the commission |
 | `approvalCelebrationPending` | boolean | false (missing on old accounts, read as false) | true from an approval (verify, or reinstate of a REJECTED organizer) until `markApprovalCelebrationDone`; readable by the member only (#120) |
 | `memberWarnings`, `memberBlocks` | number | 0 | declared and exposed to self/admin; no code increments them (see oddities) |
-| `deletedAt` | date | | declared; never written |
+| `deletedAt` | date | none (live accounts have none) | set by `deleteMyAccount` (#123); admin-only tag |
+| `emailReusableAt` | date | none | `deletedAt` + 30 days: first moment the email may open a new account (#124); admin-only tag |
+| `previousAccountId` | ObjectId | none | on a new account that reused a deleted account's email; admin-only tag |
+| `reusedByMemberId` | ObjectId | none | on the deleted account whose email was reused; admin-only tag |
 
-Indexes: unique `memberEmail`; sparse unique `memberNick`; sparse unique `memberPhone`; compound `{ memberType, memberStatus, createdAt: -1 }` for organizer lists and the rank job.
+Indexes (names in `libs/member-indexes.ts`): unique `(memberEmail, deletedAt)` named `memberEmail_1_deletedAt_1`; sparse unique `(memberPhone, deletedAt)` named `memberPhone_1_deletedAt_1`; sparse unique `memberNick` (a deleted nick stays reserved). Databases built before #124 still hold the old plain `memberEmail_1` / `memberPhone_1`; `npm run migrate:member-indexes` swaps them; compound `{ memberType, memberStatus, createdAt: -1 }` for organizer lists and the rank job.
 
 Written by: `MemberService` (sign-up, `updateMember`, `updateMemberByAdmin`), `OrganizerService` (status, `rejectReason`, `commissionOverride`), `memberStatsEditor` (counter `$inc`), `BatchService` (`memberRank`, `completedEvents`), `seed.ts` / `libs/admin-seed.ts` (admins), the demo seeder.
 

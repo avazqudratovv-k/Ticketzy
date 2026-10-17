@@ -17,6 +17,10 @@ export enum Message {
 	SERVICE_TEMPORARILY_UNAVAILABLE = 'The service is temporarily unavailable, please try again in a moment!',
 
 	USED_MEMBER_EMAIL_NICK_OR_PHONE = 'Already used member email, nick or phone',
+	EMAIL_RECENTLY_DELETED = 'This email belonged to a deleted account and cannot be used for a new account yet. Please try again later or use another email.',
+	ACCOUNT_DELETE_BLOCKED = 'Your account cannot be deleted yet. Finish the items listed first.',
+	ACCOUNT_IS_DELETED = 'This account was deleted and cannot be changed.',
+	CANNOT_SET_DELETED_STATUS = 'Accounts are deleted by their owner only.',
 	WRONG_EMAIL_OR_PASSWORD = 'Incorrect email or password!',
 	ACCOUNT_NOT_VERIFIED = 'Your account was not verified. Please contact support.',
 	ORGANIZER_NOT_APPROVED = 'Your organizer account is waiting for admin approval!',

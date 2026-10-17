@@ -162,6 +162,14 @@ export class SeatService {
 		return result.modifiedCount;
 	}
 
+	/** gives back every seat the member holds on any event (account deletion, #123); returns how many */
+	public async releaseAllHoldsOf(memberId: ObjectId): Promise<number> {
+		const result = await this.eventSeatModel
+			.updateMany({ heldBy: memberId, seatStatus: SeatStatus.HELD }, { seatStatus: SeatStatus.AVAILABLE, $unset: { heldBy: 1, heldUntil: 1 } })
+			.exec();
+		return result.modifiedCount;
+	}
+
 	/** the seats of an event that the member holds right now, or null when any of them is not held (or the hold ran out) */
 	public async findHeldSeats(memberId: ObjectId, eventId: ObjectId, seatIds: ObjectId[]): Promise<EventSeat[] | null> {
 		const seats = await this.eventSeatModel

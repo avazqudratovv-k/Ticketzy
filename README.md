@@ -70,7 +70,7 @@ Names only; copy `.env.example` and set the values (`.env.example` does not list
 | `AI_DAILY_CAP`, `AI_PER_KEY_DAILY_CAP` | optional | AI model calls per UTC day for the whole app (default 200) and AI operations per member or IP per day (default 10), kept in MongoDB. Keep the first at or below what the free daily limits of your models add up to (see the free-tier note below) |
 | `UPLOAD_MAX_FILE_MB`, `UPLOAD_MAX_FILES` | optional | image upload limits (default 15 and 10) |
 | `LOG_LEVEL`, `MONGO_AUTO_INDEX` | optional | log level (default `warn` in production); `false` stops building indexes at startup |
-| `SEAT_HOLD_SECONDS` | optional | how long a seat hold lasts (1 to 3600, default 30) |
+| `SEAT_HOLD_SECONDS` | optional | how long a seat hold lasts (1 to 3600, default 120) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | for `npm run seed` | the first admin |
 | `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | optional, for `npm run seed` | a second admin |
 | `AI_ENABLED`, `AI_PROVIDER`, `AI_TIMEOUT_MS`, `AI_RATE_LIMIT_PER_MINUTE` | optional | AI assistant settings; it stays off unless `AI_ENABLED=true` |
@@ -190,6 +190,10 @@ The assistant tries `GEMINI_MODEL`, then each model of `GEMINI_FALLBACK_MODELS` 
 Free tier means a demo: it may be slow or busy. Keep the daily limits of your models in mind, check them at https://ai.dev/rate-limit (they change), and keep `AI_DAILY_CAP` at or below what they allow.
 
 When `AI_PROVIDER=gemini`, the API logs a warning at startup if `GEMINI_API_KEY` or `GEMINI_MODEL` is missing (it never calls Google at startup).
+
+## Possible improvements (not built)
+
+- **Check-in time window.** Today check-in is allowed at any time while the event is approved. Real gates open only on the event day, for example from 6 hours before the start until the end.
 
 ## License
 

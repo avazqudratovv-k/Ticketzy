@@ -18,13 +18,15 @@ States: `PENDING`, `ACTIVE`, `REJECTED`, `SUSPENDED`, `DELETE`. Default in the s
 | (new) -> PENDING | organizer signs up | `MemberService.signupOrganizer` passes `PENDING` |
 | ADMIN accounts -> ACTIVE | `npm run seed` | `seed.ts`, `libs/admin-seed.ts` |
 | USER -> any status | an admin, with `updateMemberByAdmin` | allowed for USER targets; refused for the admin's own id (`CANNOT_CHANGE_OWN_ACCESS`), for another ADMIN (`CANNOT_CHANGE_ADMIN_ACCESS`) and for ORGANIZER targets (`USE_ORGANIZER_OPERATIONS`) |
+| ACTIVE or PENDING -> DELETE | the owner (USER or ORGANIZER), `deleteMyAccount` (#123) | `AccountService.deleteAccount`: one conditional update sets `DELETE`, `deletedAt`, `emailReusableAt`; an organizer with events in PENDING review, APPROVED events not ended or payouts NOT_YET_DUE / DUE is refused (`ACCOUNT_DELETE_BLOCKED`); a buyer's holds are released and unpaid orders cancelled. `DELETE` is final: no operation brings it back |
 | organizer moves | see 1.2 | `OrganizerService.changeStatus` |
 
 What each status can do at login and on tokens (`AuthService.loadMember`, `unverifiedMemberStatuses`): `REJECTED`, `SUSPENDED` and `DELETE` cannot log in (`login` answers `ACCOUNT_NOT_VERIFIED`) and every normal guard answers `UnauthorizedException(ACCOUNT_NOT_VERIFIED)`. `PENDING` and `ACTIVE` pass `AuthGuard`. Two guards use `allowRestricted: true` (`NotificationGuard`, `ConversationGuard`): they let `REJECTED` and `SUSPENDED` in (only `DELETE` stays blocked).
 
 Facts to know:
 
-- No operation lets a member delete their own account. `DELETE` can only be set by an admin on a USER (and `deletedAt` is declared on Member but no code writes it; the DTO field `deletedAt` in `member.update.ts` has no validator decorator, so the global `whitelist: true` pipe strips it).
+- `DELETE` is set only by `deleteMyAccount` (#123). An admin can neither set it nor change the status or role of a deleted account through `updateMemberByAdmin` (`CANNOT_SET_DELETED_STATUS`, `ACCOUNT_IS_DELETED`). The deleted record keeps every value (email, nick, phone, counters); it gets the tags `deletedAt`, `emailReusableAt` (+30 days), later `reusedByMemberId`; a new account on the same email gets `previousAccountId` (#124). All four are admin-only fields.
+- `login` looks up the email among members that are not `DELETE`, so the email of a deleted account looks like an unknown one (`WRONG_EMAIL_OR_PASSWORD`); a token of a deleted member is refused by every guard (`ACCOUNT_NOT_VERIFIED`).
 - `updateMember` (self) deletes `memberType` and `memberStatus` from the input, and its filter only matches members that are `ACTIVE` or `PENDING`.
 - Roles are never client-controlled (decision #23): `memberType` is not in any sign-up input; `updateMemberByAdmin` refuses `memberType: ADMIN` before any query (`CANNOT_ASSIGN_ADMIN_ROLE`).
 
@@ -222,7 +224,7 @@ Important: a guard only checks the *type and status*. Many operations add owners
 
 Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, **O** ACTIVE organizer, **A** ADMIN. Columns show who is let in by the guards; the last column shows service-level rules that narrow it further.
 
-### 2.2 Matrix per operation (97 operations: 41 queries, 56 mutations; 101 before #122)
+### 2.2 Matrix per operation (99 operations: 42 queries, 57 mutations; 101 before #122)
 
 `app.resolver.ts` has `sayHello`; the rest are listed by module. Q = Query, M = Mutation. "(M)" next to a `get...` name means it is declared as a Mutation in code (see oddities).
 
@@ -287,6 +289,8 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 
 **Account state (`member.resolver.ts`)**: getMyAccountState (Q): `NotificationGuard` (PENDING, REJECTED and SUSPENDED pass), always the caller's own. markApprovalCelebrationDone (M): Roles(ORGANIZER), always the caller's own, idempotent (#120).
 
+**Account deletion (`account.resolver.ts`, #123)**: getMyAccountDeletionCheck (Q) and deleteMyAccount (M): `Roles(USER, ORGANIZER)` + `RolesGuard`, always the caller's own account; an ADMIN gets `ONLY_SPECIFIC_ROLES_ALLOWED`; REJECTED and SUSPENDED organizers cannot sign in so they cannot call it. deleteMyAccount is rate limited (`accountDelete`, like a password change).
+
 **Notifications / notices / audit**: getMyNotifications (Q), markNotificationRead (M), getUnreadNotificationCount (Q), markAllNotificationsRead (M): `NotificationGuard`. getNotices (Q): WithoutGuard. createNotice, updateNotice, removeNoticeByAdmin (M), getAllNoticesByAdmin (Q), getAuditLogsByAdmin (Q): ADMIN.
 
 **Conversations (`conversation.resolver.ts`)**: startConversation (M), getMyConversations (Q), getConversation (Q), getMessages (Q), sendMessage (M), markConversationRead (M): `ConversationGuard`, then `getConversationDenial`. startConversationWithOrganizerByAdmin (M): Roles(ADMIN).
@@ -299,7 +303,7 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 
 Field resolvers hide data from the wrong viewer (they return `null`, not an error):
 
-- `Member` (`member.resolver.ts`): `memberEmail`, `memberPhone`, `memberWarnings`, `memberBlocks`, `deletedAt`, `rejectReason`, `commissionOverride` only to the member and admins; `memberFullName` and `memberAddress` also to anyone when the member is an ORGANIZER. A new `@Field` on `Member` must be classified in `member.privacy.spec.ts` (`AGENTS.md`).
+- `Member` (`member.resolver.ts`): `memberEmail`, `memberPhone`, `memberWarnings`, `memberBlocks`, `rejectReason`, `commissionOverride` only to the member and admins; `deletedAt`, `emailReusableAt`, `previousAccountId`, `reusedByMemberId` to admins only, not even to the member (#123); `memberFullName` and `memberAddress` also to anyone when the member is an ORGANIZER. A new `@Field` on `Member` must be classified in `member.privacy.spec.ts` (`AGENTS.md`).
 - `Event` (`event.resolver.ts`): `rejectReason`, `cancelReason`, `eventModeration` only to the owner and admins; `possibleVenueConflicts` only to admins.
 - `Ticket.qrToken`: only the pipelines of the owner's `getMyTickets` / `getTicket` include it.
 
@@ -317,7 +321,7 @@ All amounts are whole numbers in the schema as `Number`; the currency is always 
 | Commission rate | `getCommissionRate` (`libs/commission.ts`): the admin override wins while `endsAt` is empty or in the future; else 5 percent when `completedEvents >= 20`, 7 percent when `>= 5`, otherwise 10 (`BASE_COMMISSION_RATE`) |
 | Commission amount | `calculateOrderAmounts`: `commissionAmount = round2(subtotal * rate / 100)`; `totalAmount = subtotal`. The commission is deducted from the organizer's share; the buyer pays the subtotal |
 | Frozen on the order | `commissionRate`, `commissionAmount`, `subtotal`, `totalAmount` are stored on the `Order`; later rate changes never touch old orders (`Order.model.ts`) |
-| Hold length | `SEAT_HOLD_SECONDS` (default 30, max 3600) for seat holds and for unpaid general-admission orders |
+| Hold length | `SEAT_HOLD_SECONDS` (default 120, max 3600) for seat holds and for unpaid general-admission orders |
 | Seats per order | 8 (`MAX_SEATS_PER_HOLD`, `seat.service.ts`); `CheckoutInput` allows up to 8 `seatIds` and up to 10 `items`; each item is bounded by the ticket type's `maxPerOrder` |
 | Refund deadline | 23:59:59.999 on the day before `event.startAt`, wall clock of `venue.venueTimezone` (default `Asia/Seoul`); `getRefundDeadline` (`libs/refund-policy.ts`) returns the instant `start of the event's local day - 1 ms`, stored/compared in UTC |
 | Who may refund | buyer: PAID order, no USED ticket, `now <= deadline`; admin: same without the deadline; cancelled event: all PAID orders, USED tickets included |
@@ -409,7 +413,7 @@ The check "is there stock?" and the increment are the same atomic operation, so 
 
 | Index (file) | Race it decides |
 |---|---|
-| `Member`: unique `memberEmail`, sparse unique `memberNick`, `memberPhone` | two sign-ups with the same email/nick/phone |
+| `Member`: unique `(memberEmail, deletedAt)`, sparse unique `(memberPhone, deletedAt)`, sparse unique `memberNick` (#124) | two sign-ups with the same email/phone among live members (a deleted member has a `deletedAt`, so it never collides); a nick is reserved for ever |
 | `EventSeat`: unique `(eventId, sectionKey, row, number)` | seat generation run twice |
 | `TicketType`: unique `(eventId, ticketTypeName)`, partial unique `(eventId, tierKey)` | duplicate tiers |
 | `Order.orderNumber` unique, `Payment.providerRef` unique, `Ticket.ticketCode` unique | duplicate identifiers |

@@ -69,9 +69,29 @@ export class MemberResolver {
 		return this.isSelfOrAdmin(member, context) ? (member.memberBlocks ?? 0) : null;
 	}
 
+	/** deletion tags are admin only, also hidden from the member themselves (#123); a deleted member cannot sign in anyway */
+	private isAdmin(context: any): boolean {
+		return context?.req?.body?.authMember?.memberType === MemberType.ADMIN;
+	}
+
 	@ResolveField(() => Date, { nullable: true })
 	public deletedAt(@Parent() member: Member, @Context() context: any): Date | null {
-		return member.deletedAt && this.isSelfOrAdmin(member, context) ? member.deletedAt : null;
+		return member.deletedAt && this.isAdmin(context) ? member.deletedAt : null;
+	}
+
+	@ResolveField(() => Date, { nullable: true })
+	public emailReusableAt(@Parent() member: Member, @Context() context: any): Date | null {
+		return member.emailReusableAt && this.isAdmin(context) ? member.emailReusableAt : null;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public previousAccountId(@Parent() member: Member, @Context() context: any): string | null {
+		return member.previousAccountId && this.isAdmin(context) ? String(member.previousAccountId) : null;
+	}
+
+	@ResolveField(() => String, { nullable: true })
+	public reusedByMemberId(@Parent() member: Member, @Context() context: any): string | null {
+		return member.reusedByMemberId && this.isAdmin(context) ? String(member.reusedByMemberId) : null;
 	}
 
 	@ResolveField(() => String, { nullable: true })
