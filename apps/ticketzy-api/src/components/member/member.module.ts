@@ -7,13 +7,11 @@ import { AuthModule } from '../auth/auth.module';
 import { ViewModule } from '../view/view.module';
 import { LikeModule } from '../like/like.module';
 import EventSchema from '../../libs/schemas/Event.model';
-import FollowSchema from '../../libs/schemas/Follow.model';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
 	imports: [
 		MongooseModule.forFeature([{ name: 'Member', schema: MemberSchema }]),
-		MongooseModule.forFeature([{name: 'Follow',schema: FollowSchema,}]), 
 		MongooseModule.forFeature([{ name: 'Event', schema: EventSchema }]),
 		AuthModule, 
 		ViewModule,

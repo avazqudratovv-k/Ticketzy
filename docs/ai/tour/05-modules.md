@@ -32,7 +32,6 @@ Feature modules, what they import (from `components/*/*.module.ts`), and what th
 | `NoticeModule`, `NotificationModule`, `AuditLogModule` | Auth (+AuditLog for notice) | their services | notices, in-app notifications, audit trail |
 | `CommentModule` | Auth, Event, Notification, AuditLog | none | comments on events |
 | `LikeModule`, `ViewModule` | none | their services | like toggling, view recording (no resolvers) |
-| `FollowModule` | Auth, Member | `FollowService` | follow organizers |
 | `ConversationModule` | Auth, Notification, AuditLog | `ConversationService`, `ConversationRealtime` | chat logic and live rooms |
 | `AiModule` | Auth, AuditLog | `AiClientService`, `AiModerationService` | AI features |
 | `SocketModule` | Auth, Conversation | none | WebSocket gateway |
@@ -72,7 +71,7 @@ Notice the dependency direction: `EventModule` depends on `RefundModule` (to ref
 
 ### Community and support
 
-- `CommentService`, `LikeService.toggleLike/checkLikeExistence/getFavoriteEvents`, `ViewService.recordView/getVisitedEvents`, `FollowService`.
+- `CommentService`, `LikeService.toggleLike/checkLikeExistence/getFavoriteEvents`, `ViewService.recordView/getVisitedEvents`.
 - `NoticeService`, `NotificationService`, `AuditLogService` (details below).
 - `ConversationService` and `ConversationRealtime` (chat; details below).
 

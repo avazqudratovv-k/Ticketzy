@@ -13,7 +13,7 @@ Ticketzy is the backend of a ticket-selling platform (`README.md`, `AGENTS.md`).
 - **Organizers** publish **events** at **venues**. An event sells either general-admission tickets (a quantity) or reserved seats (a seat map).
 - **Buyers** (`USER`) hold seats for a short time, check out, "pay" (a mock provider, no money moves), receive tickets with a signed QR token, and can refund a whole order.
 - **Admins** approve organizers and events, refund orders, cancel events, and mark organizer payouts as paid.
-- Extras: in-app notifications, organizer-admin chat (GraphQL + WebSocket), comments/likes/follows, an optional AI assistant (event search, moderation hints, translation).
+- Extras: in-app notifications, organizer-admin chat (GraphQL + WebSocket), comments/likes, an optional AI assistant (event search, moderation hints, translation).
 
 The code started as a different project called Nestar (a property-listing site) and was migrated (`docs/ai/BACKEND_MIGRATION.md`, `NESTAR_COMPARISON.md`). Some shared names (for example `getFavorites`, `memberLikes`) survive from that.
 
@@ -105,7 +105,7 @@ Inside `apps/ticketzy-api/src/components/` (22 feature modules, listed in `compo
 | `sales` | organizer sales numbers |
 | `conversation` | organizer/admin chat service + realtime rooms |
 | `notification`, `notice`, `audit-log` | in-app notifications, public notices, admin audit trail |
-| `comment`, `like`, `view`, `follow` | social features |
+| `comment`, `like`, `view` | social features (the follow module was removed, #122) |
 | `ai` | assistant, moderation, translation, vendor providers |
 
 ## 4. How to run and test
@@ -233,7 +233,7 @@ Decision numbers:
 | 18, 19, 20, 21 | old collections untouched; `getFavorites`/`getVisited` keep names; like/view unique index includes the group; SMS-login `auths` dropped |
 | 22 | notifications are best effort and never throw |
 | 23, 24, 25, 26 | roles set only by the server; login by email; JWT holds only id+type and lasts 1 day, guards reload the member each request; startup hardening, magic-byte image check |
-| 27, 28, 29, 30 | community board deleted and organizer renames; comments on events only; follow organizers only; public visibility rules |
+| 27, 28, 29, 30 | community board deleted and organizer renames; comments on events only; follow organizers only (removed by #122); public visibility rules |
 | 31, 32, 33 | organizer approval transitions, commission override field, audit log + notifications for admin actions |
 | 34 to 40 | ticket types/orders refuse inactive organizers; new `EventStatus` machine; owner edit rules; `publicEventStatus`; admin event actions; `completedEvents` counter and `batchEndEvents`; renames `getMyEvents`/`getEventsByAdmin` |
 | 41 to 44, 51, 67 | venue layout model and validation; `tierKey`; `EventSeat` generation at approval; seat map visibility; layout lock; seat picker backend (`seats` by coordinates, `getSeatConfig`, `mine`) |

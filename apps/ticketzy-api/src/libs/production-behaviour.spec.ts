@@ -16,7 +16,6 @@ import AiUsageSchema from './schemas/AiUsage.model';
 import AuditLogSchema from './schemas/AuditLog.model';
 import CommentSchema from './schemas/Comment.model';
 import EventSchema from './schemas/Event.model';
-import FollowSchema from './schemas/Follow.model';
 import MemberSchema from './schemas/Member.model';
 import NoticeSchema from './schemas/Notice.model';
 import OrderSchema from './schemas/Order.model';
@@ -123,7 +122,6 @@ describe('indexes (item 10)', () => {
 		['events the batch job ends', EventSchema, { eventStatus: 1, endAt: 1 }],
 		['events of one venue by time', EventSchema, { venueId: 1, startAt: 1 }],
 		['comments of one event', CommentSchema, { commentRefId: 1, commentGroup: 1, commentStatus: 1, createdAt: -1 }],
-		['followings of one member', FollowSchema, { followerId: 1, createdAt: -1 }],
 		['tickets of one order', TicketSchema, { orderId: 1 }],
 		['payments of one order', PaymentSchema, { orderId: 1, paymentStatus: 1 }],
 		['audit by target', AuditLogSchema, { targetId: 1, createdAt: -1 }],
@@ -139,7 +137,7 @@ describe('indexes (item 10)', () => {
 	it('the indexes added in this task are all non-unique, so they cannot fail on existing duplicate data', () => {
 		const added = [
 			[EventSchema, { eventStatus: 1, createdAt: -1 }], [EventSchema, { eventStatus: 1, endAt: 1 }], [EventSchema, { venueId: 1, startAt: 1 }],
-			[CommentSchema, { commentRefId: 1, commentGroup: 1, commentStatus: 1, createdAt: -1 }], [FollowSchema, { followerId: 1, createdAt: -1 }],
+			[CommentSchema, { commentRefId: 1, commentGroup: 1, commentStatus: 1, createdAt: -1 }],
 			[TicketSchema, { orderId: 1 }], [PaymentSchema, { orderId: 1, paymentStatus: 1 }], [AuditLogSchema, { targetId: 1, createdAt: -1 }],
 			[AuditLogSchema, { actorId: 1, createdAt: -1 }], [NoticeSchema, { noticeStatus: 1, createdAt: -1 }], [VenueSchema, { venueStatus: 1, venueCity: 1 }],
 			[MemberSchema, { memberType: 1, memberStatus: 1, createdAt: -1 }],

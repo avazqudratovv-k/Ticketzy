@@ -222,7 +222,7 @@ Important: a guard only checks the *type and status*. Many operations add owners
 
 Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, **O** ACTIVE organizer, **A** ADMIN. Columns show who is let in by the guards; the last column shows service-level rules that narrow it further.
 
-### 2.2 Matrix per operation (101 operations: 43 queries, 58 mutations)
+### 2.2 Matrix per operation (97 operations: 41 queries, 56 mutations; 101 before #122)
 
 `app.resolver.ts` has `sayHello`; the rest are listed by module. Q = Query, M = Mutation. "(M)" next to a `get...` name means it is declared as a Mutation in code (see oddities).
 
@@ -283,7 +283,7 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 
 **Sales (`sales.resolver.ts`)**: getEventSales, getEventAttendees, getMyEarnings (Q): `Roles(ORGANIZER)` + `RolesGuard` only (no `ActiveOrganizerGuard`), so a PENDING organizer passes the guard; `getEventSales` and `getEventAttendees` then require owning the event (`assertOwner`), `getMyEarnings` reads the caller's own events. Passes: O (and P, who has no data).
 
-**Social**: createComment (M), updateComment (M): AuthGuard (create only on a public event: APPROVED, organizer ACTIVE, else `NO_DATA_FOUND`, #117; update only your own ACTIVE comment). getComments (Q): WithoutGuard. removeCommentByAdmin (M): ADMIN. subscribe (M), unsubscribe (M): AuthGuard (follow targets must be ACTIVE organizers). getMemberFollowings (Q), getMemberFollowers (Q): WithoutGuard.
+**Social**: createComment (M), updateComment (M): AuthGuard (create only on a public event: APPROVED, organizer ACTIVE, else `NO_DATA_FOUND`, #117; update only your own ACTIVE comment). getComments (Q): WithoutGuard. removeCommentByAdmin (M): ADMIN.
 
 **Account state (`member.resolver.ts`)**: getMyAccountState (Q): `NotificationGuard` (PENDING, REJECTED and SUSPENDED pass), always the caller's own. markApprovalCelebrationDone (M): Roles(ORGANIZER), always the caller's own, idempotent (#120).
 
@@ -416,7 +416,7 @@ The check "is there stock?" and the increment are the same atomic operation, so 
 | `Refund.orderId` unique | double refund |
 | `Payout.eventId` unique | double payout |
 | `Conversation`: partial unique `eventId`; partial unique `organizerId` where `isSupport` | duplicate conversations |
-| `View`, `Like`: unique `(memberId, refId, group)`; `Follow`: unique `(followingId, followerId)` | double view/like/follow |
+| `View`, `Like`: unique `(memberId, refId, group)` | double view/like |
 | `AiUsage.usageKey` unique | first-of-the-day counter created twice |
 
 ### 4.9 Admin state changes
@@ -425,7 +425,7 @@ Every admin transition (organizer and event) is one conditional update on the al
 
 ### 4.10 Counters and honest limits
 
-Counters (`memberEvents`, `eventLikes`, `eventViews`, `eventComments`, `memberFollowers`, ...) are plain `$inc` updates done *after* the main write; a failure is logged and not retried (decisions #39, #65). `assertVenueFree` is check-then-write (decision #83), and `updateVenue`'s layout lock is check-then-update (decision #51): both can lose a very tight race.
+Counters (`memberEvents`, `eventLikes`, `eventViews`, `eventComments`, ...) are plain `$inc` updates done *after* the main write; a failure is logged and not retried (decisions #39, #65). `assertVenueFree` is check-then-write (decision #83), and `updateVenue`'s layout lock is check-then-update (decision #51): both can lose a very tight race.
 
 ### 4.11 The AI daily counter
 

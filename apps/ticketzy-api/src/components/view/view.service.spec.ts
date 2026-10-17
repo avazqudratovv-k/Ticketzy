@@ -82,3 +82,19 @@ describe('ViewService.recordView', () => {
 		expect(model.updateOne).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe('ViewService.getVisitedEvents liked flag (#122)', () => {
+	it('looks up the caller\'s like of each visited event and puts it on the event', async () => {
+		const visitedEvent = { _id: 'e1', eventLikes: 2 };
+		const meLiked = [{ memberId: 'm1', likeRefId: 'e1', myFavorite: true }];
+		const viewModel: any = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [{ visitedEvent, meLiked }], metaCounter: [] }]) }) };
+
+		const result = await new ViewService(viewModel).getVisitedEvents('m1' as any, { page: 1, limit: 10 } as any);
+
+		const list = viewModel.aggregate.mock.calls[0][0].find((stage: any) => stage.$facet).$facet.list;
+		const lookup = list.find((stage: any) => stage.$lookup?.from === 'likes').$lookup;
+		expect(lookup.let.localLikeRefId).toBe('$visitedEvent._id');
+		expect(lookup.let.localMemberId).toBe('m1');
+		expect(result.list).toEqual([{ _id: 'e1', eventLikes: 2, meLiked }]);
+	});
+});

@@ -20,7 +20,7 @@ describe('MemberService signup and login', () => {
 	beforeEach(() => {
 		memberModel = { create: jest.fn(async (doc) => ({ _id: 'm1', ...doc })), findOne: jest.fn() };
 		authService = new AuthService({ signAsync: jest.fn().mockResolvedValue('token') } as any, {} as any);
-		service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any);
 	});
 
 	it('signupUser creates an ACTIVE USER with a hashed password', async () => {
@@ -127,7 +127,7 @@ describe('MemberService public listings', () => {
 			aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }),
 		};
 		eventModel = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }) };
-		service = new MemberService(memberModel, {} as any, eventModel, {} as any, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, eventModel, {} as any, {} as any, {} as any, {} as any);
 	});
 
 	it('an organizer profile counts APPROVED events only, not the memberEvents counter', async () => {
@@ -201,7 +201,7 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 		};
 		const authService: any = { hashPassword: jest.fn(async (password: string) => `hash-of-${password}`), createToken: jest.fn().mockResolvedValue('token') };
 		const auditLogService: any = { record: jest.fn().mockResolvedValue(undefined) };
-		const service = new MemberService(memberModel, {} as any, {} as any, authService, {} as any, {} as any, auditLogService);
+		const service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, auditLogService);
 		return { memberModel, auditLogService, authService, service };
 	};
 
@@ -371,7 +371,7 @@ describe('MemberService approval celebration (DECISIONS #120)', () => {
 			})),
 			findById: jest.fn((id: string) => ({ select: () => ({ lean: () => ({ exec: async () => (id === stored._id ? { ...stored } : null) }) }) })),
 		};
-		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
 	});
 
 	it('clears the flag once with a conditional update true to false', async () => {

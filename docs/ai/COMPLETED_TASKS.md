@@ -713,3 +713,15 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Frontend must change:** handle error code `EVENT_ENDED` on `getEvent`, `getTicketTypes`, `getComments`; stop calling `getTicketTypes` / `getComments` for events that are not public unless the caller is the owner or an admin.
 - **Verified:** tsc (api and batch), `npm run build` and `npm run test` (65 suites, 1338 tests) pass. `npm run lint` not run. Nothing committed. Not run against a real MongoDB or through GraphQL.
 
+
+## Remove following organizers; event like flag (decision #122)
+
+- **Removed operations:** `subscribe`, `unsubscribe` (Mutations), `getMemberFollowings`, `getMemberFollowers` (Queries). Schema: 97 operations (41 queries, 56 mutations).
+- **Removed fields and types:** `Member.memberFollowers`, `Member.memberFollowings`, `Member.meFollowed`; types `Follower`, `Following`, `Followers`, `Followings`, `MeFollowed`; input `FollowInquiry` (`FollowSearch`). Messages `SELF_SUBSCRIPTION_DENIED`, `ONLY_ORGANIZERS_CAN_BE_FOLLOWED`. Deleted: `components/follow`, `libs/dto/follow`, `libs/schemas/Follow.model.ts`, `lookupAuthMemberFollowed`, `lookupFollowingData`, `lookupFollowerData`, `MemberService.checkSubscription`. No follow notifications, batch code or AI tools existed.
+- **Data untouched:** the `follows` collection, old follow documents and old counters in `members` stay; nothing deletes or migrates them in code.
+- **Demo:** `seed:demo` no longer follows; `check:demo` no longer reads follows or follower/following counters (rule renamed "member like and view counters match their records"). `reset:demo` still removes follows an earlier seed created, through the manifest: `libs/schemas/LegacyFollow.model.ts` (schema-less, `autoIndex: false`) is registered by `demo-app.ts` only.
+- **Likes (backend check):** `getEvent` and `getEvents` already returned `meLiked` and `eventLikes`. Fixed: `likeTargetEvent` now returns the event with the new `eventLikes` and `meLiked` (one `MeLiked` with `myFavorite: true` after a like, `[]` after an unlike); `getFavorites` and `getVisited` now return `meLiked` on every event.
+- **Tests:** `event.service.spec.ts` (likeTargetEvent answer: like, unlike, alternating), `like.service.spec.ts` (new: favorites carry `meLiked`), `view.service.spec.ts` (visited carry `meLiked`), `schema.spec.ts` (97 operations, no follow operation, type or Member field, `meLiked` shape), `follow-removed.spec.ts` (new), `demo-consistency.spec.ts`, `demo-manifest.spec.ts` (legacy follows still removed by reset), `member.privacy.spec.ts`, `production-behaviour.spec.ts`, `pagination.spec.ts` updated; `follow.service.spec.ts` deleted with the service.
+- **Docs:** tour (overview, api, data model, modules, state and rules, quality), `AGENTS.md`, `README.md`.
+- **Decision:** #122.
+- **Not done / risks:** not run against a real MongoDB or through GraphQL (aggregation changes are checked on the pipeline shape only); `npm run lint` not run; nothing committed; `.env.example` unchanged. Frontend must stop calling the four operations and reading the removed fields.

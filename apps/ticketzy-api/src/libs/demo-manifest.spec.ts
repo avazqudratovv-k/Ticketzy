@@ -55,6 +55,7 @@ const world = () => {
 	m.comment.docs.push({ _id: id(), memberId: buyer._id, commentRefId: event._id }, { _id: id(), memberId: realBuyer._id, commentRefId: realEvent._id });
 	m.like.docs.push({ _id: id(), memberId: buyer._id, likeRefId: event._id }, { _id: id(), memberId: realBuyer._id, likeRefId: realEvent._id });
 	m.view.docs.push({ _id: id(), memberId: buyer._id, viewRefId: organizer._id }, { _id: id(), memberId: realBuyer._id, viewRefId: realOrganizer._id });
+	// follows are gone from the API (#122) but an earlier seed may have created some: reset still removes them through the manifest
 	m.follow.docs.push({ _id: id(), followerId: buyer._id, followingId: organizer._id }, { _id: id(), followerId: realBuyer._id, followingId: realOrganizer._id });
 	return { m, admin, demoAdmin, organizer, buyer, impostor, realOrganizer, realBuyer, venue, event, realEvent, order, realOrder };
 };

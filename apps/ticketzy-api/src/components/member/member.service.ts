@@ -16,7 +16,6 @@ import { LikeGroup } from '../../libs/enums/like.enum';
 import { LikeService } from '../like/like.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
-import { Follower, Following, MeFollowed } from '../../libs/dto/follow/follow';
 import { Event } from '../../libs/dto/event/event';
 import { publicEventFilter } from '../../libs/event-visibility';
 import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
@@ -28,8 +27,6 @@ export class MemberService {
 	constructor(
 		@InjectModel('Member')
 		private readonly memberModel: Model<Member>,
-		@InjectModel('Follow')
-		private readonly followModel: Model<Follower | Following>,
 		@InjectModel('Event')
 		private readonly eventModel: Model<Event>,
 		private authService: AuthService,
@@ -133,7 +130,6 @@ export class MemberService {
 			const likeInput = { memberId: memberId, likeRefId: targetId, likeGroup: LikeGroup.MEMBER };
 			targetMember.meLiked = await this.likeService.checkLikeExistence(likeInput);
 			
-			targetMember.meFollowed = await this.checkSubscription(memberId, targetId);
 		}
 		await this.useVisibleEventCount([targetMember]);
 		return targetMember;
@@ -177,11 +173,6 @@ export class MemberService {
 			.exec();
 		const totals = new Map(counts.map((row) => [String(row._id), row.total]));
 		for (const member of organizers) member.memberEvents = totals.get(String(member._id)) ?? 0;
-	}
-
-	public async checkSubscription(followerId: ObjectId, followingId: ObjectId): Promise<MeFollowed[]> {
-    const result = await this.followModel.findOne({ followingId: followingId, followerId: followerId }).exec();
-    return result ? [{ followerId: followerId, followingId: followingId, myFollowing: true }] : [];
 	}
 
 	public async getOrganizers(memberId: ObjectId, input: OrganizersInquiry): Promise<Members> {

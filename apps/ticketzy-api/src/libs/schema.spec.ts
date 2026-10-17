@@ -26,13 +26,31 @@ describe('GraphQL schema (built without a database)', () => {
 		schema = await moduleRef.get(GraphQLSchemaFactory).create(loadResolvers());
 	});
 
-	it('builds, and still has the 101 operations (43 queries, 58 mutations): none was renamed or dropped', () => {
-		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(43);
-		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(58);
+	it('builds, and has the 97 operations (41 queries, 56 mutations): none was renamed or dropped (101 before the follow feature went, #122)', () => {
+		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(41);
+		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(56);
 		for (const name of ['getEvents', 'getMember', 'getAllMembersByAdmin', 'updateMemberByAdmin', 'payOrder', 'imageUploader']) {
 			const fields = { ...schema.getQueryType()!.getFields(), ...schema.getMutationType()!.getFields() };
 			expect(fields[name]).toBeDefined();
 		}
+	});
+
+	it('has no follow operation, type or field left (#122)', () => {
+		const operations = [...Object.keys(schema.getQueryType()!.getFields()), ...Object.keys(schema.getMutationType()!.getFields())];
+		expect(operations.filter((name) => /follow|subscribe/i.test(name))).toEqual([]);
+		const typeNames = Object.keys(schema.getTypeMap()).filter((name) => /follow/i.test(name));
+		expect(typeNames).toEqual([]);
+		const member = schema.getType('Member') as GraphQLObjectType;
+		expect(Object.keys(member.getFields()).filter((name) => /follow/i.test(name))).toEqual([]);
+	});
+
+	it('shows the caller\'s liked flag on events and on the answer of likeTargetEvent (#122)', () => {
+		const event = schema.getType('Event') as GraphQLObjectType;
+		expect(String(event.getFields().meLiked.type)).toBe('[MeLiked!]');
+		expect(String(event.getFields().eventLikes.type)).toBe('Int!');
+		expect(String(schema.getMutationType()!.getFields().likeTargetEvent.type)).toBe('Event!');
+		const liked = schema.getType('MeLiked') as GraphQLObjectType;
+		expect(Object.keys(liked.getFields()).sort()).toEqual(['likeRefId', 'memberId', 'myFavorite']);
 	});
 
 	it('keeps the QR check-in operations exactly as they were and adds the ticket code ones beside them (#116)', () => {

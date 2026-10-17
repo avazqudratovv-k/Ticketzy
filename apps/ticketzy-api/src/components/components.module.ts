@@ -17,7 +17,6 @@ import { AuthModule } from './auth/auth.module';
 import { CommentModule } from './comment/comment.module';
 import { LikeModule } from './like/like.module';
 import { ViewModule } from './view/view.module';
-import { FollowModule } from './follow/follow.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { AiModule } from './ai/ai.module';
 import { PayoutModule } from './payout/payout.module';
@@ -42,7 +41,6 @@ import { PayoutModule } from './payout/payout.module';
 		LikeModule,
 		ViewModule,
 		CommentModule,
-		FollowModule,
 		ConversationModule,
 		AiModule,
 		PayoutModule,

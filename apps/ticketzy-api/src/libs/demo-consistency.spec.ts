@@ -11,8 +11,8 @@ const DAY = 86400000;
 const good = (): DemoSnapshot => ({
 	now,
 	members: [
-		{ _id: 'org', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, completedEvents: 1, memberEvents: 2, memberFollowers: 1, memberFollowings: 0, memberLikes: 0, memberViews: 1, memberRank: 11 },
-		{ _id: 'buyer', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, completedEvents: 0, memberEvents: 0, memberFollowers: 0, memberFollowings: 1, memberLikes: 0, memberViews: 0, memberRank: 0 },
+		{ _id: 'org', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, completedEvents: 1, memberEvents: 2, memberLikes: 0, memberViews: 1, memberRank: 11 },
+		{ _id: 'buyer', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, completedEvents: 0, memberEvents: 0, memberLikes: 0, memberViews: 0, memberRank: 0 },
 	],
 	venueCount: 10,
 	events: [
@@ -44,8 +44,6 @@ const good = (): DemoSnapshot => ({
 	eventViews: [{ id: 'next', count: 1 }],
 	memberViews: [{ id: 'org', count: 1 }],
 	activeComments: [{ id: 'next', count: 1 }],
-	followers: [{ id: 'org', count: 1 }],
-	followings: [{ id: 'buyer', count: 1 }],
 	conversations: [{ id: 'c', unreadForOrganizer: 1, unreadForAdmin: 0, unreadFromAdmin: 1, unreadFromOrganizer: 0 }],
 });
 
@@ -136,9 +134,9 @@ describe('demo consistency check', () => {
 		const likes = good();
 		likes.events[1].eventLikes = 2;
 		expect(failing(likes)).toContain('event like, view and comment counters match their records');
-		const follows = good();
-		follows.members[0].memberFollowers = 5;
-		expect(failing(follows)).toContain('member like, view and follow counters match their records');
+		const memberLikes = good();
+		memberLikes.members[0].memberLikes = 5;
+		expect(failing(memberLikes)).toContain('member like and view counters match their records');
 		const organizer = good();
 		organizer.members[0].completedEvents = 0;
 		expect(failing(organizer)).toContain('organizer event counters match their events');

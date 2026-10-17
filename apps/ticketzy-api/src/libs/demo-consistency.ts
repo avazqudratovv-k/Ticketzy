@@ -16,8 +16,6 @@ export interface SnapMember {
 	memberStatus: MemberStatus;
 	completedEvents: number;
 	memberEvents: number;
-	memberFollowers: number;
-	memberFollowings: number;
 	memberLikes: number;
 	memberViews: number;
 	memberRank: number;
@@ -78,8 +76,6 @@ export interface DemoSnapshot {
 	eventViews: SnapCount[];
 	memberViews: SnapCount[];
 	activeComments: SnapCount[];
-	followers: SnapCount[];
-	followings: SnapCount[];
 	conversations: {
 		id: string;
 		unreadForOrganizer: number;
@@ -266,15 +262,13 @@ export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 		[
 			['likes', member.memberLikes, countFor(snapshot.memberLikes, member._id)],
 			['views', member.memberViews, countFor(snapshot.memberViews, member._id)],
-			['followers', member.memberFollowers, countFor(snapshot.followers, member._id)],
-			['followings', member.memberFollowings, countFor(snapshot.followings, member._id)],
 		]
 			.filter(([, counter, records]) => counter !== records)
 			.map(([name, counter, records]) => `${name} counter ${counter} vs ${records} records`);
 	const memberMismatch = members.filter((member) => memberDiffs(member).length);
 	check(
 		'invariant',
-		'member like, view and follow counters match their records',
+		'member like and view counters match their records',
 		memberMismatch.length,
 		'member(s) with a counter that differs from the records',
 		'ok',

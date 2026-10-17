@@ -175,7 +175,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `getEvents(input)` Q | all | `EventsInquiry`: sort in `availableEventSorts`; `search`: `organizerId?`, `venueId?`, `cityList?`, `categoryList?`, `pricesRange?{start,end}`, `periodsRange?{start,end}`, `text?` | `Events` | none | |
 | `getEventSeatMap(eventId)` Q | all | id | `EventSeatMap { eventId, venueTimezone, venueLayout, seats[{sectionKey,row,number,seatStatus,mine?,holdExpiresAt?}] }` | none | `NO_DATA_FOUND` (code `NO_DATA_FOUND`, HTTP 404) |
 | `getFavorites(input)` / `getVisited(input)` Q | U P O A | `OrdinaryInquiry { page, limit }` | `Events` (APPROVED, not ended, events of ACTIVE organizers) | none | |
-| `likeTargetEvent(eventId)` M | U P O A | id | `Event` | toggle like; `eventLikes` +-1; notification `LIKE` to the organizer on like (not on unlike, not to oneself) | `NO_DATA_FOUND` |
+| `likeTargetEvent(eventId)` M | U P O A | id | `Event` (with the new `eventLikes` and `meLiked` of the caller, #122) | toggle like; `eventLikes` +-1; notification `LIKE` to the organizer on like (not on unlike, not to oneself) | `NO_DATA_FOUND` |
 | `getEventsByAdmin` Q | A | `EventsByAdminInquiry`: `limit` up to 200; `search`: `eventStatus?`, `eventCategoryList?`, `organizerId?`, `text?` (title and translated titles) | `Events` (empty list is fine) | none | |
 | `approveEventByAdmin(eventId)` M | A | id | `Event` (APPROVED) | seat generation, audit `EVENT_APPROVED`, notification | `CANNOT_APPROVE_OWN_EVENT`, `INVALID_EVENT_TRANSITION`, `NO_DATA_FOUND`, `SEAT_TIER_MISSING`, `SEAT_TIER_DUPLICATE`, `EVENT_SUBMIT_LAYOUT_REQUIRED`, `SEAT_GENERATION_FAILED`, `VENUE_ALREADY_BOOKED` |
 | `rejectEventByAdmin` M | A | `EventReasonInput` | `Event` (REJECTED) | audit `EVENT_REJECTED`, notification | `EVENT_REJECT_REASON_REQUIRED`, `INVALID_EVENT_TRANSITION` |
@@ -244,7 +244,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `getEventAttendees(input)` Q | O | `AttendeesInquiry { eventId, page, limit, ticketStatus? }` (default VALID and USED) | `Attendees` rows (`ticketId`, `ticketCode`, status, `checkedInAt`, `buyerName`, ticket type, seat, `orderNumber`) | none | `NOT_ALLOWED_REQUEST` |
 | `getMyEarnings` Q | O | none | `MyEarnings { earnings[{currency, ordersCount, ticketsSold, revenue, commission, netPayout, refundedAmount}] }` per currency | none | |
 
-### B.11 Social: comments, likes, follows, views
+### B.11 Social: comments, likes, views
 
 | Operation | Who | Input and validation | Returns | Effect | Errors |
 |---|---|---|---|---|---|
@@ -252,11 +252,10 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `updateComment` M | any logged in | `CommentUpdate { _id, commentStatus?, commentContent? 1-500 }` | `Comment` | only the author's ACTIVE comment; `commentStatus: DELETE` is a soft delete and lowers `eventComments` | `UPDATE_FAILED` |
 | `getComments(input)` Q | all | `CommentsInquiry`: sort in `availableCommentSorts`, `search.commentRefId` | `Comments` (ACTIVE, with `memberData`) | none | `NO_DATA_FOUND` (hidden or missing event), `EVENT_ENDED` (public caller, event ended; owner and admins still read, #121) |
 | `removeCommentByAdmin(commentId)` M | A | id | `Comment` | hard delete; `eventComments` -1 unless it was already soft-deleted; audit `COMMENT_REMOVED_BY_ADMIN` | `REMOVE_FAILED` |
-| `subscribe(input)` M | any logged in | organizer id string | `Follower` | insert `follows`; `memberFollowings`/`memberFollowers` +1 | `SELF_SUBSCRIPTION_DENIED`, `NO_DATA_FOUND`, `ONLY_ORGANIZERS_CAN_BE_FOLLOWED`, `CREATE_FAILED` |
-| `unsubscribe(input)` M | any logged in | organizer id | `Follower` | delete the follow row; counters -1 (never looks the target up) | `NO_DATA_FOUND` |
-| `getMemberFollowings(input)` / `getMemberFollowers(input)` Q | all | `FollowInquiry { page, limit, search { followerId? / followingId? } }` | `Followings` / `Followers` (ACTIVE members only, filtered before paging) | none | `BAD_REQUEST` text (thrown as `InternalServerErrorException`, so the code is `INTERNAL_SERVER_ERROR`) when the needed search id is missing |
 
-Likes and views have no resolvers of their own: `LikeService` and `ViewService` are called by the member and event services (`likeTargetMember`, `likeTargetEvent`, `getMember`, `getEvent`). `getFavorites` / `getVisited` read the `likes` and `views` collections.
+Likes and views have no resolvers of their own: `LikeService` and `ViewService` are called by the member and event services (`likeTargetMember`, `likeTargetEvent`, `getMember`, `getEvent`). `getFavorites` / `getVisited` read the `likes` and `views` collections. Following organizers was removed (#122): no `subscribe`, `unsubscribe`, `getMemberFollowings` or `getMemberFollowers`, no `memberFollowers`, `memberFollowings` or `meFollowed` on `Member`.
+
+**The liked flag (#122).** Field `meLiked: [MeLiked!]` on `Event` (and `Member`), where `MeLiked { memberId, likeRefId, myFavorite }`: a list with one item (`myFavorite: true`) when the caller liked it, an empty list when not, `null`/empty for guests. `eventLikes: Int!` is the count. It is returned by `getEvent`, `getEvents` (with `WithoutGuard`: only when a valid token is sent), `getFavorites` (always on), `getVisited` and by the answer of `likeTargetEvent` (set from the toggle: one item after a like, `[]` after an unlike).
 
 ### B.12 Notifications, notices, audit log
 

@@ -2,7 +2,6 @@ import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../../enums/member.enum';
 import { MeLiked } from '../like/like';
-import { MeFollowed } from '../follow/follow';
 
 @ObjectType()
 export class CommissionOverride {
@@ -64,12 +63,6 @@ export class Member {
 	completedEvents: number;
 
 	@Field(() => Int)
-	memberFollowers: number;
-
-	@Field(() => Int)
-	memberFollowings: number;
-
-	@Field(() => Int)
 	memberLikes: number;
 
 	@Field(() => Int)
@@ -118,8 +111,6 @@ export class Member {
 	@Field(() => [MeLiked], {nullable: true})
 	meLiked?: MeLiked[];
 
-	@Field(() => [MeFollowed], {nullable: true})
-	meFollowed?: MeFollowed[];
 }
 
 /** the small, cheap answer of `getMyAccountState`: what the frontend polls to notice an approval (always the caller's own) */

@@ -22,7 +22,6 @@ import { PayoutService } from './components/payout/payout.service';
 import { ConversationService } from './components/conversation/conversation.service';
 import { NotificationService } from './components/notification/notification.service';
 import { MemberService } from './components/member/member.service';
-import { FollowService } from './components/follow/follow.service';
 import { CommentService } from './components/comment/comment.service';
 import { ViewService } from './components/view/view.service';
 import { getCommissionRate } from './libs/commission';
@@ -121,7 +120,6 @@ export class DemoSeeder {
 	private readonly conversationService: ConversationService;
 	private readonly notificationService: NotificationService;
 	private readonly memberService: MemberService;
-	private readonly followService: FollowService;
 	private readonly commentService: CommentService;
 	private readonly viewService: ViewService;
 	private readonly batch: BatchService;
@@ -142,7 +140,6 @@ export class DemoSeeder {
 		this.conversationService = get(ConversationService);
 		this.notificationService = get(NotificationService);
 		this.memberService = get(MemberService);
-		this.followService = get(FollowService);
 		this.commentService = get(CommentService);
 		this.viewService = get(ViewService);
 		// the batch jobs are plain classes over models: the seed uses the real "end finished events" job, limited to its own events
@@ -183,7 +180,7 @@ export class DemoSeeder {
 		this.log(`  refunds: ${buyer} by buyers, ${admin} by an admin (${adminAfterDeadline} of them because the refund deadline had passed)`);
 		this.log(`  AI moderation skipped for ${this.moderationSkipped} submitted event(s) (the seed has no AI)`);
 		await withScenario('payouts', () => this.payouts(plan.events));
-		await withScenario('organizer follows and likes', () => this.followAndLike());
+		await withScenario('organizer likes', () => this.likeOrganizers());
 		await withScenario('chats', () => this.chats(plan.events));
 		await withScenario('extra notifications', () => this.extraNotifications(plan.events));
 		await withScenario('dating the admin trail', () => this.dateTheAdminTrail(plan.events));
@@ -629,22 +626,21 @@ export class DemoSeeder {
 		await this.models.event.updateMany({ _id: { $in: ids }, payoutDueNotifiedAt: null }, { $set: { payoutDueNotifiedAt: this.now } }, { timestamps: false } as any).exec();
 	}
 
-	/** ORGANIZER SOCIAL: profile views, likes and follows of the active organizers */
+	/** ORGANIZER SOCIAL: profile views and likes of the active organizers */
 
-	private async followAndLike(): Promise<void> {
+	private async likeOrganizers(): Promise<void> {
 		const active = DEMO_ORGANIZERS.filter((item) => item.outcome === 'verify').map((item) => this.organizers[item.key]);
 		const rng = createRng(77);
-		// the dice are drawn first, in order; each buyer then acts alone (one buyer's three calls stay in sequence)
+		// the dice are drawn first, in order; each buyer then acts alone (one buyer's calls stay in sequence)
 		const actions = this.buyers.map((buyer, index) => ({
 			buyer,
 			targets: shuffled(rng, active)
 				.slice(0, 1 + (index % 4))
-				.map((organizer) => ({ organizer, follow: rng() < 0.6, like: rng() < 0.35 })),
+				.map((organizer) => ({ organizer, like: rng() < 0.35 })),
 		}));
 		await this.inChunks(actions, 5, async ({ buyer, targets }) => {
-			for (const { organizer, follow, like } of targets) {
+			for (const { organizer, like } of targets) {
 				await this.memberService.getMember(buyer._id, organizer._id); // records the view and counts it
-				if (follow) await this.followService.subscribe(buyer._id, organizer._id);
 				if (like) await this.memberService.likeTargetMember(buyer._id, organizer._id);
 			}
 		});
@@ -653,7 +649,6 @@ export class DemoSeeder {
 		const to = new Date(this.now.getTime() - HOUR);
 		await this.spreadTimes(this.models.view, { viewGroup: ViewGroup.MEMBER, viewRefId: { $in: ids } }, from, to);
 		await this.spreadTimes(this.models.like, { likeGroup: LikeGroup.MEMBER, likeRefId: { $in: ids } }, from, to);
-		await this.spreadTimes(this.models.follow, { followingId: { $in: ids } }, from, to);
 	}
 
 	/** CHATS between organizers and the admin: approval, a rejection with its reason, a payout question, event reviews */

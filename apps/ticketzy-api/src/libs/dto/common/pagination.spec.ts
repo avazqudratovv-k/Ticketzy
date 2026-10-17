@@ -6,7 +6,6 @@ import { OrdersInquiry, OrganizerOrdersInquiry, AdminOrdersInquiry } from '../or
 import { AttendeesInquiry } from '../sales/sales.input';
 import { CommentsInquiry } from '../comment/comment.input';
 import { NotificationsInquiry } from '../notification/notification.input';
-import { FollowInquiry } from '../follow/follow.input';
 import { OrganizersByAdminInquiry } from '../organizer/organizer.input';
 import { MembersInquiry, OrganizersInquiry } from '../member/member.input';
 import { AuditLogsInquiry } from '../audit-log/audit-log.input';
@@ -25,7 +24,6 @@ const INQUIRIES: [string, new () => object][] = [
 	['AttendeesInquiry', AttendeesInquiry],
 	['CommentsInquiry', CommentsInquiry],
 	['NotificationsInquiry', NotificationsInquiry],
-	['FollowInquiry', FollowInquiry],
 	['OrganizersByAdminInquiry', OrganizersByAdminInquiry],
 	['MembersInquiry', MembersInquiry],
 	['OrganizersInquiry', OrganizersInquiry],

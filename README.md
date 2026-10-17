@@ -6,7 +6,7 @@ Ticketzy is the backend of a ticket selling platform. Organizers publish events 
 - **Selling:** buyers hold seats (a short timer), check out and pay. Reserved-seating events use one conditional update per seat, general admission uses a conditional stock update, so nothing is oversold. Every ticket has a signed QR token; the organizer's gate scans it (`checkInTicket`).
 - **Refunds:** a buyer can refund a whole order until the end of the day before the event. Admins can refund later, and cancelling an event refunds every order.
 - **Payouts:** one payout per event, due three days after the event ends. An admin marks it paid; status is computed, never stored.
-- **Extras:** organizer and admin chat (GraphQL plus a WebSocket gateway), notifications, comments, likes, follows (organizers only), and an optional AI assistant (event search, moderation, translation).
+- **Extras:** organizer and admin chat (GraphQL plus a WebSocket gateway), notifications, comments, likes, and an optional AI assistant (event search, moderation, translation).
 
 > **Payments are a mock.** There is no real payment provider. With `PAYMENT_MODE=simulated` the buyer chooses whether a payment succeeds, so anyone can get valid QR tickets. That is fine for a demo and wrong for real money. Set `PAYMENT_MODE=disabled` to refuse every payment. See `docs/ai/DECISIONS.md` (#48, #92).
 
@@ -32,7 +32,7 @@ Three commands (decisions #62 and #108). The data is fictional and its dates are
 
 | Command | What it does |
 |---|---|
-| `npm run seed:demo` | creates 10 organizer accounts, 50 buyers, 10 venues, 56 events (concerts, football, comedy, other, in en/ko/ru/uz; set in South Korea, see below), several hundred orders with tickets, refunds, check-ins and payouts, likes, follows, views, comments, chats, notifications and audit entries, through the real services, then runs the consistency check. Prints counts only |
+| `npm run seed:demo` | creates 10 organizer accounts, 50 buyers, 10 venues, 56 events (concerts, football, comedy, other, in en/ko/ru/uz; set in South Korea, see below), several hundred orders with tickets, refunds, check-ins and payouts, likes, views, comments, chats, notifications and audit entries, through the real services, then runs the consistency check. Prints counts only |
 | `npm run reset:demo` | removes exactly the records the seed tracked, and what hangs off them. Other data is never touched |
 | `npm run check:demo` | read only: compares every counter with its records (a failing rule lists the offending events with their ids, titles and the numbers compared), and lists probable QA or test data that is not part of the seed (it only reports) |
 
@@ -118,7 +118,7 @@ apps/
     src/
       main.ts, app.module.ts      bootstrap (CORS, uploads, WebSocket adapter) and the root module
       components/<name>/          one folder per feature: resolver, service, module, specs
-                                  (ai, audit-log, auth, comment, conversation, event, follow, like, member,
+                                  (ai, audit-log, auth, comment, conversation, event, like, member,
                                    notice, notification, order, organizer, payment, payout, refund, sales,
                                    seat, ticket, ticket-type, venue, view)
       libs/                       DTOs (dto/), enums, Mongoose schemas, pure rules (payout, refund policy,

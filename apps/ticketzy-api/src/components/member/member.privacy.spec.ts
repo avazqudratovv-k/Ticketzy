@@ -15,8 +15,6 @@ const PUBLIC_FIELDS = [
 	'memberDesc',
 	'memberEvents',
 	'completedEvents',
-	'memberFollowers',
-	'memberFollowings',
 	'memberLikes',
 	'memberViews',
 	'memberComments',
@@ -24,7 +22,6 @@ const PUBLIC_FIELDS = [
 	'createdAt',
 	'updatedAt',
 	'meLiked',
-	'meFollowed',
 ];
 /** public only for ORGANIZER accounts (organization name and address), private for everyone else */
 const ORGANIZER_PUBLIC_FIELDS = ['memberFullName', 'memberAddress'];

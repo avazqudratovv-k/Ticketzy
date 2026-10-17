@@ -8,7 +8,7 @@ import { publicEventFilterAt } from '../../libs/event-visibility';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { T } from '../../libs/types/common';
 import { ViewGroup } from '../../libs/enums/view.enum';
-import { lookupVisit } from '../../libs/config';
+import { lookupAuthMemberLiked, lookupVisit } from '../../libs/config';
 import { MemberStatus } from '../../libs/enums/member.enum';
 
 @Injectable()
@@ -73,6 +73,7 @@ export class ViewService {
           				list: [
             				{ $skip: (page - 1) * limit },
             				{ $limit: limit },
+            				lookupAuthMemberLiked(memberId, '$visitedEvent._id'),
           				],
           		metaCounter: [{ $count: 'total' }],
         		},
@@ -81,7 +82,7 @@ export class ViewService {
     	.exec();
 
   		const result: Events = { list: [], metaCounter: data[0]?.metaCounter ?? [] };
-  		result.list = (data[0]?.list ?? []).map((ele) => ele.visitedEvent);
+  		result.list = (data[0]?.list ?? []).map((ele) => ({ ...ele.visitedEvent, meLiked: ele.meLiked }));
 
   		return result;
 	}

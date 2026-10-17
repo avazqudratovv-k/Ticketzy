@@ -6,10 +6,15 @@ import { MongooseModule, getModelToken } from '@nestjs/mongoose';
 import { DatabaseModule } from './database/database.module';
 import { ComponentsModule } from './components/components.module';
 import DemoSeedRecordSchema from './libs/schemas/DemoSeedRecord.model';
+import LegacyFollowSchema from './libs/schemas/LegacyFollow.model';
 import { DemoMongoModels } from './demo-snapshot';
 
 @Module({
-	imports: [ConfigModule.forRoot(), DatabaseModule, ComponentsModule, MongooseModule.forFeature([{ name: 'DemoSeedRecord', schema: DemoSeedRecordSchema }])],
+	imports: [ConfigModule.forRoot(), DatabaseModule, ComponentsModule, MongooseModule.forFeature([
+			{ name: 'DemoSeedRecord', schema: DemoSeedRecordSchema },
+			// follows no longer exist in the API (#122); this model only lets reset:demo remove the ones an earlier seed created
+			{ name: 'Follow', schema: LegacyFollowSchema },
+		])],
 })
 export class DemoSeedModule {}
 

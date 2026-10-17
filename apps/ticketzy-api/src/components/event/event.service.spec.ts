@@ -142,6 +142,7 @@ describe('EventService', () => {
 	let memberModel: any;
 	let memberService: any;
 	let viewService: any;
+	let likeService: any;
 	let notificationService: any;
 	let auditLogService: any;
 	let eventSeatModel: any;
@@ -165,6 +166,7 @@ describe('EventService', () => {
 		memberModel = { distinct: jest.fn().mockResolvedValue(['o9']), findById: jest.fn().mockReturnValue(lean({ _id: 'org1', memberStatus: MemberStatus.SUSPENDED })) };
 		memberService = { getMember: jest.fn().mockResolvedValue({ _id: 'org1' }), memberStatsEditor: jest.fn().mockResolvedValue({}) };
 		viewService = { recordView: jest.fn().mockResolvedValue(null) };
+		likeService = { checkLikeExistence: jest.fn().mockResolvedValue([]), toggleLike: jest.fn().mockResolvedValue(1) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
 		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
 		refundService = {
@@ -179,7 +181,7 @@ describe('EventService', () => {
 			memberModel,
 			memberService,
 			viewService,
-			{ checkLikeExistence: jest.fn().mockResolvedValue([]) } as any,
+			likeService,
 			notificationService,
 			auditLogService,
 			eventSeatModel,
@@ -1376,6 +1378,38 @@ describe('EventService', () => {
 			eventModel.findOne.mockReturnValue(exec(null));
 			await expect(service.likeTargetEvent('m1' as any, 'e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
 			expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED, endAt: { $gt: expect.any(Date) } });
+		});
+
+		describe('likeTargetEvent answer (#122)', () => {
+			const approved = () => draft({ eventStatus: EventStatus.APPROVED, endAt: future(8) });
+			const likeIt = async (modifier: number, updated: any) => {
+				eventModel.findOne.mockReturnValue(exec(approved()));
+				eventModel.findByIdAndUpdate = jest.fn().mockReturnValue(exec(updated));
+				likeService.toggleLike.mockResolvedValue(modifier);
+				return await service.likeTargetEvent('m1' as any, 'e1' as any);
+			};
+
+			it('a like returns the event with the new eventLikes and meLiked set, from a plain object', async () => {
+				const doc = { toObject: () => ({ _id: 'e1', eventLikes: 5 }) };
+				const result: any = await likeIt(1, doc);
+				expect(result).toMatchObject({ _id: 'e1', eventLikes: 5 });
+				expect(result.meLiked).toEqual([{ memberId: 'm1', likeRefId: 'e1', myFavorite: true }]);
+				expect(result.toObject).toBeUndefined();
+				expect(eventModel.findByIdAndUpdate.mock.calls[0][1]).toEqual({ $inc: { eventLikes: 1 } });
+			});
+
+			it('an unlike returns an empty meLiked list and the lowered count', async () => {
+				const result: any = await likeIt(-1, { toObject: () => ({ _id: 'e1', eventLikes: 4 }) });
+				expect(result).toMatchObject({ _id: 'e1', eventLikes: 4, meLiked: [] });
+				expect(eventModel.findByIdAndUpdate.mock.calls[0][1]).toEqual({ $inc: { eventLikes: -1 } });
+			});
+
+			it('liking twice in a row ends unliked: the answers alternate', async () => {
+				const first: any = await likeIt(1, { toObject: () => ({ _id: 'e1', eventLikes: 1 }) });
+				const second: any = await likeIt(-1, { toObject: () => ({ _id: 'e1', eventLikes: 0 }) });
+				expect(first.meLiked).toHaveLength(1);
+				expect(second.meLiked).toHaveLength(0);
+			});
 		});
 
 		describe('assertPublicEvent (comments)', () => {

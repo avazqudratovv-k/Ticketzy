@@ -403,7 +403,11 @@ export class EventService {
 				eventId: likeRefId,
 			});
 		}
-		return result;
+		// the toggle result decides the flag (no second read): a plain object, because a Mongoose document drops fields outside the schema
+		const liked = modifier === 1;
+		const plain: Event = typeof (result as any).toObject === 'function' ? (result as any).toObject() : result;
+		plain.meLiked = liked ? [{ memberId, likeRefId, myFavorite: true }] : [];
+		return plain;
 	}
 
 	/** ADMIN */

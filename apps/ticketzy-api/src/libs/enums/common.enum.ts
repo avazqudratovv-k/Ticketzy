@@ -25,8 +25,6 @@ export enum Message {
 	ONLY_SPECIFIC_ROLES_ALLOWED = 'Allowed only for members with specific role',
 	NOT_ALLOWED_REQUEST = 'Not Allowed Request!',
 	PROVIDE_ALLOWED_FORMAT = 'Please provide jpg, jpeg or png images!',
-	SELF_SUBSCRIPTION_DENIED = 'Self subscription is denied!',
-	ONLY_ORGANIZERS_CAN_BE_FOLLOWED = 'Only organizers can be followed!',
 	NO_ORGANIZER_FOUND = 'No organizer found!',
 	USE_ORGANIZER_OPERATIONS = 'Organizer status and role are changed with the organizer operations, not with updateMemberByAdmin!',
 	INVALID_STATUS_TRANSITION = 'This organizer status change is not allowed from the current status!',

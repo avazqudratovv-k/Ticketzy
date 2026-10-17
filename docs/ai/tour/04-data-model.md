@@ -37,7 +37,7 @@ Conversation 1--* Message
 | `memberImage` | string | '' | upload path |
 | `memberEvents` | number | 0 | events the organizer created (drafts included; decremented on cancel and draft removal) |
 | `completedEvents` | number | 0 | ended events; drives commission tiers; incremented by the batch job |
-| `memberFollowers`, `memberFollowings`, `memberLikes`, `memberViews`, `memberComments` | number | 0 | counters; `memberComments` is declared but nothing increments it (comments exist on events only) |
+| `memberLikes`, `memberViews`, `memberComments` | number | 0 | counters; `memberComments` is declared but nothing increments it (comments exist on events only) |
 | `memberRank` | number | 0 | written by the batch rank job |
 | `rejectReason` | string | | why an organizer was rejected |
 | `commissionOverride` | `{ rate 0..100, endsAt?, reason }` | none | admin override of the commission |
@@ -223,7 +223,7 @@ Fields: `actorId`, `action` (22 values of `AuditAction`), `targetType` (MEMBER, 
 | `comments` | `Comment.model.ts` | `commentStatus` (ACTIVE/DELETE), `commentGroup` (EVENT), `commentContent`, `commentRefId`, `memberId` | `(commentRefId, commentGroup, commentStatus, createdAt: -1)` | `CommentService` |
 | `likes` | `Like.model.ts` | `likeGroup` (MEMBER/EVENT), `likeRefId`, `memberId` | unique `(memberId, likeRefId, likeGroup)` | `LikeService.toggleLike` |
 | `views` | `View.model.ts` | `viewGroup` (MEMBER/EVENT), `viewRefId`, `memberId` | unique `(memberId, viewRefId, viewGroup)` | `ViewService.recordView` |
-| `follows` | `Follow.model.ts` | `followingId`, `followerId` | unique `(followingId, followerId)`, `(followerId, createdAt: -1)` | `FollowService` |
+| `follows` (legacy, #122) | none in the API (`LegacyFollow.model.ts`, demo scripts only) | `followingId`, `followerId` | the old unique indexes stay in the database; nothing creates them | nothing; kept untouched, `reset:demo` removes the seeded ones through the manifest |
 | `notices` | `Notice.model.ts` | `noticeCategory` (FAQ/TERMS/INQUIRY), `noticeStatus` (HOLD/ACTIVE/DELETE), `noticeTitle`, `noticeContent`, `memberId` | `(noticeStatus, createdAt: -1)` | `NoticeService` |
 
 `likes` and `views` use the same group enums and are the source for "favorites" and "visited" lists.
@@ -234,7 +234,7 @@ Counters of AI use per UTC day. `usageKey` (required, unique) is `global:<day>` 
 
 ## 16. Demo seed collection `demo_seed_records` (`DemoSeedRecord.model.ts`)
 
-The manifest of the demo seed. One row per *root* document the seed created: `runId` (string), `recordType` (`Member`, `Venue` or `Event`), `recordId`; only `createdAt`. Unique index `(recordType, recordId)`. Written by the seeder (`DemoSeeder.track` in `apps/ticketzy-api/src/demo-seeder.ts`) *before* it creates each root, so a crash leaves a complete manifest. The API never reads it. `reset:demo` derives everything that hangs off those roots (ticket types, seats, orders, tickets, payments, refunds, payouts, comments, likes, views, follows, conversations, messages, notifications, audit entries) from the roots (`libs/demo-manifest.ts`, `removeDemoData`). A member is removed only if its id is in the manifest **and** its email ends with `@ticketzy.demo`, and never if it is an ADMIN. An event that somebody else bought tickets for stays, with its organizer, venue and orders, and is reported.
+The manifest of the demo seed. One row per *root* document the seed created: `runId` (string), `recordType` (`Member`, `Venue` or `Event`), `recordId`; only `createdAt`. Unique index `(recordType, recordId)`. Written by the seeder (`DemoSeeder.track` in `apps/ticketzy-api/src/demo-seeder.ts`) *before* it creates each root, so a crash leaves a complete manifest. The API never reads it. `reset:demo` derives everything that hangs off those roots (ticket types, seats, orders, tickets, payments, refunds, payouts, comments, likes, views, (old follows, #122), conversations, messages, notifications, audit entries) from the roots (`libs/demo-manifest.ts`, `removeDemoData`). A member is removed only if its id is in the manifest **and** its email ends with `@ticketzy.demo`, and never if it is an ADMIN. An event that somebody else bought tickets for stays, with its organizer, venue and orders, and is reported.
 
 ## 17. Counters kept in sync by hand
 
@@ -244,7 +244,6 @@ Counters are separate writes after the main change; none is wrapped in a transac
 |---|---|---|---|
 | `Member.memberEvents` | member | +1 `createEvent`; -1 cancel (`cancelEvent`) and draft removal | count of events (the public page shows a live count of APPROVED events instead, `useVisibleEventCount`) |
 | `Member.completedEvents` | member | +1 `BatchService.batchEndEvents` | ENDED events |
-| `Member.memberFollowers/Followings` | member | `FollowService.subscribe/unsubscribe` | `follows` |
 | `Member.memberLikes`, `Event.eventLikes` | | `likeTargetMember`, `likeTargetEvent` via `toggleLike` | `likes` |
 | `Member.memberViews`, `Event.eventViews` | | `getMember`, `getEvent` when `recordView` inserted | `views` (never decremented by design) |
 | `Event.eventComments` | event | +1 create, -1 soft delete or admin remove | `comments` |

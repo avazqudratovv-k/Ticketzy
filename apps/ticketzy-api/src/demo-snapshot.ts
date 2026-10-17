@@ -39,7 +39,7 @@ export const loadDemoSnapshot = async (models: DemoMongoModels, now: Date = new 
 	const organizerOf = new Map(events.map((event) => [str(event._id), str(event.organizerId)]));
 	const venueIds = await getTrackedIds(models, 'Venue');
 
-	const [ticketTypes, orderRows, seatRows, ticketRows, orderDocs, payouts, likeRows, viewRows, commentRows, followerRows, followingRows, conversations] =
+	const [ticketTypes, orderRows, seatRows, ticketRows, orderDocs, payouts, likeRows, viewRows, commentRows, conversations] =
 		await Promise.all([
 			models.ticketType.find({ eventId: { $in: eventIds } }).select('eventId totalQuantity soldQuantity ticketTypeStatus').lean().exec(),
 			models.order
@@ -62,8 +62,6 @@ export const loadDemoSnapshot = async (models: DemoMongoModels, now: Date = new 
 			models.comment
 				.aggregate([{ $match: { commentRefId: { $in: eventIds }, commentStatus: CommentStatus.ACTIVE } }, { $group: { _id: { id: '$commentRefId' }, count: { $sum: 1 } } }])
 				.exec(),
-			models.follow.aggregate([{ $match: { followingId: { $in: memberIds } } }, { $group: { _id: { id: '$followingId' }, count: { $sum: 1 } } }]).exec(),
-			models.follow.aggregate([{ $match: { followerId: { $in: memberIds } } }, { $group: { _id: { id: '$followerId' }, count: { $sum: 1 } } }]).exec(),
 			models.conversation.find({ organizerId: { $in: memberIds } }).lean().exec(),
 		]);
 
@@ -109,8 +107,6 @@ export const loadDemoSnapshot = async (models: DemoMongoModels, now: Date = new 
 			memberStatus: member.memberStatus,
 			completedEvents: member.completedEvents ?? 0,
 			memberEvents: member.memberEvents ?? 0,
-			memberFollowers: member.memberFollowers ?? 0,
-			memberFollowings: member.memberFollowings ?? 0,
 			memberLikes: member.memberLikes ?? 0,
 			memberViews: member.memberViews ?? 0,
 			memberRank: member.memberRank ?? 0,
@@ -157,8 +153,6 @@ export const loadDemoSnapshot = async (models: DemoMongoModels, now: Date = new 
 		eventViews: groupBy(viewRows, 'EVENT'),
 		memberViews: groupBy(viewRows, 'MEMBER'),
 		activeComments: rows(commentRows),
-		followers: rows(followerRows),
-		followings: rows(followingRows),
 		conversations: conversations.map((conversation: any) => {
 			const own = str(conversation.organizerId);
 			const count = (fromOrganizer: boolean) =>
@@ -185,7 +179,7 @@ export const countDemoDocuments = async (models: DemoMongoModels): Promise<Recor
 	const count = (model: Model<any>, filter: any): Promise<number> => model.countDocuments(filter).exec();
 	const byStatus = (list: any[], field: string, value: string): number => list.filter((item) => item[field] === value).length;
 
-	const [venues, ticketTypes, seats, soldSeats, orders, paidOrders, tickets, usedTickets, payments, refunds, payouts, likes, views, comments, follows, conversations, messages, notifications, auditLogs] =
+	const [venues, ticketTypes, seats, soldSeats, orders, paidOrders, tickets, usedTickets, payments, refunds, payouts, likes, views, comments, conversations, messages, notifications, auditLogs] =
 		await Promise.all([
 			count(models.venue, { _id: { $in: await getTrackedIds(models, 'Venue') } }),
 			count(models.ticketType, { eventId: { $in: eventIds } }),
@@ -201,7 +195,6 @@ export const countDemoDocuments = async (models: DemoMongoModels): Promise<Recor
 			count(models.like, { likeRefId: { $in: [...eventIds, ...memberIds] } }),
 			count(models.view, { viewRefId: { $in: [...eventIds, ...memberIds] } }),
 			count(models.comment, { commentRefId: { $in: eventIds } }),
-			count(models.follow, { followingId: { $in: memberIds } }),
 			count(models.conversation, { _id: { $in: conversationIds } }),
 			count(models.message, { conversationId: { $in: conversationIds } }),
 			count(models.notification, {
@@ -228,7 +221,6 @@ export const countDemoDocuments = async (models: DemoMongoModels): Promise<Recor
 		likes,
 		views,
 		comments,
-		follows,
 		conversations,
 		messages,
 		notifications,

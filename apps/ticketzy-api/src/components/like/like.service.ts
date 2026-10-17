@@ -75,6 +75,8 @@ export class LikeService {
                     list: [
                         { $skip: (page - 1) * limit }, 
                         { $limit: limit }, 
+                        // every row of this list is a like of the caller, so the heart is on
+                        { $set: { 'favoriteEvent.meLiked': [{ memberId: '$memberId', likeRefId: '$likeRefId', myFavorite: true }] } },
                     ],
                     metaCounter: [{ $count: 'total' }]
                 },
