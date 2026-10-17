@@ -7,7 +7,8 @@ import { Ticket } from '../../libs/dto/ticket/ticket';
 import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
 import { Venue } from '../../libs/dto/venue/venue';
 import { Message } from '../../libs/enums/common.enum';
-import { EventCategory, publicEventStatus } from '../../libs/enums/event.enum';
+import { EventCategory } from '../../libs/enums/event.enum';
+import { publicEventFilter } from '../../libs/event-visibility';
 import { TicketStatus, TicketTypeStatus } from '../../libs/enums/ticket.enum';
 import { escapeRegExp, lookupActiveOrganizer, lookupEvent, lookupSeat, lookupTicketType, lookupVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { getRefundPolicyText } from '../../libs/refund-policy';
@@ -107,7 +108,7 @@ export class AiToolsService {
 	}
 
 	private async searchEvents(args: Record<string, unknown>): Promise<ToolOutcome> {
-		const match: T = { eventStatus: publicEventStatus };
+		const match: T = { ...publicEventFilter() };
 
 		if (args.category !== undefined) {
 			if (!Object.values(EventCategory).includes(args.category as EventCategory)) return this.fail('Unknown category.');
@@ -167,7 +168,7 @@ export class AiToolsService {
 
 		const [event]: Event[] = await this.eventModel
 			.aggregate([
-				{ $match: { _id: shapeIntoMongoObjectId(args.eventId), eventStatus: publicEventStatus } },
+				{ $match: { _id: shapeIntoMongoObjectId(args.eventId), ...publicEventFilter() } },
 				...lookupActiveOrganizer,
 				lookupVenue,
 				{ $unwind: { path: '$venueData', preserveNullAndEmptyArrays: true } },

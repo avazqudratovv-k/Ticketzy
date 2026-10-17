@@ -704,3 +704,12 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Decision:** #119, #120.
 - **Not done / risks:** not run against a real MongoDB (the claim and the DUE pipeline are covered with fakes); `.env.example` and `RUN_IN_PRODUCTION.md` unchanged (no new variable); `npm run lint` not run; nothing committed.
 
+## Hide ended events from the public (decision #121)
+
+- **What changed:** new `libs/event-visibility.ts` (`publicEventFilter`, `publicEventFilterAt`, `getPublicEventState`, `isEventEnded`, `eventEndedException`) and `Message.EVENT_ENDED`. A public read now needs APPROVED and `endAt` ahead (the clock, not the batch job): `getEvents`, `getFavorites`, `getVisited`, `likeTargetEvent`, `assertPublicEvent` (`createComment`), `getEventSeatMap`, public `memberEvents` count, AI `search_events` and `get_event`. `getEvent` for the public on an ended event: `CodedException` `EVENT_ENDED` / "This event has ended!". `getComments` (new `EventService.assertEventReadable`) and `getTicketTypes` now check the event and take the caller (owner and admins pass in any status). `payOrder` refuses an event that ended while the order was pending (`EVENT_ENDED_NO_SALES`).
+- **Buyer access:** unchanged on purpose; verified that order, ticket and refund-quote reads have no status or end filter.
+- **Tests:** `components/event/ended-events.spec.ts` (new, 39 cases: helpers, error shape, every read and write above for APPROVED-past-end and ENDED, guest / member / owner / admin, buyer reads); updated expectations in `event.service.spec.ts`, `comment.service.spec.ts`, `ticket-type.service.spec.ts`, `order-expiry.spec.ts`.
+- **Decision:** #121.
+- **Frontend must change:** handle error code `EVENT_ENDED` on `getEvent`, `getTicketTypes`, `getComments`; stop calling `getTicketTypes` / `getComments` for events that are not public unless the caller is the owner or an admin.
+- **Verified:** tsc (api and batch), `npm run build` and `npm run test` (65 suites, 1338 tests) pass. `npm run lint` not run. Nothing committed. Not run against a real MongoDB or through GraphQL.
+

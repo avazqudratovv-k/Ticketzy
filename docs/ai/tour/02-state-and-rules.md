@@ -78,6 +78,8 @@ export const eventTransitions = {
 | APPROVED -> ENDED | batch job `batchEndEvents` (`apps/ticketzy-batch/src/batch.service.ts`) | when `endAt <= now`; adds 1 to the organizer's `completedEvents` |
 | DRAFT -> (deleted) | `removeEventByAdmin` | only DRAFT; deletes its ticket types too |
 
+**Ended events (#121).** Public means APPROVED **and** `endAt` ahead, compared with the clock (`libs/event-visibility.ts`), so an event disappears from the public at its end time even before `batchEndEvents` sets ENDED (or when the batch app sleeps). `getEvent` answers the public with `EVENT_ENDED`; lists, favorites, visited, likes, comments, seat map, ticket types and the AI tools exclude it. Owner and admins keep full access; buyers keep their own orders, tickets and refund quote (event and venue joined by id, no status filter). `payOrder` refuses an ended event.
+
 Editable statuses for an organizer: `editableEventStatuses` = DRAFT, REJECTED, APPROVED (APPROVED goes to PENDING). `closedEventStatuses` = CANCELLED, ENDED: no edits, no new ticket types (`assertCanManageEvent` excludes them). PENDING is locked so the reviewer sees what was submitted. Public visibility: only `publicEventStatus` = APPROVED, and only if the organizer is ACTIVE.
 
 When the move fails: `changeStatusByAdmin` re-reads the event and answers `NOT_ALLOWED_REQUEST` (organizer path, not the owner), `NO_DATA_FOUND`, `EVENT_ALREADY_CLOSED` (organizer cancelling a closed event), `CANNOT_APPROVE_OWN_EVENT`, or `INVALID_EVENT_TRANSITION`.
@@ -255,8 +257,8 @@ Abbreviations in the matrix: **G** guest, **U** USER, **P** PENDING organizer, *
 |---|---|---|---|
 | createEvent, updateEvent, submitEventForApproval, cancelMyEvent (M) | Roles(ORGANIZER) + ActiveOrganizerGuard | O | own events only |
 | getMyEvents (Q) | same | O | own events |
-| getEvent (Q) | WithoutGuard | all | public = APPROVED + ACTIVE organizer; owner/admin see any status |
-| getEvents (Q), getEventSeatMap (Q) | WithoutGuard | all | public rules |
+| getEvent (Q) | WithoutGuard | all | public = APPROVED + `endAt` ahead + ACTIVE organizer (#121); an ended event answers `EVENT_ENDED` to the public; owner/admin see any status |
+| getEvents (Q), getEventSeatMap (Q) | WithoutGuard | all | public rules (APPROVED and not ended) |
 | getFavorites (Q), getVisited (Q), likeTargetEvent (M) | AuthGuard | U P O A | public events only |
 | getEventsByAdmin (Q), approveEventByAdmin, rejectEventByAdmin, cancelEventByAdmin, updateEventByAdmin, removeEventByAdmin (M) | Roles(ADMIN) | A | approve: not the admin's own event |
 

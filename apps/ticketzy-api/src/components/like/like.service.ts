@@ -8,7 +8,7 @@ import { T } from '../../libs/types/common';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { Events } from '../../libs/dto/event/event';
-import { publicEventStatus } from '../../libs/enums/event.enum';
+import { publicEventFilterAt } from '../../libs/event-visibility';
 import { lookupFavorite } from '../../libs/config';
 import { MemberStatus } from '../../libs/enums/member.enum';
 
@@ -64,8 +64,8 @@ export class LikeService {
                 },
             },
             { $unwind: '$favoriteEvent' },
-            // only APPROVED events are public
-            { $match: { 'favoriteEvent.eventStatus': publicEventStatus } },
+            // only public events (APPROVED and not ended, #121)
+            { $match: publicEventFilterAt('favoriteEvent') },
             lookupFavorite,
             { $unwind: '$favoriteEvent.memberData' },
             // events of an organizer that is not ACTIVE are hidden

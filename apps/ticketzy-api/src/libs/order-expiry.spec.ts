@@ -142,7 +142,7 @@ describe('lazy expiry in the API when the batch app is asleep (C3-50)', () => {
 
 	it('getTicketTypes: reading the ticket types frees abandoned stock first', async () => {
 		const fixture = setup();
-		const events = { findById: () => ({ select: () => ({ lean: () => ({ exec: async () => ({ organizerId: oid() }) }) }) }) };
+		const events = { findById: () => ({ select: () => ({ lean: () => ({ exec: async () => ({ organizerId: oid(), eventStatus: 'APPROVED', endAt: new Date(Date.now() + 86400000) }) }) }) }) };
 		const service = new TicketTypeService(fixture.ticketTypes as any, events as any, { exists: jest.fn().mockReturnValue({ exec: async () => ({ _id: 1 }) }) } as any, {} as any, fixture.seats as any, fixture.orders as any);
 		// getTicketTypes sorts the list; the stock model above answers find() with an array, so give it a sort
 		(fixture.ticketTypes as any).find = (filter: any) => ({ sort: () => ({ exec: async () => fixture.ticketTypes.docs.filter((d) => String(d.eventId) === String(filter.eventId)) }) });

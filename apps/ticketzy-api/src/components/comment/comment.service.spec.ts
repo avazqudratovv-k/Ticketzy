@@ -111,7 +111,8 @@ describe('comments are for events only', () => {
 
 	it('getComments only reads EVENT comments', async () => {
 		const commentModel: any = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }) };
-		const service = new CommentService(commentModel, {} as any, {} as any, {} as any);
+		const eventService: any = { assertEventReadable: jest.fn().mockResolvedValue(undefined) };
+		const service = new CommentService(commentModel, eventService, {} as any, {} as any);
 
 		await service.getComments(null as any, { page: 1, limit: 5, search: { commentRefId: 'e1' as any } });
 

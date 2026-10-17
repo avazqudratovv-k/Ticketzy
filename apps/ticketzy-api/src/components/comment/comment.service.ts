@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException, Logger }
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, ObjectId } from 'mongoose';
 import { EventService } from '../event/event.service';
+import { Member } from '../../libs/dto/member/member';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import { CommentInput, CommentsInquiry } from '../../libs/dto/comment/comment.input';
@@ -82,8 +83,10 @@ export class CommentService {
         return result;
     }
 
-    public async getComments(memberId: ObjectId, input: CommentsInquiry): Promise<Comments> {
+    public async getComments(authMember: Member | null, input: CommentsInquiry): Promise<Comments> {
     const { commentRefId } = input.search;
+    // comments of an event that is not public (ended, draft, ...) are for its owner and admins only (#121)
+    await this.eventService.assertEventReadable(authMember, commentRefId);
     const match: T = { commentGroup: CommentGroup.EVENT, commentRefId: commentRefId, commentStatus: CommentStatus.ACTIVE };
     const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 

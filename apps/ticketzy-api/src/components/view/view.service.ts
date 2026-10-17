@@ -4,7 +4,7 @@ import { Model, ObjectId } from 'mongoose';
 import { View } from '../../libs/dto/view/view';
 import { ViewInput } from '../../libs/dto/view/view.input';
 import { Events } from '../../libs/dto/event/event';
-import { publicEventStatus } from '../../libs/enums/event.enum';
+import { publicEventFilterAt } from '../../libs/event-visibility';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
 import { T } from '../../libs/types/common';
 import { ViewGroup } from '../../libs/enums/view.enum';
@@ -62,8 +62,8 @@ export class ViewService {
         			},
       			},
       			{ $unwind: '$visitedEvent' },
-      			// only APPROVED events are public
-      			{ $match: { 'visitedEvent.eventStatus': publicEventStatus } },
+      			// only public events (APPROVED and not ended, #121)
+      			{ $match: publicEventFilterAt('visitedEvent') },
       			lookupVisit,
       			{ $unwind: '$visitedEvent.memberData' },
       			// events of an organizer that is not ACTIVE are hidden

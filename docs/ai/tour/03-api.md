@@ -171,10 +171,10 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `submitEventForApproval(eventId)` M | O | id | `Event` (PENDING) | status; AI moderation in the background | `NO_DATA_FOUND`, `INVALID_EVENT_TRANSITION`, `EVENT_SUBMIT_*`, `SEAT_TIER_MISSING`, `VENUE_ALREADY_BOOKED` |
 | `cancelMyEvent` M | O | `EventReasonInput { eventId, reason (max 500, trimmed) }` | `Event` (CANCELLED) | Flow 11 | `EVENT_CANCEL_REASON_REQUIRED`, `NOT_ALLOWED_REQUEST`, `EVENT_ALREADY_CLOSED`, `INVALID_EVENT_TRANSITION` |
 | `getMyEvents` Q | O | `OrganizerEventsInquiry`: sort in `availableEventSorts`, `search.eventStatus?` | `Events` with organizer, venue, seat counts | none | |
-| `getEvent(eventId)` Q | all | id | `Event` with `memberData`, `venueData`, seat counts, `meLiked`; admins also `possibleVenueConflicts` | records a view for logged-in callers on public events | `NO_DATA_FOUND` |
+| `getEvent(eventId)` Q | all | id | `Event` with `memberData`, `venueData`, seat counts, `meLiked`; admins also `possibleVenueConflicts` | records a view for logged-in callers on public events | `NO_DATA_FOUND` (missing or hidden), **`EVENT_ENDED`** "This event has ended!" for the public when the event is APPROVED past `endAt` or ENDED (no details; owner and admins get the full event, #121) |
 | `getEvents(input)` Q | all | `EventsInquiry`: sort in `availableEventSorts`; `search`: `organizerId?`, `venueId?`, `cityList?`, `categoryList?`, `pricesRange?{start,end}`, `periodsRange?{start,end}`, `text?` | `Events` | none | |
 | `getEventSeatMap(eventId)` Q | all | id | `EventSeatMap { eventId, venueTimezone, venueLayout, seats[{sectionKey,row,number,seatStatus,mine?,holdExpiresAt?}] }` | none | `NO_DATA_FOUND` (code `NO_DATA_FOUND`, HTTP 404) |
-| `getFavorites(input)` / `getVisited(input)` Q | U P O A | `OrdinaryInquiry { page, limit }` | `Events` (APPROVED events of ACTIVE organizers) | none | |
+| `getFavorites(input)` / `getVisited(input)` Q | U P O A | `OrdinaryInquiry { page, limit }` | `Events` (APPROVED, not ended, events of ACTIVE organizers) | none | |
 | `likeTargetEvent(eventId)` M | U P O A | id | `Event` | toggle like; `eventLikes` +-1; notification `LIKE` to the organizer on like (not on unlike, not to oneself) | `NO_DATA_FOUND` |
 | `getEventsByAdmin` Q | A | `EventsByAdminInquiry`: `limit` up to 200; `search`: `eventStatus?`, `eventCategoryList?`, `organizerId?`, `text?` (title and translated titles) | `Events` (empty list is fine) | none | |
 | `approveEventByAdmin(eventId)` M | A | id | `Event` (APPROVED) | seat generation, audit `EVENT_APPROVED`, notification | `CANNOT_APPROVE_OWN_EVENT`, `INVALID_EVENT_TRANSITION`, `NO_DATA_FOUND`, `SEAT_TIER_MISSING`, `SEAT_TIER_DUPLICATE`, `EVENT_SUBMIT_LAYOUT_REQUIRED`, `SEAT_GENERATION_FAILED`, `VENUE_ALREADY_BOOKED` |
@@ -189,9 +189,9 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 |---|---|---|---|---|---|
 | `createTicketType` M | O A | `TicketTypeInput { eventId, ticketTypeName 2-60, ticketPrice >= 0, ticketCurrency, tierKey? 1-30, totalQuantity? int >= 1, maxPerOrder int >= 1, saleStartAt?, saleEndAt? }` | `TicketType` | insert; `eventMinPrice` refreshed | `NOT_ALLOWED_REQUEST`, `ONLY_KRW_TICKETS`, `EVENT_HAS_OTHER_CURRENCY`, `TICKET_TYPE_QUANTITY_REQUIRED`, `TICKET_TYPE_QUANTITY_FROM_SEATS`, `TICKET_TYPE_TIER_KEY_REQUIRED`, `CREATE_FAILED` (also for the unique name/tier index) |
 | `updateTicketType` M | O A | `TicketTypeUpdate { _id, ...optional, ticketTypeStatus? }` | `TicketType` | update; total cannot drop below `soldQuantity`; `eventMinPrice` refreshed | `NO_DATA_FOUND`, `NOT_ALLOWED_REQUEST`, `ONLY_KRW_TICKETS`, `TICKET_CURRENCY_LOCKED`, `TICKET_TYPE_TIER_LOCKED`, `TICKET_TYPE_QUANTITY_FROM_SEATS`, `UPDATE_FAILED` |
-| `getTicketTypes(eventId)` Q | all | id | `[TicketType]` sorted by price | first expires stale unpaid orders of the event | `NO_DATA_FOUND` (unknown event or organizer not ACTIVE) |
+| `getTicketTypes(eventId)` Q | all | id | `[TicketType]` sorted by price | first expires stale unpaid orders of the event | `NO_DATA_FOUND` (unknown event, hidden event or organizer not ACTIVE), `EVENT_ENDED` (public caller, event ended) |
 
-`getTicketTypes` does not apply `publicEventStatus`, so the ticket types of a DRAFT event of an ACTIVE organizer are readable by anyone who knows the event id (decision #37 lists this as open, C3-30).
+`getTicketTypes` takes the caller (#121): the owner and admins read any status; everyone else needs a public event (APPROVED, not ended). This closes C3-30.
 
 ### B.6 Seats (`components/seat`)
 
@@ -250,7 +250,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 |---|---|---|---|---|---|
 | `createComment` M | any logged in | `CommentInput { commentGroup (EVENT), commentContent 1-500, commentRefId }` (`memberId` set by the server) | `Comment` | insert; `eventComments` +1; notification `COMMENT` to the organizer; refused before the insert when the event is missing, not APPROVED or its organizer is not ACTIVE (#117) | `NO_DATA_FOUND`, `CREATE_FAILED` |
 | `updateComment` M | any logged in | `CommentUpdate { _id, commentStatus?, commentContent? 1-500 }` | `Comment` | only the author's ACTIVE comment; `commentStatus: DELETE` is a soft delete and lowers `eventComments` | `UPDATE_FAILED` |
-| `getComments(input)` Q | all | `CommentsInquiry`: sort in `availableCommentSorts`, `search.commentRefId` | `Comments` (ACTIVE, with `memberData`) | none | `NO_DATA_FOUND` |
+| `getComments(input)` Q | all | `CommentsInquiry`: sort in `availableCommentSorts`, `search.commentRefId` | `Comments` (ACTIVE, with `memberData`) | none | `NO_DATA_FOUND` (hidden or missing event), `EVENT_ENDED` (public caller, event ended; owner and admins still read, #121) |
 | `removeCommentByAdmin(commentId)` M | A | id | `Comment` | hard delete; `eventComments` -1 unless it was already soft-deleted; audit `COMMENT_REMOVED_BY_ADMIN` | `REMOVE_FAILED` |
 | `subscribe(input)` M | any logged in | organizer id string | `Follower` | insert `follows`; `memberFollowings`/`memberFollowers` +1 | `SELF_SUBSCRIPTION_DENIED`, `NO_DATA_FOUND`, `ONLY_ORGANIZERS_CAN_BE_FOLLOWED`, `CREATE_FAILED` |
 | `unsubscribe(input)` M | any logged in | organizer id | `Follower` | delete the follow row; counters -1 (never looks the target up) | `NO_DATA_FOUND` |

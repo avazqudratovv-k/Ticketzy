@@ -4,6 +4,7 @@ import { Model, ObjectId } from 'mongoose';
 import * as moment from 'moment';
 import { Event, Events } from '../../libs/dto/event/event';
 import { Direction, Message } from '../../libs/enums/common.enum';
+import { eventEndedException, getPublicEventState, publicEventFilter } from '../../libs/event-visibility';
 import { OrganizerEventsInquiry, EventsByAdminInquiry, EventInput, EventReasonInput, EventsInquiry } from '../../libs/dto/event/event.input';
 import { EventUpdate } from '../../libs/dto/event/event.update';
 import { OrdinaryInquiry } from '../../libs/dto/common/common.input';
@@ -18,7 +19,6 @@ import {
 	closedEventStatuses,
 	editableEventStatuses,
 	eventTransitions,
-	publicEventStatus,
 } from '../../libs/enums/event.enum';
 import { MemberType } from '../../libs/enums/member.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
@@ -148,8 +148,13 @@ export class EventService {
 
 		const isAdmin = authMember?.memberType === MemberType.ADMIN;
 		const isOwner = !!memberId && String(memberId) === String(targetEvent.organizerId);
-		const isPublic = targetEvent.eventStatus === publicEventStatus;
-		if (!isPublic && !isOwner && !isAdmin) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		// public: APPROVED and not ended (the end time decides, not the batch job, #121)
+		const publicState = getPublicEventState(targetEvent);
+		const isPublic = publicState === 'PUBLIC';
+		if (!isPublic && !isOwner && !isAdmin) {
+			if (publicState === 'ENDED') throw eventEndedException();
+			throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		}
 
 		if (isOwner || isAdmin) {
 			targetEvent.memberData = await this.memberModel.findById(targetEvent.organizerId).lean().exec();
@@ -185,7 +190,7 @@ export class EventService {
 	}
 
 	public async getEvents(memberId: ObjectId, input: EventsInquiry): Promise<Events> {
-		const match: T = { eventStatus: publicEventStatus };
+		const match: T = { ...publicEventFilter() };
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		await this.shapeMatchQuery(match, input);
@@ -347,15 +352,31 @@ export class EventService {
 
 	/** the event if it is public (APPROVED, organizer ACTIVE, #28, #30), otherwise NO_DATA_FOUND, the same answer as a missing event */
 	public async assertPublicEvent(eventId: ObjectId): Promise<Event> {
-		const target: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
+		const target: Event = await this.eventModel.findOne({ _id: eventId, ...publicEventFilter() }).lean().exec();
 		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 		await this.memberService.getMember(null, target.organizerId); // hidden when the organizer is not ACTIVE
 		return target;
 	}
 
+	/**
+	 * For reads that hang off an event (comments): the owner and admins always pass; everyone else needs a public event
+	 * (APPROVED, not ended, organizer ACTIVE). An ended event answers EVENT_ENDED, anything else hidden NO_DATA_FOUND.
+	 */
+	public async assertEventReadable(authMember: Member | null, eventId: ObjectId): Promise<void> {
+		const target: Event = await this.eventModel.findOne({ _id: eventId }).select('organizerId eventStatus endAt').lean().exec();
+		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		const isAdmin = authMember?.memberType === MemberType.ADMIN;
+		const isOwner = !!authMember?._id && String(authMember._id) === String(target.organizerId);
+		if (isAdmin || isOwner) return;
+		const state = getPublicEventState(target);
+		if (state === 'ENDED') throw eventEndedException();
+		if (state === 'HIDDEN') throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		await this.memberService.getMember(null, target.organizerId); // hidden when the organizer is not ACTIVE
+	}
+
 	public async likeTargetEvent(memberId: ObjectId, likeRefId: ObjectId): Promise<Event> {
 		const target: Event = await this.eventModel
-			.findOne({ _id: likeRefId, eventStatus: publicEventStatus })
+			.findOne({ _id: likeRefId, ...publicEventFilter() })
 			.exec();
 		if (!target) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
 		await this.memberService.getMember(null, target.organizerId); // hidden when the organizer is not ACTIVE
@@ -526,7 +547,7 @@ export class EventService {
 	 * A hold that has run out counts as free. A logged-in caller's own active holds carry mine and holdExpiresAt.
 	 */
 	public async getEventSeatMap(eventId: ObjectId, memberId: ObjectId | null = null): Promise<EventSeatMap> {
-		const event: Event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
+		const event: Event = await this.eventModel.findOne({ _id: eventId, ...publicEventFilter() }).lean().exec();
 		if (!event || event.seatingType !== SeatingType.RESERVED) throw noSeatMap();
 		// hidden when the organizer is not ACTIVE: getMember says so with a plain 500, which is not what a client should see here
 		await this.memberService.getMember(null, event.organizerId).catch((err) => {

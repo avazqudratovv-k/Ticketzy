@@ -18,7 +18,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { Follower, Following, MeFollowed } from '../../libs/dto/follow/follow';
 import { Event } from '../../libs/dto/event/event';
-import { publicEventStatus } from '../../libs/enums/event.enum';
+import { publicEventFilter } from '../../libs/event-visibility';
 import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
 
 @Injectable()
@@ -171,7 +171,7 @@ export class MemberService {
 
 		const counts: { _id: ObjectId; total: number }[] = await this.eventModel
 			.aggregate([
-				{ $match: { organizerId: { $in: organizers.map((member) => member._id) }, eventStatus: publicEventStatus } },
+				{ $match: { organizerId: { $in: organizers.map((member) => member._id) }, ...publicEventFilter() } },
 				{ $group: { _id: '$organizerId', total: { $sum: 1 } } },
 			])
 			.exec();

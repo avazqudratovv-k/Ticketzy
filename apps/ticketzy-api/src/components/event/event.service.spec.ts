@@ -1173,7 +1173,7 @@ describe('EventService', () => {
 
 			it('looks up APPROVED events only', async () => {
 				await service.getEventSeatMap('e1' as any);
-				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED, endAt: { $gt: expect.any(Date) } });
 			});
 
 			it.each(['DRAFT', 'PENDING', 'REJECTED', 'CANCELLED', 'ENDED'])('hides a %s event (it is not found)', async () => {
@@ -1320,13 +1320,13 @@ describe('EventService', () => {
 			await service.getEvents(null as any, { page: 1, limit: 10, search: {} } as any);
 
 			const pipeline = eventModel.aggregate.mock.calls[0][0];
-			expect(pipeline[0].$match.eventStatus).toBe(EventStatus.APPROVED);
+			expect(pipeline[0].$match).toMatchObject({ eventStatus: EventStatus.APPROVED, endAt: { $gt: expect.any(Date) } });
 			const matchIndex = pipeline.findIndex((s: any) => s.$match?.['memberData.memberStatus'] === MemberStatus.ACTIVE);
 			expect(matchIndex).toBeGreaterThan(-1);
 			expect(matchIndex).toBeLessThan(pipeline.findIndex((s: any) => s.$facet));
 		});
 
-		it.each([EventStatus.DRAFT, EventStatus.PENDING, EventStatus.REJECTED, EventStatus.CANCELLED, EventStatus.ENDED])(
+		it.each([EventStatus.DRAFT, EventStatus.PENDING, EventStatus.REJECTED, EventStatus.CANCELLED])(
 			'getEvent hides a %s event from guests and other members',
 			async (status) => {
 				eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: status })));
@@ -1375,14 +1375,14 @@ describe('EventService', () => {
 		it('likeTargetEvent only finds APPROVED events', async () => {
 			eventModel.findOne.mockReturnValue(exec(null));
 			await expect(service.likeTargetEvent('m1' as any, 'e1' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
-			expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+			expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED, endAt: { $gt: expect.any(Date) } });
 		});
 
 		describe('assertPublicEvent (comments)', () => {
 			it('only looks for APPROVED events and returns the event of an ACTIVE organizer', async () => {
 				eventModel.findOne.mockReturnValue(lean(draft({ eventStatus: EventStatus.APPROVED, organizerId: 'org1' })));
 				await expect(service.assertPublicEvent('e1' as any)).resolves.toMatchObject({ organizerId: 'org1' });
-				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED });
+				expect(eventModel.findOne.mock.calls[0][0]).toEqual({ _id: 'e1', eventStatus: EventStatus.APPROVED, endAt: { $gt: expect.any(Date) } });
 			});
 
 			it('answers NO_DATA_FOUND for a missing or non-APPROVED event', async () => {

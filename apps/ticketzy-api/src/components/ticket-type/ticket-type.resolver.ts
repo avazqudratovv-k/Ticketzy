@@ -5,6 +5,7 @@ import { TicketTypeService } from './ticket-type.service';
 import { TicketType } from '../../libs/dto/ticket-type/ticket-type';
 import { TicketTypeInput, TicketTypeUpdate } from '../../libs/dto/ticket-type/ticket-type.input';
 import { MemberType } from '../../libs/enums/member.enum';
+import { Member } from '../../libs/dto/member/member';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ActiveOrganizerGuard } from '../auth/guards/organizer.guard';
@@ -45,8 +46,8 @@ export class TicketTypeResolver {
 
 	@UseGuards(WithoutGuard)
 	@Query(() => [TicketType])
-	public async getTicketTypes(@Args('eventId') input: string): Promise<TicketType[]> {
+	public async getTicketTypes(@Args('eventId') input: string, @AuthMember() authMember: Member | null): Promise<TicketType[]> {
 		this.logger.log('Query: getTicketTypes');
-		return await this.ticketTypeService.getTicketTypes(shapeIntoMongoObjectId(input));
+		return await this.ticketTypeService.getTicketTypes(shapeIntoMongoObjectId(input), authMember);
 	}
 }

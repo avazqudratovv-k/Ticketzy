@@ -62,6 +62,7 @@ export enum Message {
 	SALES_START_NOT_BEFORE_SALES_END = 'The ticket sales start must be before the ticket sales end!',
 	SALES_END_AFTER_EVENT_END = 'The ticket sales must end no later than the event end!',
 	SALES_START_NOT_BEFORE_EVENT_END = 'The ticket sales must start before the event ends!',
+	EVENT_ENDED = 'This event has ended!',
 	EVENT_ENDED_NO_SALES = 'This event has ended, so tickets can no longer be bought!',
 	SALES_NOT_STARTED = 'Ticket sales for this event have not started yet!',
 	SALES_CLOSED = 'Ticket sales for this event are closed!',

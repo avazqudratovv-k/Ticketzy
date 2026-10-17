@@ -80,7 +80,7 @@ describe('TicketTypeService.getTicketTypes hides ticket types of organizers that
 
 	beforeEach(() => {
 		ticketTypeModel = { find: jest.fn().mockReturnValue({ sort: () => ({ exec: jest.fn().mockResolvedValue([{ _id: 't1' }]) }) }) };
-		eventModel = { findById: jest.fn().mockReturnValue(lean({ organizerId: 'o1' })) };
+		eventModel = { findById: jest.fn().mockReturnValue(lean({ organizerId: 'o1', eventStatus: 'APPROVED', endAt: new Date(Date.now() + 86400000) })) };
 		memberModel = { exists: jest.fn() };
 		service = new TicketTypeService(ticketTypeModel, eventModel, memberModel, {} as any, {} as any);
 	});

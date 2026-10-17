@@ -33,6 +33,7 @@ interface OrderLine {
 }
 
 import { getPurchaseWindowError } from '../../libs/sales-window';
+import { isEventEnded } from '../../libs/event-visibility';
 
 @Injectable()
 export class OrderService {
@@ -189,6 +190,9 @@ export class OrderService {
 			await this.expireOrder(order);
 			throw new BadRequestException(Message.HOLD_EXPIRED);
 		}
+		// an order started before the event ended cannot be paid after it (#121); the batch job releases its stock
+		const orderEvent = await this.eventModel.findOne({ _id: order.eventId }).select('eventStatus endAt').lean().exec();
+		if (orderEvent && isEventEnded(orderEvent)) throw new BadRequestException(Message.EVENT_ENDED_NO_SALES);
 
 		const charge = await this.paymentService.charge(order, simulate);
 		if (!charge.success) return await this.failOrder(order, charge);

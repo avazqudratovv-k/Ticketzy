@@ -10,6 +10,7 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 import { WithoutGuard } from '../auth/guards/without.guard';
 import { Comments, Comment } from '../../libs/dto/comment/comment';
 import { MemberType } from '../../libs/enums/member.enum';
+import { Member } from '../../libs/dto/member/member';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
@@ -45,11 +46,11 @@ export class CommentResolver {
     @Query((returns) => Comments)
     public async getComments(
         @Args('input') input: CommentsInquiry,
-        @AuthMember('_id') memberId: ObjectId,
+        @AuthMember() authMember: Member | null,
     ): Promise<Comments> {
         this.logger.log('Query: getComments');
         input.search.commentRefId = shapeIntoMongoObjectId(input.search.commentRefId);
-        const result = await this.commentService.getComments(memberId, input);
+        const result = await this.commentService.getComments(authMember, input);
         return result;
     }
 

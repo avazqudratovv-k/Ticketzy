@@ -11,6 +11,7 @@ import { SeatingType, closedEventStatuses } from '../../libs/enums/event.enum';
 import { TicketTypeStatus } from '../../libs/enums/ticket.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { Member } from '../../libs/dto/member/member';
+import { eventEndedException, getPublicEventState } from '../../libs/event-visibility';
 import { T } from '../../libs/types/common';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 import { countTierSeats } from '../../libs/venue-layout';
@@ -100,12 +101,20 @@ export class TicketTypeService {
 		return result;
 	}
 
-	public async getTicketTypes(eventId: ObjectId): Promise<TicketType[]> {
-		// the ticket types of an event whose organizer is not ACTIVE are hidden, like the event itself
-		const event = await this.eventModel.findById(eventId).select('organizerId').lean().exec();
-		const organizerActive =
-			event && (await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE }));
-		if (!organizerActive) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+	public async getTicketTypes(eventId: ObjectId, authMember: Member | null = null): Promise<TicketType[]> {
+		const event = await this.eventModel.findById(eventId).select('organizerId eventStatus endAt').lean().exec();
+		if (!event) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		// the owner and admins read the ticket types of their event in any status; everyone else only of a public event
+		// (APPROVED, not ended, #121): an ended event answers EVENT_ENDED, a hidden one NO_DATA_FOUND
+		const isStaff = authMember?.memberType === MemberType.ADMIN || (!!authMember?._id && String(authMember._id) === String(event.organizerId));
+		if (!isStaff) {
+			const state = getPublicEventState(event);
+			if (state === 'ENDED') throw eventEndedException();
+			if (state === 'HIDDEN') throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+			// the ticket types of an event whose organizer is not ACTIVE are hidden, like the event itself
+			const organizerActive = await this.memberModel.exists({ _id: event.organizerId, memberStatus: MemberStatus.ACTIVE });
+			if (!organizerActive) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
+		}
 
 		// abandoned checkouts of this event give their stock back before the numbers are shown
 		await this.sweepStaleOrders({ eventId });
