@@ -14,7 +14,7 @@ services:
 
   ticketzy-batch:
     container_name: ticketzy-batch
-    restart: always
+    restart: unless-stopped
     image: node:24.15.0
     ports:
       - "127.0.0.1:4002:3008"
