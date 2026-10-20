@@ -24,6 +24,7 @@ import { validateEnv } from 'apps/ticketzy-api/src/libs/env.validation';
 			{ name: 'Order', schema: OrderSchema },
 			{ name: 'TicketType', schema: TicketTypeSchema },
 			{ name: 'EventSeat', schema: EventSeatSchema },
+			{ name: 'Notification', schema: NotificationSchema },
 		]),
 	],
 	controllers: [BatchController],
