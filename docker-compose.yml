@@ -1,0 +1,32 @@
+services:
+  ticketzy-api:
+    container_name: ticketzy-api
+    restart: always
+    image: node:24.15.0
+    ports:
+      - "127.0.0.1:4001:3007"
+    volumes:
+      - ./:/usr/src/ticketzy
+    working_dir: /usr/src/ticketzy
+    networks:
+      - monorepo-network
+    command: bash -c "npm ci && npm run build && npm run start:prod"
+
+  ticketzy-batch:
+    container_name: ticketzy-batch
+    restart: always
+    image: node:24.15.0
+    ports:
+      - "127.0.0.1:4002:3008"
+    volumes:
+      - ./:/usr/src/ticketzy
+    working_dir: /usr/src/ticketzy
+    networks:
+      - monorepo-network
+    depends_on:
+      - ticketzy-api
+    command: bash -c "until [ -f dist/apps/ticketzy-batch/main.js ]; do sleep 5; done && npm run start:prod:batch"
+
+networks:
+  monorepo-network:
+    driver: bridge
