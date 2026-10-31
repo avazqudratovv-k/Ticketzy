@@ -8,7 +8,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { SeatStatus, SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { getSeatHoldSeconds } from '../../libs/env.validation';
-import { assertBuyerAccount } from '../../libs/buyer';
+import { assertBuyerAccount, assertVerifiedEmail } from '../../libs/buyer';
 import { shapeIntoMongoObjectId } from '../../libs/config';
 import { getPurchaseWindowError } from '../../libs/sales-window';
 
@@ -89,9 +89,10 @@ export class SeatService {
 	 */
 	public async holdSeats(memberId: ObjectId, eventId: ObjectId, seatIds: ObjectId[]): Promise<SeatHold> {
 		const ids = this.normalizeSeatIds(seatIds);
-		const buyer = await this.memberModel.findOne({ _id: memberId, memberStatus: MemberStatus.ACTIVE }).select('memberType').lean().exec();
+		const buyer = await this.memberModel.findOne({ _id: memberId, memberStatus: MemberStatus.ACTIVE }).select('memberType emailVerifiedAt').lean().exec();
 		if (!buyer) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		assertBuyerAccount(buyer.memberType);
+		assertVerifiedEmail(buyer);
 		await this.assertEventOpenForSeats(eventId);
 
 		// a member has one hold per event: seats held earlier (and not asked for again) go back to the pool

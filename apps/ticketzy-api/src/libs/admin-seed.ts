@@ -55,6 +55,7 @@ export async function ensureExtraAdmin(
 			memberType: MemberType.ADMIN,
 			memberStatus: MemberStatus.ACTIVE,
 			memberAuthType: MemberAuthType.EMAIL,
+			emailVerifiedAt: new Date(),
 			...(nick ? { memberNick: nick } : {}),
 		});
 	} catch (err) {

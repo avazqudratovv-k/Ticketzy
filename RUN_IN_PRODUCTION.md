@@ -13,6 +13,9 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `SECRET_TOKEN` | signs login tokens (JWT); at least 32 random characters, no placeholder words |
 | `QR_SECRET` | signs ticket QR codes; at least 32 random characters, different from `SECRET_TOKEN` |
 | `CORS_ORIGINS` | comma-separated exact browser origins that may call the API, for example the Vercel production URL; no wildcard, no path, `https` |
+| `RESEND_API_KEY` | Resend API key (sends the verification and password reset emails). Without it the API does not start in production |
+| `MAIL_FROM` | sender, an address on a domain you verified at Resend: `noreply@example.com` or `Ticketzy <noreply@example.com>` |
+| `SITE_URL` | front end address the emailed links start with, `https`, no path, for example `https://example.com`. The links are `SITE_URL/verify-email?token=...` and `SITE_URL/reset-password?token=...` |
 | `PAYMENT_MODE` | `simulated` (mock provider, the buyer picks the result) or `disabled` (every payment is refused); there is no real provider and no default in production |
 
 ## Optional environment variables
@@ -41,6 +44,7 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN2_EMAIL`, `ADMIN2_PASSWORD`, `ADMIN2_NICK` | none | only for `npm run seed` (the admin accounts); remove `ADMIN_PASSWORD` from the host afterwards |
 | `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | none | only for `npm run seed:demo`: strong passwords (12+ characters, three kinds, no common words) of the demo accounts; remove them from the host afterwards |
 | `DEMO_SEED_CONFIRM` | none | only for `seed:demo` and `reset:demo`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use |
+| `EMAIL_VERIFIED_MIGRATION_CONFIRM` | none | only for `npm run migrate:email-verified -- --apply`: must be `MONGO_DEV` or `MONGO_PROD` (see "Upgrading to email verification") |
 | `MEMBER_INDEX_MIGRATION_CONFIRM` | none | only for `npm run migrate:member-indexes -- --apply`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use (see "Upgrading member indexes") |
 | `DEMO_SEED_ALLOW_NON_DEMO_DB` | `false` | `true` lets the demo commands run against a database that already holds data the seed did not create |
 | `ALLOW_DEMO_SEED` | `false` | the demo commands refuse `NODE_ENV=production` unless this is `true` |
@@ -59,6 +63,17 @@ The API refuses to start, and prints every problem at once by variable **name**,
 4. `npm run check:demo` first (read only) to see what is there, then `npm run seed:demo`; later `npm run reset:demo`. A failing rule of the check lists the offending events (id, title, the numbers compared), never personal data.
 5. A failed seed names the scenario that failed and leaves its data; just run `npm run seed:demo` again (it removes the earlier run first). Moderation is skipped during the seed (#109).
 6. Seeded events are in the future: run the seed again to refresh the dates. The seed sets `SEAT_HOLD_SECONDS=300` and `PAYMENT_MODE=simulated` for its own process only. Unset the variables afterwards.
+
+## Upgrading to email verification (decision #135)
+
+New sign-ups must verify their email before they can buy. Members that exist when this ships (demo members and admins included) must count as verified, or nobody could buy. Run the migration **once, right after the deploy** that adds the feature, before new people sign up:
+
+```bash
+npm run migrate:email-verified                                                          # 1. dry run: counts the members without a verified email
+EMAIL_VERIFIED_MIGRATION_CONFIRM=MONGO_PROD NODE_ENV=production npm run migrate:email-verified -- --apply   # 2. run it
+```
+
+It sets `emailVerifiedAt` only on members that have none, so running it again changes nothing. Set `RESEND_API_KEY`, `MAIL_FROM` and `SITE_URL` first (the API refuses to start in production without them), and verify the sending domain at Resend (SPF and DKIM) or the mail will not arrive.
 
 ## Upgrading member indexes (account deletion, decision #124)
 
@@ -168,6 +183,7 @@ The backend sends no email at all: there is no mail library, no mail setting, an
 - [ ] `CORS_ORIGINS` is the exact Vercel origin; the frontend's `NEXT_PUBLIC_API_GRAPHQL_URL`, `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_WS_URL` point at the API.
 - [ ] Atlas user has `readWrite` on one database; the allowlist is decided; `MONGO_PROD` has the right database name.
 - [ ] Existing database: `npm run migrate:member-indexes -- --apply` run once (see "Upgrading member indexes").
+- [ ] Email: `RESEND_API_KEY`, `MAIL_FROM`, `SITE_URL` set, sending domain verified at Resend, `npm run migrate:email-verified -- --apply` run once (see "Upgrading to email verification").
 - [ ] Admin created with `npm run seed`; `ADMIN_PASSWORD` removed from the host afterwards.
 - [ ] Render health check path is `/health`.
 - [ ] After deploy: `GET /health` is 200, `GET /ready` is 200, GraphQL `introspection` is refused, a login with a wrong password 11 times in a row answers `RATE_LIMITED`.

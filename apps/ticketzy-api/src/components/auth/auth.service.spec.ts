@@ -16,11 +16,11 @@ describe('AuthService', () => {
 		service = new AuthService(new JwtService({ secret: 'test-secret', signOptions: { expiresIn: '1d' } }), memberModel);
 	});
 
-	it('puts only _id and memberType in the token, and the token expires in one day', async () => {
+	it('puts only _id, memberType and the token version in the token, and the token expires in one day', async () => {
 		const token = await service.createToken({ _id: memberId as any, memberType: MemberType.USER });
 		const payload: any = new JwtService({ secret: 'test-secret' }).decode(token);
 
-		expect(Object.keys(payload).sort()).toEqual(['_id', 'exp', 'iat', 'memberType']);
+		expect(Object.keys(payload).sort()).toEqual(['_id', 'exp', 'iat', 'memberType', 'tv']);
 		expect(payload).toMatchObject({ _id: memberId, memberType: MemberType.USER });
 		expect(payload.exp - payload.iat).toBe(24 * 60 * 60);
 	});
@@ -85,5 +85,47 @@ describe('AuthService', () => {
 		expect(service.getBearerToken({ headers: { authorization: 'Bearer abc' } })).toBe('abc');
 		expect(() => service.getBearerToken({ headers: {} })).toThrow(Message.TOKEN_NOT_EXIST);
 		expect(() => service.getBearerToken({ headers: { authorization: 'Basic abc' } })).toThrow(Message.NOT_AUTHENTICATED);
+	});
+
+	describe('sessions after a password reset (DECISIONS #135)', () => {
+		const made = async (tokenVersion?: number) => service.createToken({ _id: memberId as any, memberType: MemberType.USER, tokenVersion });
+		const stored = (tokenVersion?: number) =>
+			memberModel.findById.mockReturnValue(query({ _id: memberId, memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, ...(tokenVersion === undefined ? {} : { tokenVersion }) }));
+
+		it('puts the tokenVersion of the member in the token (0 when the member has none)', async () => {
+			const jwt = new JwtService({ secret: 'test-secret' });
+			expect((jwt.decode(await made(3)) as any).tv).toBe(3);
+			expect((jwt.decode(await made()) as any).tv).toBe(0);
+		});
+
+		it('accepts a token whose version matches', async () => {
+			stored(2);
+			await expect(service.authenticate(await made(2))).resolves.toMatchObject({ memberStatus: MemberStatus.ACTIVE });
+		});
+
+		it('rejects a token made before the version went up, with the plain 401', async () => {
+			stored(1);
+			const err: any = await service.authenticate(await made(0)).catch((e) => e);
+			expect(err).toBeInstanceOf(UnauthorizedException);
+			expect(err.message).toBe(Message.NOT_AUTHENTICATED);
+		});
+
+		it('keeps tokens from before this feature (no tv) working until the first reset', async () => {
+			stored(undefined);
+			const oldToken = await new JwtService({ secret: 'test-secret' }).signAsync({ _id: memberId, memberType: MemberType.USER });
+			await expect(service.authenticate(oldToken)).resolves.toBeDefined();
+			stored(1);
+			await expect(service.authenticate(oldToken)).rejects.toThrow(Message.NOT_AUTHENTICATED);
+		});
+
+		it('rejects a token with a higher version than the member too (a forged or rolled back one)', async () => {
+			stored(0);
+			await expect(service.authenticate(await made(5))).rejects.toThrow(Message.NOT_AUTHENTICATED);
+		});
+
+		it('applies to the restricted (support) flow as well', async () => {
+			stored(1);
+			await expect(service.authenticate(await made(0), { allowRestricted: true })).rejects.toThrow(Message.NOT_AUTHENTICATED);
+		});
 	});
 });

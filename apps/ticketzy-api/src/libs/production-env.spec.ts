@@ -14,7 +14,7 @@ import {
 
 const STRONG_A = 'Xk9vQ2mZp7LdR4tWy8NcB5hFj3GsUe6A';
 const STRONG_B = 'pL0oM9iN8bV7cX6zA5sD4fG3hJ2kQ1wE';
-const production = { NODE_ENV: 'production', MONGO_PROD: 'mongodb+srv://u:p@cluster.example.mongodb.net/db', SECRET_TOKEN: STRONG_A, QR_SECRET: STRONG_B, PAYMENT_MODE: 'simulated', CORS_ORIGINS: 'https://shop.vercel.app' };
+const production = { NODE_ENV: 'production', MONGO_PROD: 'mongodb+srv://u:p@cluster.example.mongodb.net/db', SECRET_TOKEN: STRONG_A, QR_SECRET: STRONG_B, PAYMENT_MODE: 'simulated', CORS_ORIGINS: 'https://shop.vercel.app', RESEND_API_KEY: 're_test_key', MAIL_FROM: 'Ticketzy <noreply@shop.example>', SITE_URL: 'https://shop.vercel.app' };
 const validateApi = validateEnv(['SECRET_TOKEN', 'QR_SECRET'], { checkPayment: true, web: true });
 
 describe('production environment validation (DECISIONS #103)', () => {
@@ -29,7 +29,7 @@ describe('production environment validation (DECISIONS #103)', () => {
 		} catch (err) {
 			message = (err as Error).message;
 		}
-		for (const name of ['MONGO_PROD', 'SECRET_TOKEN', 'QR_SECRET', 'CORS_ORIGINS', 'PAYMENT_MODE']) expect(message).toContain(name);
+		for (const name of ['MONGO_PROD', 'SECRET_TOKEN', 'QR_SECRET', 'CORS_ORIGINS', 'PAYMENT_MODE', 'RESEND_API_KEY', 'MAIL_FROM', 'SITE_URL']) expect(message).toContain(name);
 	});
 
 	describe.each([

@@ -16,6 +16,7 @@ import { WithoutGuard } from '../auth/guards/without.guard';
 import { GraphQLUpload, FileUpload } from 'graphql-upload';
 import { Message } from '../../libs/enums/common.enum';
 import { enforceLoginLimit, enforcePasswordLimit, enforceSignupLimit } from '../../libs/rate-limit';
+import { EventLocale } from '../../libs/enums/event.enum';
 
 @Resolver(() => Member)
 export class MemberResolver {
@@ -67,6 +68,20 @@ export class MemberResolver {
 	@ResolveField(() => Int, { nullable: true })
 	public memberBlocks(@Parent() member: Member, @Context() context: any): number | null {
 		return this.isSelfOrAdmin(member, context) ? (member.memberBlocks ?? 0) : null;
+	}
+
+	/**
+	 * Email state (#135): the member themselves and admins see it. A response that carries an accessToken (sign-up, login,
+	 * updateMember) belongs to a caller who just proved who they are, so it is shown there too.
+	 */
+	@ResolveField(() => Boolean, { nullable: true })
+	public emailVerified(@Parent() member: Member, @Context() context: any): boolean | null {
+		return this.isSelfOrAdmin(member, context) || member.accessToken ? Boolean(member.emailVerifiedAt) : null;
+	}
+
+	@ResolveField(() => EventLocale, { nullable: true })
+	public memberLang(@Parent() member: Member, @Context() context: any): EventLocale | null {
+		return this.isSelfOrAdmin(member, context) || member.accessToken ? (member.memberLang ?? EventLocale.EN) : null;
 	}
 
 	/** deletion tags are admin only, also hidden from the member themselves (#123); a deleted member cannot sign in anyway */
@@ -202,7 +217,6 @@ export class MemberResolver {
 		const likeRefId = shapeIntoMongoObjectId(input);
     	return await this.memberService.likeTargetMember(memberId, likeRefId);
 	}
-
 
 	/** ADMIN */
 

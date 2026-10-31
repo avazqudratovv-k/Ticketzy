@@ -26,7 +26,7 @@ const PUBLIC_FIELDS = [
 /** public only for ORGANIZER accounts (organization name and address), private for everyone else */
 const ORGANIZER_PUBLIC_FIELDS = ['memberFullName', 'memberAddress'];
 /** the member themselves and admins only */
-const PRIVATE_FIELDS = ['memberEmail', 'memberPhone', 'memberWarnings', 'memberBlocks', 'rejectReason', 'commissionOverride'];
+const PRIVATE_FIELDS = ['memberEmail', 'memberPhone', 'memberWarnings', 'memberBlocks', 'rejectReason', 'commissionOverride', 'emailVerified', 'memberLang'];
 /** admins only: not even the member themselves (DECISIONS #123, #90) */
 const ADMIN_ONLY_FIELDS = ['deletedAt', 'emailReusableAt', 'previousAccountId', 'reusedByMemberId'];
 /** the member themselves only: admins get null too (DECISIONS #120) */
@@ -112,6 +112,23 @@ describe('Member field privacy', () => {
 		expect(read(field, pending, admin)).toBeNull();
 		// an account that never had the flag reads as false for itself
 		expect(read(field, organizer, self(organizer))).toBe(false);
+	});
+
+	it('emailVerified and memberLang are also shown where the response carries a fresh accessToken (sign-up, login)', () => {
+		const fresh = { ...buyer, emailVerifiedAt: new Date(), memberLang: 'ko', accessToken: 'jwt' } as unknown as Member;
+		expect(read('emailVerified', fresh, guest)).toBe(true);
+		expect(read('memberLang', fresh, guest)).toBe('ko');
+		const unverified = { ...buyer, accessToken: 'jwt' } as unknown as Member;
+		expect(read('emailVerified', unverified, guest)).toBe(false);
+		expect(read('memberLang', unverified, guest)).toBe('en');
+		// a member read without a token stays private
+		expect(read('emailVerified', { ...buyer, emailVerifiedAt: new Date() } as any, guest)).toBeNull();
+		expect(read('emailVerified', { ...buyer, emailVerifiedAt: new Date() } as any, stranger)).toBeNull();
+	});
+
+	it('never exposes the verification date or the token version as fields', () => {
+		expect(memberFieldNames()).not.toContain('emailVerifiedAt');
+		expect(memberFieldNames()).not.toContain('tokenVersion');
 	});
 
 	it('hides the full name and address of a buyer from guests and strangers', () => {

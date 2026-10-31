@@ -9,7 +9,7 @@ import { Message } from '../../libs/enums/common.enum';
 import { EventStatus, SeatStatus, SeatingType } from '../../libs/enums/event.enum';
 import { MemberStatus, MemberType } from '../../libs/enums/member.enum';
 import { OrderStatus, PaymentSimulation } from '../../libs/enums/ticket.enum';
-import { assertBuyerAccount } from '../../libs/buyer';
+import { assertBuyerAccount, assertVerifiedEmail } from '../../libs/buyer';
 import { OrderResolver } from './order.resolver';
 import { SeatResolver } from '../seat/seat.resolver';
 
@@ -18,6 +18,7 @@ const USER = oid();
 const ORG = oid();
 const OTHER_ORG = oid();
 const ADMIN = oid();
+const UNVERIFIED = oid();
 const EVENT = oid();
 const GENERAL_EVENT = oid();
 const OWN_EVENT = oid();
@@ -28,7 +29,8 @@ const REFUSAL = 'Only buyer accounts can buy tickets! Organizer and admin accoun
 const build = () => {
 	const active = { memberStatus: MemberStatus.ACTIVE, completedEvents: 0 };
 	const members = new FakeModel([
-		{ _id: USER, memberType: MemberType.USER, ...active },
+		{ _id: USER, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01'), ...active },
+		{ _id: UNVERIFIED, memberType: MemberType.USER, ...active },
 		{ _id: ORG, memberType: MemberType.ORGANIZER, ...active },
 		{ _id: OTHER_ORG, memberType: MemberType.ORGANIZER, ...active },
 		{ _id: ADMIN, memberType: MemberType.ADMIN, ...active },
@@ -65,6 +67,46 @@ const build = () => {
 
 beforeAll(() => {
 	process.env.QR_SECRET = 'test-qr-secret';
+});
+
+describe('a buyer needs a verified email address (DECISIONS #135)', () => {
+	const NOT_VERIFIED = { code: 'EMAIL_NOT_VERIFIED', message: Message.EMAIL_NOT_VERIFIED };
+
+	it('holdSeats is refused with EMAIL_NOT_VERIFIED and nothing is held', async () => {
+		const ctx = build();
+		await expect(ctx.seatService.holdSeats(UNVERIFIED as any, EVENT as any, [ctx.seats.docs[0]._id])).rejects.toMatchObject(NOT_VERIFIED);
+		expect(ctx.seats.docs.every((seat) => seat.seatStatus === SeatStatus.AVAILABLE)).toBe(true);
+	});
+
+	it('createCheckout is refused for a general and a reserved event, and nothing is reserved or created', async () => {
+		const ctx = build();
+		await expect(ctx.orderService.createCheckout(UNVERIFIED as any, { eventId: GENERAL_EVENT, items: [{ ticketTypeId: TT, quantity: 1 }] } as any)).rejects.toMatchObject(NOT_VERIFIED);
+		await expect(ctx.orderService.createCheckout(UNVERIFIED as any, { eventId: EVENT, seatIds: [ctx.seats.docs[0]._id] } as any)).rejects.toMatchObject(NOT_VERIFIED);
+		expect(ctx.ticketTypeService.reserve).not.toHaveBeenCalled();
+		expect(ctx.orders.docs).toHaveLength(0);
+	});
+
+	it('payOrder is refused even for a pending order that exists (an order made before verification was required)', async () => {
+		const ctx = build();
+		const order = { _id: oid(), buyerId: UNVERIFIED, eventId: GENERAL_EVENT, orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: hours(1), items: [] };
+		ctx.orders.docs.push(order);
+		await expect(ctx.orderService.payOrder(UNVERIFIED as any, order._id as any, PaymentSimulation.SUCCESS)).rejects.toMatchObject(NOT_VERIFIED);
+		expect(order.orderStatus).toBe(OrderStatus.PENDING_PAYMENT);
+	});
+
+	it('the refusal is a coded error a client can branch on, and a verified buyer is not affected', async () => {
+		expect(() => assertVerifiedEmail({ emailVerifiedAt: new Date() })).not.toThrow();
+		for (const bad of [{}, { emailVerifiedAt: null }, undefined, null]) expect(() => assertVerifiedEmail(bad as any)).toThrow(Message.EMAIL_NOT_VERIFIED);
+		const ctx = build();
+		const err: any = await ctx.seatService.holdSeats(UNVERIFIED as any, EVENT as any, [ctx.seats.docs[0]._id]).catch((e) => e);
+		expect(err.code).toBe('EMAIL_NOT_VERIFIED');
+		expect(err.getStatus()).toBe(403);
+	});
+
+	it('an organizer is still refused as a non-buyer first', async () => {
+		const ctx = build();
+		await expect(ctx.seatService.holdSeats(ORG as any, EVENT as any, [ctx.seats.docs[0]._id])).rejects.toThrow(REFUSAL);
+	});
 });
 
 describe('only buyer accounts (USER) can buy tickets', () => {

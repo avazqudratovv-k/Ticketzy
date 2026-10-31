@@ -18,7 +18,7 @@ import { T } from '../../libs/types/common';
 import { escapeRegExp, lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
 import { calculateOrderAmounts, getCommissionRate } from '../../libs/commission';
 import { getPaymentMode, getSeatHoldSeconds } from '../../libs/env.validation';
-import { assertBuyerAccount } from '../../libs/buyer';
+import { assertBuyerAccount, assertVerifiedEmail } from '../../libs/buyer';
 import { buildQrToken } from '../../libs/qr-token';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
 import { NotificationService } from '../notification/notification.service';
@@ -60,9 +60,10 @@ export class OrderService {
 		const eventId = shapeIntoMongoObjectId(input.eventId);
 		const now = new Date();
 
-		const buyer = await this.memberModel.findOne({ _id: memberId, memberStatus: MemberStatus.ACTIVE }).select('memberType').lean().exec();
+		const buyer = await this.memberModel.findOne({ _id: memberId, memberStatus: MemberStatus.ACTIVE }).select('memberType emailVerifiedAt').lean().exec();
 		if (!buyer) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		assertBuyerAccount(buyer.memberType);
+		assertVerifiedEmail(buyer);
 
 		const event = await this.eventModel.findOne({ _id: eventId, eventStatus: publicEventStatus }).lean().exec();
 		if (!event) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
@@ -191,8 +192,9 @@ export class OrderService {
 		if (getPaymentMode() === 'disabled') {
 			throw new GraphQLError(Message.PAYMENTS_DISABLED, { extensions: { code: 'SERVICE_UNAVAILABLE' } });
 		}
-		const payer = await this.memberModel.findOne({ _id: memberId }).select('memberType').lean().exec();
+		const payer = await this.memberModel.findOne({ _id: memberId }).select('memberType emailVerifiedAt').lean().exec();
 		assertBuyerAccount(payer?.memberType);
+		assertVerifiedEmail(payer);
 		const order = await this.orderModel.findOne({ _id: orderId, buyerId: memberId }).lean().exec();
 		if (!order) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		if (order.orderStatus === OrderStatus.PAID) return order;

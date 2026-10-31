@@ -12,6 +12,8 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 export interface TokenPayload {
 	_id: string;
 	memberType: MemberType;
+	/** the member's tokenVersion when the token was made; a token without it counts as 0 (DECISIONS #135) */
+	tv?: number;
 }
 
 @Injectable()
@@ -35,8 +37,8 @@ export class AuthService {
 		return Boolean(hashedPassword) && isMatch;
 	}
 
-	public async createToken(member: { _id: ObjectId; memberType: MemberType }): Promise<string> {
-		const payload: TokenPayload = { _id: String(member._id), memberType: member.memberType };
+	public async createToken(member: { _id: ObjectId; memberType: MemberType; tokenVersion?: number }): Promise<string> {
+		const payload: TokenPayload = { _id: String(member._id), memberType: member.memberType, tv: member.tokenVersion ?? 0 };
 		return await this.jwtService.signAsync(payload);
 	}
 
@@ -58,7 +60,10 @@ export class AuthService {
 	 */
 	public async authenticate(token: string, options: { allowRestricted?: boolean } = {}): Promise<Member> {
 		const payload = await this.verifyToken(token);
-		return await this.loadMember(payload._id, options);
+		const member = await this.loadMember(payload._id, options);
+		// a password reset or change raised the member's tokenVersion: tokens made before it are dead (DECISIONS #135)
+		if ((payload.tv ?? 0) !== (member.tokenVersion ?? 0)) throw new UnauthorizedException(Message.NOT_AUTHENTICATED);
+		return member;
 	}
 
 	/** the member by id with the same status rules as authenticate (used by sockets that outlive one request) */

@@ -16,6 +16,7 @@ const fakeMemberModel = (members: any[]) => {
 	const matches = (filter: any) => (m: any) =>
 		(filter._id === undefined || m._id === filter._id) &&
 		(filter.memberType === undefined || m.memberType === filter.memberType) &&
+		(filter.emailVerifiedAt === undefined || (filter.emailVerifiedAt.$ne === null && m.emailVerifiedAt != null)) &&
 		(filter.commissionOverride === undefined || (filter.commissionOverride.$ne === null && m.commissionOverride != null)) &&
 		(filter.memberStatus === undefined ||
 			(filter.memberStatus.$in
@@ -62,7 +63,7 @@ describe('OrganizerService status transitions', () => {
 	};
 
 	beforeEach(() => {
-		members = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.PENDING }];
+		members = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.PENDING, emailVerifiedAt: new Date('2026-01-01') }];
 		model = fakeMemberModel(members);
 		auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
 		notificationService = { createNotification: jest.fn().mockResolvedValue(undefined) };
@@ -104,6 +105,33 @@ describe('OrganizerService status transitions', () => {
 		});
 	});
 
+	describe('verify needs a verified email address (DECISIONS #135)', () => {
+		it('refuses an organizer whose email is not verified with EMAIL_NOT_VERIFIED and changes nothing', async () => {
+			delete members[0].emailVerifiedAt;
+
+			const err: any = await service.verifyOrganizerByAdmin(ADMIN as any, ORG as any).catch((e) => e);
+
+			expect(err.code).toBe('EMAIL_NOT_VERIFIED');
+			expect(err.message).toBe(Message.EMAIL_NOT_VERIFIED);
+			expect(members[0].memberStatus).toBe(MemberStatus.PENDING);
+			expect(auditLogService.record).not.toHaveBeenCalled();
+			expect(notificationService.createNotification).not.toHaveBeenCalled();
+		});
+
+		it('approves the same organizer once the email is verified', async () => {
+			delete members[0].emailVerifiedAt;
+			await expect(service.verifyOrganizerByAdmin(ADMIN as any, ORG as any)).rejects.toMatchObject({ code: 'EMAIL_NOT_VERIFIED' });
+			members[0].emailVerifiedAt = new Date();
+			await expect(service.verifyOrganizerByAdmin(ADMIN as any, ORG as any)).resolves.toMatchObject({ memberStatus: MemberStatus.ACTIVE });
+		});
+
+		it('an unverified organizer can still be rejected, and a status that is not PENDING keeps its usual refusal', async () => {
+			delete members[0].emailVerifiedAt;
+			await expect(service.rejectOrganizerByAdmin(ADMIN as any, { memberId: ORG as any, reason: 'No documents' })).resolves.toMatchObject({ memberStatus: MemberStatus.REJECTED });
+			await expect(service.verifyOrganizerByAdmin(ADMIN as any, ORG as any)).rejects.toThrow(Message.INVALID_STATUS_TRANSITION);
+		});
+	});
+
 	it('answers NO_ORGANIZER_FOUND for an unknown member and for a member that is not an organizer', async () => {
 		members.push({ _id: 'user-1', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE });
 
@@ -118,7 +146,8 @@ describe('OrganizerService status transitions', () => {
 		await service.verifyOrganizerByAdmin(ADMIN as any, ORG as any);
 
 		const [filter] = model.findOneAndUpdate.mock.calls[0];
-		expect(filter).toEqual({ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: { $in: [MemberStatus.PENDING] } });
+		// approving also needs a verified email address, in the same condition (#135)
+		expect(filter).toEqual({ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: { $in: [MemberStatus.PENDING] }, emailVerifiedAt: { $ne: null } });
 	});
 
 	describe('rejectReason', () => {
@@ -329,7 +358,7 @@ describe('OrganizerService.clearCommissionOverrideByAdmin', () => {
 
 describe('OrganizerService socket cut-off', () => {
 	const build = (status: MemberStatus) => {
-		const members: any[] = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: status }];
+		const members: any[] = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus: status, emailVerifiedAt: new Date('2026-01-01') }];
 		const realtime: any = { setMemberRestricted: jest.fn() };
 		const notifications: any = { createNotification: jest.fn().mockResolvedValue(undefined) };
 		const service = new OrganizerService(fakeMemberModel(members) as any, { record: jest.fn() } as any, notifications, realtime);
@@ -394,7 +423,7 @@ describe('OrganizerService approval celebration flag (DECISIONS #120)', () => {
 	let service: OrganizerService;
 
 	const setup = (memberStatus: MemberStatus, extra: any = {}) => {
-		members = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus, ...extra }];
+		members = [{ _id: ORG, memberType: MemberType.ORGANIZER, memberStatus, emailVerifiedAt: new Date('2026-01-01'), ...extra }];
 		model = fakeMemberModel(members);
 		service = new OrganizerService(
 			model,

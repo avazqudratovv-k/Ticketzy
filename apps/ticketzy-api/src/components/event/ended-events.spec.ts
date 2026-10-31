@@ -332,7 +332,7 @@ describe('payOrder after the event ended (#121)', () => {
 		const E = new ObjectId();
 		const orders = new FakeModel([{ _id: new ObjectId(), buyerId: BUYER, eventId: E, orderStatus: OrderStatus.PENDING_PAYMENT, expiresAt: ahead(1) }]);
 		const events = new FakeModel([{ _id: E, ...over }]);
-		const members = new FakeModel([{ _id: BUYER, memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE }]);
+		const members = new FakeModel([{ _id: BUYER, memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, emailVerifiedAt: new Date('2026-01-01') }]);
 		const paymentService: any = { charge: jest.fn() };
 		const service = new OrderService(orders as any, events as any, new FakeModel() as any, members as any, {} as any, {} as any, paymentService, {} as any);
 		await expect(service.payOrder(BUYER as any, orders.docs[0]._id as any, {} as any)).rejects.toThrow(Message.EVENT_ENDED_NO_SALES);

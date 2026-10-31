@@ -19,8 +19,8 @@ import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { Event } from '../../libs/dto/event/event';
 import { publicEventFilter } from '../../libs/event-visibility';
 import { escapeRegExp, lookupAuthMemberLiked } from '../../libs/config';
-import { CodedException } from '../../libs/coded-exception';
-import { getReusableAtOf } from '../../libs/account-deletion';
+import { findReusableEmailHolder } from '../../libs/member-email';
+import { EmailAuthService } from '../email-auth/email-auth.service';
 
 @Injectable()
 export class MemberService {
@@ -35,6 +35,7 @@ export class MemberService {
 		private viewService: ViewService,
 		private likeService: LikeService,
 		private auditLogService: AuditLogService,
+		private emailAuthService: EmailAuthService,
 	) {}
 
 	/** the server decides role and status: users are active at once, organizers wait for admin approval */
@@ -57,6 +58,7 @@ export class MemberService {
 				memberNick: input.memberNick,
 				memberPhone: input.memberPhone,
 				memberFullName: input.memberFullName,
+				...(input.memberLang ? { memberLang: input.memberLang } : {}),
 				memberType,
 				memberStatus,
 				memberAuthType: MemberAuthType.EMAIL,
@@ -64,6 +66,8 @@ export class MemberService {
 			});
 			if (previous) await this.markEmailReused(previous._id, result._id);
 			result.accessToken = await this.authService.createToken(result);
+			// the verification link goes out in the background and never fails the sign-up (#135)
+			this.emailAuthService.sendVerificationInBackground(result);
 			return result;
 		} catch (err) {
 			this.logger.error(`signup failed: ${err.message}`);
@@ -72,29 +76,9 @@ export class MemberService {
 		}
 	}
 
-	/**
-	 * Accounts that deleted themselves keep their email (DECISIONS #123). A live account with the email is the usual
-	 * "already used" answer; if only deleted accounts have it, the newest one decides: before its `emailReusableAt` the
-	 * sign-up is refused with EMAIL_RECENTLY_DELETED (no date in the text), after it the email is free again and the deleted
-	 * account is returned so the new one can be tagged. The unique index still decides a race between two sign-ups.
-	 */
+	/** see `findReusableEmailHolder` (DECISIONS #123): a live holder or a recently deleted one refuses the address */
 	private async checkEmailAvailable(memberEmail: string): Promise<{ _id: ObjectId } | null> {
-		const holders = await this.memberModel
-			.find({ memberEmail })
-			.select('memberStatus deletedAt emailReusableAt')
-			.sort({ deletedAt: -1 })
-			.lean()
-			.exec();
-		if (!holders.length) return null;
-		if (holders.some((holder) => holder.memberStatus !== MemberStatus.DELETE)) {
-			throw new BadRequestException(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
-		}
-		const newest = holders[0];
-		const reusableAt = getReusableAtOf(newest);
-		if (reusableAt && reusableAt.getTime() > Date.now()) {
-			throw new CodedException(Message.EMAIL_RECENTLY_DELETED, 'EMAIL_RECENTLY_DELETED', 400);
-		}
-		return { _id: newest._id as unknown as ObjectId };
+		return await findReusableEmailHolder(this.memberModel, memberEmail);
 	}
 
 	/** the deleted account learns who took its email; a failure only costs this admin tag, so it is logged and the sign-up stands */
@@ -136,13 +120,15 @@ export class MemberService {
 		delete input.memberStatus;
 		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 
+		// a password change ends the other sessions: tokenVersion goes up, and the token returned below carries the new one (#135)
+		const update: Record<string, any> = input.memberPassword ? { $set: input, $inc: { tokenVersion: 1 } } : input;
 		const result: Member = await this.memberModel
 			.findOneAndUpdate(
 				{
 					_id: memberId,
 					memberStatus: { $in: [MemberStatus.ACTIVE, MemberStatus.PENDING] },
 				},
-				input,
+				update,
 				{ new: true },
 			)
 			.exec();
@@ -328,7 +314,9 @@ export class MemberService {
 		}
 		const changedFields = this.changedFields(input);
 		if (input.memberPassword) input.memberPassword = await this.authService.hashPassword(input.memberPassword);
-		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true }).exec();
+		// a password set by an admin ends the member's sessions too (#135)
+		const update: Record<string, any> = input.memberPassword ? { $set: { ...input }, $inc: { tokenVersion: 1 } } : input;
+		const result: Member = await this.memberModel.findOneAndUpdate({ _id: input._id }, update, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 
 		await this.auditLogService.record({

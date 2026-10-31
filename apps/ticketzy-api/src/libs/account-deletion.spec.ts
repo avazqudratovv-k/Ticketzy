@@ -94,7 +94,7 @@ describe('public views of a deleted member (DECISIONS #123)', () => {
 			findOne: jest.fn().mockReturnValue({ lean: () => exec(null) }),
 			aggregate: jest.fn().mockReturnValue(exec([{ list: [], metaCounter: [] }])),
 		};
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any, { sendVerificationInBackground: jest.fn() } as any);
 
 		await expect(service.getMember(null, new ObjectId() as any)).rejects.toThrow('No data found!');
 		expect(memberModel.findOne.mock.calls[0][0].memberStatus).toBe(MemberStatus.ACTIVE);
@@ -112,7 +112,7 @@ describe('public views of a deleted member (DECISIONS #123)', () => {
 
 	it('liking a deleted member is refused (ACTIVE members only)', async () => {
 		const memberModel: any = { findOne: jest.fn().mockReturnValue(exec(null)) };
-		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
+		const service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any, { sendVerificationInBackground: jest.fn() } as any);
 		await expect(service.likeTargetMember('m1' as any, 'm2' as any)).rejects.toThrow('No data found!');
 		expect(memberModel.findOne.mock.calls[0][0].memberStatus).toBe(MemberStatus.ACTIVE);
 	});

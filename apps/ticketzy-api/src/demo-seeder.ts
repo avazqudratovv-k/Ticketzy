@@ -303,6 +303,7 @@ export class DemoSeeder {
 				memberType: MemberType.ORGANIZER,
 				memberStatus: MemberStatus.PENDING, // organizers sign up as PENDING; the admin action below brings them to their final status
 				memberAuthType: MemberAuthType.EMAIL,
+				emailVerifiedAt: this.now, // demo addresses are not real inboxes: they count as verified (#135)
 				memberNick: account.nick,
 				memberFullName: account.fullName,
 				memberAddress: account.address,
@@ -331,6 +332,7 @@ export class DemoSeeder {
 					memberType: MemberType.USER,
 					memberStatus: MemberStatus.ACTIVE,
 					memberAuthType: MemberAuthType.EMAIL,
+					emailVerifiedAt: this.now,
 					memberNick: buyer.nick,
 					memberFullName: buyer.fullName,
 					memberPhone: buyer.phone,

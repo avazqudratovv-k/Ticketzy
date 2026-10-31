@@ -145,6 +145,18 @@ export enum Message {
 	AI_DAILY_CAP_REACHED = 'The AI assistant has reached its limit for today, please try again tomorrow!',
 	AI_USER_DAILY_LIMIT = 'You have used all your AI requests for today, please try again tomorrow!',
 
+	EMAIL_NOT_VERIFIED = 'Please verify your email address first. Check your inbox for the link or ask for a new one.',
+	EMAIL_ALREADY_VERIFIED = 'Your email address is already verified!',
+	INVALID_OR_EXPIRED_TOKEN = 'This link is not valid, has expired or was already used. Please ask for a new one.',
+	VERIFICATION_EMAIL_SENT = 'We sent a verification link to your email address.',
+	EMAIL_VERIFIED = 'Your email address is verified.',
+	EMAIL_CHANGE_REQUESTED = 'We sent a link to the new email address. Your current address stays in use until you open it.',
+	EMAIL_CHANGED = 'Your email address was changed.',
+	EMAIL_CHANGE_SAME = 'That is already your email address!',
+	WRONG_PASSWORD = 'The password is not correct!',
+	PASSWORD_RESET_REQUESTED = 'If an account uses this email address, we sent it a link to reset the password.',
+	PASSWORD_RESET_DONE = 'Your password was changed. Please log in with the new password.',
+
 	RATE_LIMITED = 'Too many requests, please try again in {seconds} seconds!',
 	LIMIT_TOO_HIGH = 'You asked for too many items at once, the maximum is {max} per page!',
 	PAGE_TOO_HIGH = 'That page number is too high, the maximum is {max}!',

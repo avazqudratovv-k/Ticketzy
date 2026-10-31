@@ -1,10 +1,11 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsNotEmpty, IsOptional, Length, Min, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsIn, IsNotEmpty, IsOptional, Length, Min, MinLength } from 'class-validator';
 import { MemberStatus, MemberType } from '../../enums/member.enum';
 import { availableOrganizerSorts, availableMemberSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 import { PageField, LimitField } from '../common/pagination';
+import { EventLocale } from '../../enums/event.enum';
 
 const normalizeEmail = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim().toLowerCase() : value);
 
@@ -35,6 +36,12 @@ export class MemberInput {
 	@Length(3, 100)
 	@Field(() => String, { nullable: true })
 	memberFullName?: string;
+
+	/** the language of the emails sent to the member; en when missing */
+	@IsOptional()
+	@IsEnum(EventLocale)
+	@Field(() => EventLocale, { nullable: true })
+	memberLang?: EventLocale;
 }
 
 @InputType()

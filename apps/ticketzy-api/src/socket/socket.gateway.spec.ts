@@ -28,7 +28,7 @@ describe('SocketGateway', () => {
 		await gateway.handleConnection(client, { headers: { authorization: 'Bearer abc' }, url: '/?token=ignored' });
 
 		expect(authService.authenticate).toHaveBeenCalledWith('abc', { allowRestricted: true });
-		expect(realtime.getClient(client)).toEqual({ memberId: String(organizer._id), memberType: MemberType.ORGANIZER });
+		expect(realtime.getClient(client)).toEqual({ memberId: String(organizer._id), memberType: MemberType.ORGANIZER, tokenVersion: 0 });
 		expect(events(client)[0].event).toBe('authenticated');
 	});
 
@@ -120,6 +120,24 @@ describe('SocketGateway', () => {
 
 		await ctx.gateway.handleJoin(client, { conversationId: String(new ObjectId()) });
 		expect(client.close).toHaveBeenCalledWith(4401, expect.any(String));
+	});
+
+	it('closes a socket that authenticated before a password reset on its next action (DECISIONS #135)', async () => {
+		const ctx = build();
+		const { client, who } = await authenticated(ctx);
+		ctx.authService.loadMember.mockResolvedValue({ ...who, tokenVersion: 1 });
+
+		await ctx.gateway.handleJoin(client, { conversationId: String(new ObjectId()) });
+		expect(client.close).toHaveBeenCalledWith(4401, expect.any(String));
+		expect(ctx.conversationService.assertConversationAccess).not.toHaveBeenCalled();
+	});
+
+	it('keeps a socket whose version still matches', async () => {
+		const ctx = build();
+		const { client, who } = await authenticated(ctx, { ...member(), tokenVersion: 2 });
+		ctx.authService.loadMember.mockResolvedValue({ ...who, tokenVersion: 2 });
+		await ctx.gateway.handleJoin(client, { conversationId: String(new ObjectId()) });
+		expect(client.close).not.toHaveBeenCalled();
 	});
 
 	it('typing reaches the other sockets of the room only, and only from a socket that joined', async () => {

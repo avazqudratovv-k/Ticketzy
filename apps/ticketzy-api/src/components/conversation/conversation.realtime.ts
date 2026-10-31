@@ -6,6 +6,8 @@ import { Message } from '../../libs/enums/common.enum';
 export interface RealtimeClient {
 	memberId: string;
 	memberType: MemberType;
+	/** the member's tokenVersion when the socket authenticated; a password reset raises it and the socket is closed (#135) */
+	tokenVersion?: number;
 	/** set while the member is REJECTED / SUSPENDED / PENDING: the socket may only use support rooms */
 	restricted?: boolean;
 }

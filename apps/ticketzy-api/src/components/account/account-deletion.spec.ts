@@ -36,8 +36,8 @@ const GENERAL_TT = oid();
 
 const build = () => {
 	const members = new FakeModel([
-		{ _id: BUYER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, memberEmail: 'buyer@x.com', memberNick: 'buyer' },
-		{ _id: OTHER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER },
+		{ _id: BUYER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01'), memberEmail: 'buyer@x.com', memberNick: 'buyer' },
+		{ _id: OTHER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01') },
 		{ _id: ORG, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.ORGANIZER, memberEmail: 'org@x.com' },
 		{ _id: ADMIN, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.ADMIN },
 	]);

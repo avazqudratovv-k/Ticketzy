@@ -23,8 +23,8 @@ const inHours = (hours: number) => new Date(Date.now() + hours * 3600000);
 
 const build = (seatCount = 5) => {
 	const members = new FakeModel([
-		{ _id: M1, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER },
-		{ _id: M2, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER },
+		{ _id: M1, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01') },
+		{ _id: M2, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01') },
 		{ _id: ORG, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.ORGANIZER, completedEvents: 0 },
 	]);
 	const events = new FakeModel([

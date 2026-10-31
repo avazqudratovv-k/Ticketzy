@@ -249,6 +249,50 @@ export const getRateLimitConfig = (env: Record<string, any> = process.env): Rate
 export const getTrustProxyHops = (env: Record<string, any> = process.env): number =>
 	parseBoundedInt('TRUST_PROXY_HOPS', env.TRUST_PROXY_HOPS, env.NODE_ENV === 'production' ? 1 : 0, 0, 5);
 
+export interface MailConfig {
+	/** empty outside production means "dev mode": links are logged instead of sent */
+	apiKey: string;
+	from: string;
+	/** the front end base URL the emailed links start with, no trailing slash */
+	siteUrl: string;
+}
+
+const MAIL_FROM_PATTERN = /^(?:[^<>@\r\n]{1,80}<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/;
+
+/**
+ * RESEND_API_KEY, MAIL_FROM and SITE_URL (DECISIONS #135). In production all three are required (the API refuses to start
+ * without them, names only). Outside production the key may be empty: mail is then not sent and the link is logged. A key
+ * without MAIL_FROM is always an error. SITE_URL must be an http(s) URL without a path; https in production. Outside
+ * production it falls back to the first CORS origin, then to http://localhost:3000. Errors never contain a value.
+ */
+export const getMailConfig = (env: Record<string, any> = process.env): MailConfig => {
+	const production = env.NODE_ENV === 'production';
+	const apiKey = String(env.RESEND_API_KEY ?? '').trim();
+	const from = String(env.MAIL_FROM ?? '').trim();
+	if (/\s/.test(apiKey)) throw new Error('RESEND_API_KEY must not contain spaces');
+	if (production && !apiKey) throw new Error('RESEND_API_KEY must be set in production');
+	if (production && !from) throw new Error('MAIL_FROM must be set in production');
+	if (apiKey && !from) throw new Error('MAIL_FROM must be set when RESEND_API_KEY is set');
+	if (from && !MAIL_FROM_PATTERN.test(from)) throw new Error('MAIL_FROM must be an address like noreply@example.com or Name <noreply@example.com>');
+
+	let siteUrl = String(env.SITE_URL ?? '').trim();
+	if (!siteUrl) {
+		if (production) throw new Error('SITE_URL must be set in production');
+		siteUrl = String(env.CORS_ORIGINS ?? env.CLIENT_URL ?? '').split(',')[0].trim() || 'http://localhost:3000';
+	}
+	let url: URL;
+	try {
+		url = new URL(siteUrl);
+	} catch {
+		throw new Error('SITE_URL must be a URL like https://example.com');
+	}
+	if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname.replace(/\/+$/, '')) {
+		throw new Error('SITE_URL must be an http(s) address without a path, query or credentials');
+	}
+	if (production && url.protocol !== 'https:') throw new Error('SITE_URL must use https in production');
+	return { apiKey, from, siteUrl: url.origin };
+};
+
 const SECRET_NAMES = ['SECRET_TOKEN', 'QR_SECRET'];
 
 const isMongoUri = (value: unknown): boolean => /^mongodb(\+srv)?:\/\//i.test(String(value ?? '').trim());
@@ -277,6 +321,8 @@ export const validateEnv =
 		const mongoKey = getMongoUriKey(config.NODE_ENV);
 		const missing = [mongoKey, ...required].filter((key) => !String(config[key] ?? '').trim());
 		if (options.web && isProduction && !String(config.CORS_ORIGINS ?? config.CLIENT_URL ?? '').trim()) missing.push('CORS_ORIGINS');
+		// the email links (#135): all three are needed in production, listed together with the other missing names
+		if (options.web && isProduction) missing.push(...['RESEND_API_KEY', 'MAIL_FROM', 'SITE_URL'].filter((name) => !String(config[name] ?? '').trim()));
 		if (missing.length) problems.push(`Missing required environment variables: ${missing.join(', ')}`);
 
 		if (config.NODE_ENV !== undefined && !['production', 'development', 'test'].includes(String(config.NODE_ENV))) {
@@ -311,6 +357,7 @@ export const validateEnv =
 			collect(problems, () => getUploadLimits(config));
 			collect(problems, () => getRateLimitConfig(config));
 			collect(problems, () => getTrustProxyHops(config));
+			if (!isProduction || ['RESEND_API_KEY', 'MAIL_FROM', 'SITE_URL'].every((name) => String(config[name] ?? '').trim())) collect(problems, () => getMailConfig(config));
 		}
 
 		if (problems.length) throw new Error(`Invalid environment configuration:\n - ${problems.join('\n - ')}`);

@@ -27,7 +27,7 @@ describe('MemberService signup and login', () => {
 			updateOne: jest.fn(() => ({ exec: jest.fn().mockResolvedValue({}) })),
 		};
 		authService = new AuthService({ signAsync: jest.fn().mockResolvedValue('token') } as any, {} as any);
-		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any, { sendVerificationInBackground: jest.fn() } as any);
 	});
 
 	it('signupUser creates an ACTIVE USER with a hashed password', async () => {
@@ -38,6 +38,38 @@ describe('MemberService signup and login', () => {
 		expect(doc.memberPassword).not.toBe('longenough1');
 		expect(await authService.comparePasswords('longenough1', doc.memberPassword)).toBe(true);
 		expect(result.accessToken).toBe('token');
+	});
+
+	it('signup starts unverified, saves the language, and sends the verification link in the background (DECISIONS #135)', async () => {
+		const emailAuth = { sendVerificationInBackground: jest.fn() };
+		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any, emailAuth as any);
+
+		await service.signupUser({ ...input(), memberLang: 'ko' as any });
+		const doc = memberModel.create.mock.calls[0][0];
+		expect(doc.memberLang).toBe('ko');
+		expect(doc.emailVerifiedAt).toBeUndefined();
+		expect(doc).not.toHaveProperty('tokenVersion');
+		expect(emailAuth.sendVerificationInBackground).toHaveBeenCalledWith(expect.objectContaining({ _id: 'm1', memberEmail: 'a@b.com', memberLang: 'ko' }));
+
+		await service.signupOrganizer(input());
+		expect(memberModel.create.mock.calls[1][0]).not.toHaveProperty('memberLang');
+		expect(emailAuth.sendVerificationInBackground).toHaveBeenCalledTimes(2);
+	});
+
+	it('a failing mail provider cannot fail the signup, and a failed signup sends no mail', async () => {
+		const emailAuth = { sendVerificationInBackground: jest.fn() };
+		service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any, emailAuth as any);
+		memberModel.create.mockRejectedValue({ code: 11000, message: 'E11000' });
+		await expect(service.signupUser(input())).rejects.toThrow(Message.USED_MEMBER_EMAIL_NICK_OR_PHONE);
+		expect(emailAuth.sendVerificationInBackground).not.toHaveBeenCalled();
+	});
+
+	it('the signup input accepts only the four languages', async () => {
+		const pipe = createValidationPipe();
+		const check = (memberLang: unknown) => pipe.transform({ ...input(), memberLang }, { type: 'body', metatype: MemberInput });
+		await expect(check('uz')).resolves.toMatchObject({ memberLang: 'uz' });
+		await expect(check(undefined)).resolves.toBeDefined();
+		await expect(check('fr')).rejects.toBeDefined();
 	});
 
 	it('signupOrganizer creates a PENDING ORGANIZER', async () => {
@@ -232,7 +264,7 @@ describe('MemberService public listings', () => {
 			aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([{ list: [], metaCounter: [] }]) }),
 		};
 		eventModel = { aggregate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue([]) }) };
-		service = new MemberService(memberModel, eventModel, {} as any, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, eventModel, {} as any, {} as any, {} as any, {} as any, { sendVerificationInBackground: jest.fn() } as any);
 	});
 
 	it('an organizer profile counts APPROVED events only, not the memberEvents counter', async () => {
@@ -306,7 +338,7 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 		};
 		const authService: any = { hashPassword: jest.fn(async (password: string) => `hash-of-${password}`), createToken: jest.fn().mockResolvedValue('token') };
 		const auditLogService: any = { record: jest.fn().mockResolvedValue(undefined) };
-		const service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, auditLogService);
+		const service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, auditLogService, { sendVerificationInBackground: jest.fn() } as any);
 		return { memberModel, auditLogService, authService, service };
 	};
 
@@ -430,7 +462,9 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 			for (const memberType of [MemberType.USER, MemberType.ORGANIZER]) {
 				const { memberModel, auditLogService, service } = build({ _id: 'x1', memberType }, { _id: 'x1' });
 				await service.updateMemberByAdmin(ADMIN as any, { _id: 'x1' as any, memberPassword: 'newpassword1' });
-				expect(memberModel.findOneAndUpdate.mock.calls[0][1].memberPassword).toBe('hash-of-newpassword1');
+				expect(memberModel.findOneAndUpdate.mock.calls[0][1].$set.memberPassword).toBe('hash-of-newpassword1');
+				// an admin-set password ends the member's sessions (#135)
+				expect(memberModel.findOneAndUpdate.mock.calls[0][1].$inc).toEqual({ tokenVersion: 1 });
 				expect(auditLogService.record).toHaveBeenCalledWith(
 					expect.objectContaining({ action: AuditAction.MEMBER_UPDATED_BY_ADMIN, targetId: 'x1', meta: { changedFields: ['memberPassword'] } }),
 				);
@@ -446,7 +480,8 @@ describe('MemberService.updateMemberByAdmin keeps organizer status changes audit
 
 			// and updateMember (the member's own mutation) hashes and applies it
 			await service.updateMember(ADMIN as any, { _id: ADMIN as any, memberPassword: 'another-password' });
-			expect(memberModel.findOneAndUpdate.mock.calls[1][1].memberPassword).toBe('hash-of-another-password');
+			expect(memberModel.findOneAndUpdate.mock.calls[1][1].$set.memberPassword).toBe('hash-of-another-password');
+			expect(memberModel.findOneAndUpdate.mock.calls[1][1].$inc).toEqual({ tokenVersion: 1 });
 		});
 
 		it('writes an audit entry for an ordinary admin edit, with field names and the new status only', async () => {
@@ -492,7 +527,7 @@ describe('MemberService approval celebration (DECISIONS #120)', () => {
 			})),
 			findById: jest.fn((id: string) => ({ select: () => ({ lean: () => ({ exec: async () => (id === stored._id ? { ...stored } : null) }) }) })),
 		};
-		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any);
+		service = new MemberService(memberModel, {} as any, {} as any, {} as any, {} as any, {} as any, { sendVerificationInBackground: jest.fn() } as any);
 	});
 
 	it('clears the flag once with a conditional update true to false', async () => {
@@ -535,5 +570,58 @@ describe('MemberService approval celebration (DECISIONS #120)', () => {
 
 	it('getMyAccountState fails for an unknown member', async () => {
 		await expect(service.getMyAccountState('nobody' as any)).rejects.toThrow(Message.NO_DATA_FOUND);
+	});
+});
+
+describe('MemberService.updateMember and sessions (DECISIONS #135)', () => {
+	const ID = 'u1';
+	const build = () => {
+		const stored: any = { _id: ID, memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, tokenVersion: 0 };
+		const memberModel: any = {
+			findOneAndUpdate: jest.fn((_filter: any, update: any) => ({
+				exec: async () => {
+					if (update.$inc) for (const [key, by] of Object.entries(update.$inc)) stored[key] = (stored[key] ?? 0) + (by as number);
+					Object.assign(stored, update.$set ?? update);
+					return stored;
+				},
+			})),
+		};
+		const jwt: any = { signAsync: jest.fn(async (payload: any) => `token:${payload.tv}`) };
+		const authService = new AuthService(jwt, {} as any);
+		const service = new MemberService(memberModel, {} as any, authService, {} as any, {} as any, {} as any, {} as any);
+		return { stored, memberModel, service };
+	};
+
+	it('a new password raises tokenVersion in the same update and the returned token carries the new version', async () => {
+		const { stored, memberModel, service } = build();
+		const result = await service.updateMember(ID as any, { _id: ID as any, memberPassword: 'another-password' });
+
+		const [, update] = memberModel.findOneAndUpdate.mock.calls[0];
+		expect(update.$inc).toEqual({ tokenVersion: 1 });
+		expect(update.$set.memberPassword).not.toBe('another-password');
+		expect(stored.tokenVersion).toBe(1);
+		expect(result.accessToken).toBe('token:1');
+	});
+
+	it('other edits leave sessions alone and can set the language of the emails', async () => {
+		const { stored, memberModel, service } = build();
+		const result = await service.updateMember(ID as any, { _id: ID as any, memberLang: 'ru' as any, memberNick: 'newnick' });
+
+		const [, update] = memberModel.findOneAndUpdate.mock.calls[0];
+		expect(update.$inc).toBeUndefined();
+		expect(update).toMatchObject({ memberLang: 'ru', memberNick: 'newnick' });
+		expect(stored.tokenVersion).toBe(0);
+		expect(result.accessToken).toBe('token:0');
+	});
+
+	it('the update input cannot carry the email, the verification date or the token version', async () => {
+		const pipe = createValidationPipe();
+		const out: any = await pipe.transform(
+			{ _id: ID, memberNick: 'nick1', memberEmail: 'x@y.com', emailVerifiedAt: new Date(), tokenVersion: 9 },
+			{ type: 'body', metatype: (await import('../../libs/dto/member/member.update')).MemberUpdate },
+		);
+		expect(out).not.toHaveProperty('memberEmail');
+		expect(out).not.toHaveProperty('emailVerifiedAt');
+		expect(out).not.toHaveProperty('tokenVersion');
 	});
 });

@@ -1,6 +1,7 @@
 import { Schema } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../enums/member.enum';
 import { MEMBER_EMAIL_INDEX, MEMBER_PHONE_INDEX } from '../member-indexes';
+import { EventLocale } from '../enums/event.enum';
 
 const CommissionOverrideSchema = new Schema(
 	{
@@ -38,6 +39,24 @@ const MemberSchema = new Schema(
 			lowercase: true,
 			trim: true,
 			match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+		},
+
+		/** missing until the owner opens the emailed link; the migration sets it for old accounts (DECISIONS #135) */
+		emailVerifiedAt: {
+			type: Date,
+		},
+
+		/** compared with the `tv` of every token: a password reset raises it and so ends the old sessions (DECISIONS #135) */
+		tokenVersion: {
+			type: Number,
+			default: 0,
+		},
+
+		/** the language of the emails sent to the member */
+		memberLang: {
+			type: String,
+			enum: EventLocale,
+			default: EventLocale.EN,
 		},
 
 		memberPhone: {

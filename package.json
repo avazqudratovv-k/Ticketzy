@@ -19,6 +19,7 @@
     "reset:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/reset-demo.ts",
     "check:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/check-demo.ts",
     "migrate:venue-focal-areas": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/migrate-venue-focal-areas.ts",
+    "migrate:email-verified": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/migrate-email-verified.ts",
     "migrate:member-indexes": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/migrate-member-indexes.ts",
     "report:currency": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/report-currency.ts",
     "ai:check": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/ai-check.ts",
@@ -56,6 +57,7 @@
     "moment": "^2.29.4",
     "mongoose": "^8.0.0",
     "reflect-metadata": "^0.1.13",
+    "resend": "6.34.1",
     "rxjs": "^7.8.1",
     "uuid": "^9.0.1",
     "ws": "^8.14.2"

@@ -23,7 +23,7 @@ describe('OrderService.createCheckout: non-refundable acknowledgement', () => {
 
 	const setup = (refundPolicy?: any) => {
 		const members = new FakeModel([
-			{ _id: BUYER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER },
+			{ _id: BUYER, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.USER, emailVerifiedAt: new Date('2026-01-01') },
 			{ _id: ORG, memberStatus: MemberStatus.ACTIVE, memberType: MemberType.ORGANIZER, completedEvents: 0 },
 		]);
 		events = new FakeModel([

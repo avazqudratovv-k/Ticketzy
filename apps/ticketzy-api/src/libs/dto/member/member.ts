@@ -2,6 +2,7 @@ import { Field, Float, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
 import { MemberAuthType, MemberStatus, MemberType } from '../../enums/member.enum';
 import { MeLiked } from '../like/like';
+import { EventLocale } from '../../enums/event.enum';
 
 @ObjectType()
 export class CommissionOverride {
@@ -41,6 +42,20 @@ export class Member {
 	memberNick?: string;
 
 	memberPassword?: string;
+
+	/** stored on the document; the schema exposes only the computed `emailVerified` (self and admins, see MemberResolver) */
+	emailVerifiedAt?: Date;
+
+	/** internal: raised by a password reset or change, compared with the `tv` of every token */
+	tokenVersion?: number;
+
+	/** the member themselves and admins only, see MemberResolver */
+	@Field(() => EventLocale, { nullable: true })
+	memberLang?: EventLocale;
+
+	/** whether the owner proved the address; the member themselves and admins only, see MemberResolver */
+	@Field(() => Boolean, { nullable: true })
+	emailVerified?: boolean;
 
 	/** public for organizers (organization name), private for everyone else, see MemberResolver */
 	@Field(() => String, { nullable: true })

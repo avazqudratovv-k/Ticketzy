@@ -9,10 +9,24 @@ const QUARTER_HOUR = 15 * MINUTE;
 const HOUR = 60 * MINUTE;
 
 export const CHECK_IN_CODE_PER_MINUTE = 60;
+/** emails to one address per purpose, emails started from one IP, and link redemptions from one IP (#135): fixed numbers, not tuning knobs */
+export const MAIL_PER_EMAIL_PER_HOUR = 3;
+export const MAIL_PER_IP_PER_HOUR = 10;
+export const EMAIL_TOKEN_PER_IP_PER_15_MIN = 20;
 
 export const RATE_LIMITED_CODE = 'RATE_LIMITED';
 
-export type RateLimitName = 'general' | 'login' | 'loginEmail' | 'signup' | 'password' | 'checkInCode' | 'accountDelete';
+export type RateLimitName =
+	| 'general'
+	| 'login'
+	| 'loginEmail'
+	| 'signup'
+	| 'password'
+	| 'checkInCode'
+	| 'accountDelete'
+	| 'mailEmail'
+	| 'mailIp'
+	| 'emailToken';
 
 /** the text a client sees; the number of seconds is the retry hint */
 export const rateLimitedMessage = (retryAfterSeconds: number): string => Message.RATE_LIMITED.replace('{seconds}', String(retryAfterSeconds));
@@ -42,6 +56,10 @@ export class RateLimits {
 			checkInCode: new RateLimiter(CHECK_IN_CODE_PER_MINUTE, MINUTE),
 			// account deletion counts like a password change (#123): same number, its own bucket
 			accountDelete: new RateLimiter(config.passwordPer15Min, QUARTER_HOUR),
+			// emailed links (#135): per address and purpose, per IP, and per IP for redeeming a link
+			mailEmail: new RateLimiter(MAIL_PER_EMAIL_PER_HOUR, HOUR),
+			mailIp: new RateLimiter(MAIL_PER_IP_PER_HOUR, HOUR),
+			emailToken: new RateLimiter(EMAIL_TOKEN_PER_IP_PER_15_MIN, QUARTER_HOUR),
 		};
 	}
 
@@ -117,3 +135,16 @@ export const enforceAccountDeleteLimit = (req: any, actorId: unknown, limits: Ra
 /** check-in and preview by ticket code: per acting member, so a guesser cannot walk the code space */
 export const enforceCheckInCodeLimit = (actorId: unknown, limits: RateLimits = getRateLimits()): void =>
 	limits.enforce('checkInCode', `member:${String(actorId)}`);
+
+/**
+ * Before an email with a link is started (#135): 3 per address and purpose per hour, 10 per IP per hour. The key is the
+ * submitted address, whether or not an account uses it, so a refusal tells nothing about accounts.
+ */
+export const enforceMailLimit = (req: any, purpose: string, email: unknown, limits: RateLimits = getRateLimits()): void => {
+	limits.enforce('mailIp', getClientIp(req));
+	const address = String(email ?? '').trim().toLowerCase();
+	if (address) limits.enforce('mailEmail', `${purpose}:${address}`);
+};
+
+/** before a link is redeemed (verifyEmail, resetPassword): per IP, so a guesser cannot hammer the token space */
+export const enforceEmailTokenLimit = (req: any, limits: RateLimits = getRateLimits()): void => limits.enforce('emailToken', getClientIp(req));

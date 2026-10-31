@@ -11,6 +11,7 @@ import { MemberStatus, MemberType, OrganizerAction, organizerTransitions } from 
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
 import { T } from '../../libs/types/common';
 import { escapeRegExp } from '../../libs/config';
+import { assertVerifiedEmail } from '../../libs/buyer';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { ConversationRealtime } from '../conversation/conversation.realtime';
 import { NotificationService } from '../notification/notification.service';
@@ -172,14 +173,17 @@ export class OrganizerService {
 				.exec();
 		}
 		if (!result) {
+			// approving needs a verified email address, checked in the same conditional update (DECISIONS #135)
+			const verified = action === 'verify' ? { emailVerifiedAt: { $ne: null } } : {};
 			result = await this.memberModel
-				.findOneAndUpdate({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: { $in: from } }, update, { new: false })
+				.findOneAndUpdate({ _id: memberId, memberType: MemberType.ORGANIZER, memberStatus: { $in: from }, ...verified }, update, { new: false })
 				.exec();
 		}
 
 		if (!result) {
 			const current = await this.memberModel.findOne({ _id: memberId, memberType: MemberType.ORGANIZER }).lean().exec();
 			if (!current) throw new BadRequestException(Message.NO_ORGANIZER_FOUND);
+			if (action === 'verify' && from.includes(current.memberStatus)) assertVerifiedEmail(current);
 			throw new BadRequestException(Message.INVALID_STATUS_TRANSITION);
 		}
 

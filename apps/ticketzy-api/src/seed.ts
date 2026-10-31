@@ -40,6 +40,7 @@ async function seed(): Promise<void> {
 			memberType: MemberType.ADMIN,
 			memberStatus: MemberStatus.ACTIVE,
 			memberAuthType: MemberAuthType.EMAIL,
+			emailVerifiedAt: new Date(),
 		});
 		console.log(`Admin ${email} was created.`);
 	}

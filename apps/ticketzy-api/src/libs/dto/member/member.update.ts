@@ -1,7 +1,8 @@
 import { Field, InputType } from '@nestjs/graphql';
-import { IsNotEmpty, IsOptional, Length, MinLength } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, Length, MinLength } from 'class-validator';
 import { MemberStatus, MemberType } from '../../enums/member.enum';
 import { ObjectId } from 'mongoose';
+import { EventLocale } from '../../enums/event.enum';
 
 @InputType()
 export class MemberUpdate {
@@ -47,6 +48,12 @@ export class MemberUpdate {
 	@IsOptional()
 	@Field(() => String, { nullable: true })
 	memberDesc?: string;
+
+	/** the language of the emails sent to the member */
+	@IsOptional()
+	@IsEnum(EventLocale)
+	@Field(() => EventLocale, { nullable: true })
+	memberLang?: EventLocale;
 
 	deletedAt?: Date;
 }

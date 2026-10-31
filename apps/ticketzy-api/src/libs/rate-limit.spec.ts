@@ -3,7 +3,7 @@ import * as request from 'supertest';
 import { CodedException } from './coded-exception';
 import { RateLimiter } from './rate-limiter';
 import { DEFAULT_RATE_LIMITS } from './env.validation';
-import { CHECK_IN_CODE_PER_MINUTE, RateLimits, createGeneralRateLimitMiddleware, enforceCheckInCodeLimit, enforceLoginLimit, enforcePasswordLimit, enforceSignupLimit, getClientIp } from './rate-limit';
+import { CHECK_IN_CODE_PER_MINUTE, RateLimits, createGeneralRateLimitMiddleware, enforceCheckInCodeLimit, enforceEmailTokenLimit, enforceLoginLimit, enforceMailLimit, enforcePasswordLimit, enforceSignupLimit, getClientIp } from './rate-limit';
 
 const limits = (over: Partial<typeof DEFAULT_RATE_LIMITS> = {}) => new RateLimits({ ...DEFAULT_RATE_LIMITS, ...over });
 const req = (ip: string) => ({ ip });
@@ -127,5 +127,48 @@ describe('general per-IP middleware', () => {
 		await request(app).post('/graphql').set('X-Forwarded-For', '7.7.7.1').expect(200);
 		await request(app).post('/graphql').set('X-Forwarded-For', '7.7.7.2').expect(200);
 		await request(app).post('/graphql').set('X-Forwarded-For', '7.7.7.1').expect(429);
+	});
+});
+
+describe('email link limits (DECISIONS #135)', () => {
+
+	it('allows 3 emails per address and purpose per hour, then answers RATE_LIMITED with a retry hint', () => {
+		const l = limits();
+		for (let i = 0; i < 3; i++) enforceMailLimit(req('1.1.1.1'), 'RESET_PASSWORD', 'a@example.com', l);
+		let error: any;
+		try {
+			enforceMailLimit(req('1.1.1.1'), 'RESET_PASSWORD', 'a@example.com', l);
+		} catch (err) {
+			error = err;
+		}
+		expect(error.code).toBe('RATE_LIMITED');
+		expect(error.retryAfterSeconds).toBeGreaterThan(0);
+	});
+
+	it('counts per purpose and ignores case and spaces of the address', () => {
+		const l = limits();
+		for (let i = 0; i < 3; i++) enforceMailLimit(req('1.1.1.1'), 'RESET_PASSWORD', ' A@Example.com ', l);
+		expect(() => enforceMailLimit(req('1.1.1.1'), 'RESET_PASSWORD', 'a@example.com', l)).toThrow();
+		expect(() => enforceMailLimit(req('1.1.1.1'), 'VERIFY_EMAIL', 'a@example.com', l)).not.toThrow();
+	});
+
+	it('refuses an unknown address exactly like a known one (the key is the submitted address)', () => {
+		const l = limits();
+		for (let i = 0; i < 3; i++) enforceMailLimit(req('2.2.2.2'), 'RESET_PASSWORD', 'nobody@example.com', l);
+		expect(() => enforceMailLimit(req('2.2.2.2'), 'RESET_PASSWORD', 'nobody@example.com', l)).toThrow();
+	});
+
+	it('allows 10 emails per IP per hour across addresses', () => {
+		const l = limits();
+		for (let i = 0; i < 10; i++) enforceMailLimit(req('3.3.3.3'), 'RESET_PASSWORD', `u${i}@example.com`, l);
+		expect(() => enforceMailLimit(req('3.3.3.3'), 'RESET_PASSWORD', 'u11@example.com', l)).toThrow();
+		expect(() => enforceMailLimit(req('4.4.4.4'), 'RESET_PASSWORD', 'u11@example.com', l)).not.toThrow();
+	});
+
+	it('allows 20 link redemptions per IP per 15 minutes', () => {
+		const l = limits();
+		for (let i = 0; i < 20; i++) enforceEmailTokenLimit(req('5.5.5.5'), l);
+		expect(() => enforceEmailTokenLimit(req('5.5.5.5'), l)).toThrow();
+		expect(() => enforceEmailTokenLimit(req('6.6.6.6'), l)).not.toThrow();
 	});
 });

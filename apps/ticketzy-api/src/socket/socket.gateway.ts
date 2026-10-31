@@ -118,7 +118,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 			if (![MemberType.ORGANIZER, MemberType.ADMIN].includes(member.memberType)) throw new Error(Message.ONLY_SPECIFIC_ROLES_ALLOWED);
 
 			this.clearAuthTimer(client);
-			this.realtime.register(client, { memberId: String(member._id), memberType: member.memberType });
+			this.realtime.register(client, { memberId: String(member._id), memberType: member.memberType, tokenVersion: member.tokenVersion ?? 0 });
 			this.logger.verbose(`Socket authenticated [${member._id}]`);
 			this.send(client, 'authenticated', { memberId: String(member._id) });
 		} catch (err) {
@@ -137,6 +137,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 		} catch (err) {
 			return this.reject(client, err.message);
 		}
+
+		// the password was reset or changed after this socket authenticated: its session is over (#135)
+		if (info.tokenVersion !== undefined && info.tokenVersion !== (member.tokenVersion ?? 0)) return this.reject(client, Message.NOT_AUTHENTICATED);
 
 		// the status is read fresh on every action, so a socket opened before a rejection loses its rooms at once
 		this.realtime.setRestricted(client, member.memberType === MemberType.ORGANIZER && member.memberStatus !== MemberStatus.ACTIVE);
