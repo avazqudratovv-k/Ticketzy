@@ -38,6 +38,8 @@ describe('VenueService layout and capacity', () => {
 		venueModel = {
 			create: jest.fn().mockImplementation(async (doc) => doc),
 			findOneAndUpdate: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ _id: 'v1' }) }),
+			// the stored layout, read to keep its focal area when an update sends none
+			findOne: jest.fn().mockReturnValue({ select: () => ({ lean: () => ({ exec: async () => null }) }) }),
 		};
 		service = new VenueService(venueModel, eventModel as any, eventSeatModel as any);
 	});

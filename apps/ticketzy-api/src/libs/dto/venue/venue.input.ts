@@ -2,7 +2,7 @@ import { Field, InputType, Int } from '@nestjs/graphql';
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsNumber, Length, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ObjectId } from 'mongoose';
-import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
+import { FocalAreaType, SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
 import { availableVenueSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
 import { PageField, LimitField } from '../common/pagination';
@@ -61,6 +61,41 @@ export class VenueSectionInput {
 	@Length(1, 30)
 	@Field(() => String, { nullable: true, description: 'required for SEATED sections: links to a ticket type' })
 	tierKey?: string;
+
+	@IsOptional()
+	@IsInt()
+	@Min(0)
+	@Max(2)
+	@Field(() => Int, { nullable: true, description: '0 floor (default), 1 lower tier, 2 upper tier' })
+	level?: number;
+}
+
+@InputType()
+export class FocalAreaInput {
+	@IsNotEmpty()
+	@IsIn(Object.values(FocalAreaType))
+	@Field(() => FocalAreaType)
+	type: FocalAreaType;
+
+	@IsOptional()
+	@IsNumber()
+	@Field(() => Number, { nullable: true, description: 'a STAGE needs x, y, width and height; a PITCH is fixed and may omit them' })
+	x?: number;
+
+	@IsOptional()
+	@IsNumber()
+	@Field(() => Number, { nullable: true })
+	y?: number;
+
+	@IsOptional()
+	@IsNumber()
+	@Field(() => Number, { nullable: true })
+	width?: number;
+
+	@IsOptional()
+	@IsNumber()
+	@Field(() => Number, { nullable: true })
+	height?: number;
 }
 
 @InputType()
@@ -69,6 +104,12 @@ export class VenueLayoutInput {
 	@Type(() => VenueSectionInput)
 	@Field(() => [VenueSectionInput])
 	sections: VenueSectionInput[];
+
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => FocalAreaInput)
+	@Field(() => FocalAreaInput, { nullable: true, description: 'omitted: a new venue gets the default stage, an update keeps the stored one' })
+	focalArea?: FocalAreaInput;
 }
 
 @InputType()

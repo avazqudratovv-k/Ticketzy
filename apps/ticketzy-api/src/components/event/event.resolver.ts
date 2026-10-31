@@ -22,6 +22,8 @@ import { WithoutGuard } from '../auth/guards/without.guard';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { Member } from '../../libs/dto/member/member';
 import { shapeIntoMongoObjectId } from '../../libs/config';
+import { RefundPolicy } from '../../libs/dto/event/refund-policy';
+import { readRefundPolicy } from '../../libs/refund-policy';
 
 @Resolver(() => Event)
 export class EventResolver {
@@ -34,6 +36,12 @@ export class EventResolver {
 		const authMember = context?.req?.body?.authMember;
 		if (!authMember) return false;
 		return String(authMember._id) === String(event.organizerId) || authMember.memberType === MemberType.ADMIN;
+	}
+
+	/** events saved before policies read as refundable until the day before the event (#129) */
+	@ResolveField(() => RefundPolicy)
+	public refundPolicy(@Parent() event: Event): RefundPolicy {
+		return readRefundPolicy(event);
 	}
 
 	@ResolveField(() => String, { nullable: true })

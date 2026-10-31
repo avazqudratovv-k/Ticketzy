@@ -5,6 +5,7 @@ import { ObjectId } from 'mongoose';
 import { EventCategory, EventLocale, EventStatus, SeatingType } from '../../enums/event.enum';
 import { availableEventSorts } from '../../config';
 import { Direction } from '../../enums/common.enum';
+import { RefundPolicyInput } from './refund-policy';
 import { PeriodsRange, PricesRange } from '../common/common.input';
 import { PageField, LimitField, MAX_ADMIN_EVENTS_LIMIT } from '../common/pagination';
 
@@ -50,6 +51,12 @@ export class EventInput {
 	@Type(() => EventTranslationInput)
 	@Field(() => [EventTranslationInput], { nullable: true })
 	eventTranslations?: EventTranslationInput[];
+
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => RefundPolicyInput)
+	@Field(() => RefundPolicyInput, { nullable: true, description: 'default: refundable until the day before the event' })
+	refundPolicy?: RefundPolicyInput;
 
 	@IsNotEmpty()
 	@Field(() => [String])

@@ -1,6 +1,6 @@
 import { Field, InputType, Int } from '@nestjs/graphql';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsDate, IsIn, IsInt, IsNotEmpty, IsOptional, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsBoolean, IsDate, IsIn, IsInt, IsNotEmpty, IsOptional, MaxLength, Min, ValidateNested } from 'class-validator';
 import { ObjectId } from 'mongoose';
 import { OrderStatus } from '../../enums/ticket.enum';
 import { Direction } from '../../enums/common.enum';
@@ -40,6 +40,11 @@ export class CheckoutInput {
 	@Type(() => OrderItemInput)
 	@Field(() => [OrderItemInput], { nullable: true })
 	items?: OrderItemInput[];
+
+	@IsOptional()
+	@IsBoolean()
+	@Field(() => Boolean, { nullable: true, description: 'must be true when the event is non-refundable: the buyer confirms they know' })
+	acknowledgeNonRefundable?: boolean;
 }
 
 @InputType()

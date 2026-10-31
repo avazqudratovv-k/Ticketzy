@@ -11,6 +11,7 @@ import { MemberType } from '../../libs/enums/member.enum';
 import { T } from '../../libs/types/common';
 import { escapeRegExp } from '../../libs/config';
 import { VenueLayout, computeLayoutCapacity, getVenueLayoutError, isValidTimezone } from '../../libs/venue-layout';
+import { DEFAULT_STAGE, FocalAreaInput, buildFocalArea, readFocalArea } from '../../libs/focal-area';
 
 @Injectable()
 export class VenueService {
@@ -31,10 +32,22 @@ export class VenueService {
 		return computeLayoutCapacity(layout);
 	}
 
+	/**
+	 * The layout that is stored: validated, with the focal area the server decides on. A PITCH always gets its fixed
+	 * geometry (a different one from the client was refused by the validation), an omitted focal area keeps the stored one
+	 * of the venue (update) or becomes the default stage (create).
+	 */
+	private buildStoredLayout(layout: VenueLayout, keep?: VenueLayout | null): VenueLayout {
+		const requested = layout.focalArea as FocalAreaInput | undefined;
+		const focalArea = requested ? buildFocalArea(requested) : keep ? readFocalArea(keep) : { ...DEFAULT_STAGE };
+		return { ...layout, focalArea };
+	}
+
 	public async createVenue(input: VenueInput): Promise<Venue> {
 		const venueCapacity = this.assertValidLayoutAndTimezone(input.venueTimezone, input.venueLayout as VenueLayout);
+		const venueLayout = this.buildStoredLayout(input.venueLayout as VenueLayout);
 		try {
-			return await this.venueModel.create({ ...input, venueCapacity });
+			return await this.venueModel.create({ ...input, venueLayout, venueCapacity });
 		} catch (err) {
 			this.logger.error(`Error, Service.model: ${err.message}`);
 			throw new BadRequestException(Message.CREATE_FAILED);
@@ -57,7 +70,12 @@ export class VenueService {
 		const search: T = { _id: input._id, venueStatus: { $ne: VenueStatus.DELETE } };
 		if (memberType !== MemberType.ADMIN) search.memberId = memberId;
 
-		const update: T = venueCapacity === undefined ? input : { ...input, venueCapacity };
+		const update: T = { ...input };
+		if (input.venueLayout !== undefined) {
+			const stored: Venue = await this.venueModel.findOne({ _id: input._id }).select('venueLayout').lean().exec();
+			update.venueLayout = this.buildStoredLayout(input.venueLayout as VenueLayout, stored?.venueLayout as VenueLayout);
+			update.venueCapacity = venueCapacity;
+		}
 		const result = await this.venueModel.findOneAndUpdate(search, update, { new: true }).exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;

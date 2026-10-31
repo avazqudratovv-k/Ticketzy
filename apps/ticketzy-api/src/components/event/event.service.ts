@@ -13,6 +13,7 @@ import { StatisticModifier, T } from '../../libs/types/common';
 import {
 	EventCategory,
 	EventStatus,
+	RefundPolicyType,
 	SeatStatus,
 	SeatingType,
 	VenueStatus,
@@ -32,6 +33,8 @@ import { LikeInput } from '../../libs/dto/like/like.input';
 import { LikeGroup } from '../../libs/enums/like.enum';
 import { Venue } from '../../libs/dto/venue/venue';
 import { CodedException } from '../../libs/coded-exception';
+import { RefundPolicy } from '../../libs/refund-policy';
+import { buildRefundPolicy, getRefundPolicyError } from '../../libs/refund-policy';
 import { EventSeat, EventSeatMap, TakenSeat } from '../../libs/dto/event/event-seat';
 import {
 	VenueLayout,
@@ -122,9 +125,10 @@ export class EventService {
 		this.assertValidDates(input.startAt, input.endAt, input.saleStartAt, input.saleEndAt);
 		await this.assertVenueUsable(input.venueId);
 		await this.assertVenueFree(input.venueId, input.startAt, input.endAt);
+		const refundPolicy = this.shapeRefundPolicy(input.refundPolicy);
 
 		try {
-			const result = await this.eventModel.create({ ...input, eventStatus: EventStatus.DRAFT });
+			const result = await this.eventModel.create({ ...input, ...(refundPolicy ? { refundPolicy } : {}), eventStatus: EventStatus.DRAFT });
 			await this.memberService.memberStatsEditor({
 				_id: result.organizerId,
 				targetKey: 'memberEvents',
@@ -739,6 +743,8 @@ export class EventService {
 
 		const { _id, ...fields } = input;
 		const update: T = { ...fields };
+		const refundPolicy = this.shapeRefundPolicy(input.refundPolicy);
+		if (refundPolicy) update.refundPolicy = refundPolicy;
 		if (sendApprovedBackToPending && before.eventStatus === EventStatus.APPROVED) {
 			update.eventStatus = eventTransitions.submit.to;
 		}
@@ -763,6 +769,14 @@ export class EventService {
 		if (before.eventStatus === EventStatus.APPROVED) throw new BadRequestException(Message.EVENT_LAYOUT_LOCKED);
 		const seat = await this.eventSeatModel.findOne({ eventId: before._id }).select('_id').lean().exec();
 		if (seat) throw new BadRequestException(Message.EVENT_LAYOUT_LOCKED);
+	}
+
+	/** the stored refund policy for a client's choice, null when none was sent; an invalid one is refused (#129) */
+	private shapeRefundPolicy(input?: { policyType: RefundPolicyType; daysBefore?: number }): RefundPolicy | null {
+		if (!input) return null;
+		const error = getRefundPolicyError(input);
+		if (error) throw new BadRequestException(error);
+		return buildRefundPolicy(input);
 	}
 
 	private assertValidDates(startAt: Date, endAt: Date, saleStartAt?: Date, saleEndAt?: Date): void {

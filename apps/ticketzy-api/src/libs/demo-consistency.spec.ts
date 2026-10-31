@@ -14,7 +14,7 @@ const good = (): DemoSnapshot => ({
 		{ _id: 'org', memberType: MemberType.ORGANIZER, memberStatus: MemberStatus.ACTIVE, completedEvents: 1, memberEvents: 2, memberLikes: 0, memberViews: 1, memberRank: 11 },
 		{ _id: 'buyer', memberType: MemberType.USER, memberStatus: MemberStatus.ACTIVE, completedEvents: 0, memberEvents: 0, memberLikes: 0, memberViews: 0, memberRank: 0 },
 	],
-	venueCount: 10,
+	venueCount: 12,
 	events: [
 		{ _id: 'past', organizerId: 'org', eventStatus: EventStatus.ENDED, eventLikes: 0, eventViews: 0, eventComments: 0, eventRank: 0, startAt: new Date(now.getTime() - 5 * DAY), endAt: new Date(now.getTime() - 5 * DAY + 3600000), imageCount: 2 },
 		{ _id: 'next', organizerId: 'org', eventStatus: EventStatus.APPROVED, eventLikes: 1, eventViews: 1, eventComments: 1, eventRank: 3, startAt: new Date(now.getTime() + 2 * DAY), endAt: new Date(now.getTime() + 2 * DAY + 3600000), imageCount: 2 },

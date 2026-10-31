@@ -1,5 +1,5 @@
 import { Schema } from 'mongoose';
-import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../enums/event.enum';
+import { FocalAreaType, SectionKind, SectionSpacing, VenueStatus, VenueType } from '../enums/event.enum';
 
 const VenueSectionSchema = new Schema(
 	{
@@ -14,6 +14,20 @@ const VenueSectionSchema = new Schema(
 		rotation: { type: Number, default: 0 },
 		spacing: { type: String, enum: SectionSpacing, default: SectionSpacing.NORMAL },
 		tierKey: { type: String },
+		/** 0 floor, 1 lower tier, 2 upper tier; missing on old sections means 0 (DECISIONS #128) */
+		level: { type: Number, min: 0, max: 2, default: 0 },
+	},
+	{ _id: false },
+);
+
+/** the one stage or pitch of a layout; missing on old layouts, which read as the default stage (libs/focal-area.ts) */
+const FocalAreaSchema = new Schema(
+	{
+		type: { type: String, enum: FocalAreaType, required: true },
+		x: { type: Number, required: true },
+		y: { type: Number, required: true },
+		width: { type: Number, required: true },
+		height: { type: Number, required: true },
 	},
 	{ _id: false },
 );
@@ -52,7 +66,7 @@ const VenueSchema = new Schema(
 
 		/** optional: venues created before layouts have none, and then only host GENERAL events */
 		venueLayout: {
-			type: new Schema({ sections: { type: [VenueSectionSchema], default: [] } }, { _id: false }),
+			type: new Schema({ sections: { type: [VenueSectionSchema], default: [] }, focalArea: { type: FocalAreaSchema } }, { _id: false }),
 		},
 
 		/** computed from venueLayout by the server */

@@ -735,7 +735,7 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Verified:** tsc (api and batch), `npm run build` and `npm run test` (69 suites, 1398 tests) pass.
 - **Not done / risks:** the index migration and the compound unique indexes were not run against a real MongoDB (no `mongod` here; the plan is tested with a fake collection and the schema indexes are asserted); `npm run lint` not run; nothing committed; `.env` and `.env.example` untouched. The frontend must handle `ACCOUNT_DELETE_BLOCKED` (with `reasons`), `EMAIL_RECENTLY_DELETED`, and "Deleted user".
 
-## Venue focal areas, levels, templates, logos, refund policy, bigger demo seed (decisions #127 to #132)
+## Venue focal areas, levels, templates, logos, refund policy, bigger demo seed (decisions #127 to #133)
 
 - **Schema fields:** `Venue.venueLayout.focalArea { type, x, y, width, height }`, `venueLayout.sections[].level` (0 to 2), `Event.refundPolicy { policyType, daysBefore }`, `Order.refundPolicy` (snapshot) and `Order.nonRefundableAcknowledgedAt`.
 - **GraphQL:** new query `getVenueTemplates` (43 queries, 57 mutations). New types `FocalArea`, `VenueTemplate`, `RefundPolicy`; new enums `FocalAreaType`, `RefundPolicyType`; new inputs `FocalAreaInput` (in `VenueLayoutInput.focalArea`), `RefundPolicyInput` (in `EventInput` / `EventUpdate.refundPolicy`), `CheckoutInput.acknowledgeNonRefundable`, `VenueSectionInput.level`; new output fields `VenueLayout.focalArea`, `VenueSection.level`, `Event.refundPolicy`, `Order.refundPolicy`, `Order.nonRefundableAcknowledgedAt`, `RefundQuote.refundPolicy`. New `Message` values: `VENUE_LAYOUT_BAD_LEVEL`, `FOCAL_AREA_INVALID`, `FOCAL_AREA_PITCH_FIXED`, `VENUE_TEMPLATE_NOT_FOUND`, `REFUND_NOT_ALLOWED_BY_POLICY`, `NON_REFUNDABLE_ACK_REQUIRED`, `INVALID_REFUND_POLICY`.
@@ -743,4 +743,4 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Existing venues:** read-time default (a layout without a focal area reads as the default stage, a section without a level as 0); no data rewritten. Optional script `npm run migrate:venue-focal-areas` (dry run by default) writes the default stage into stored layouts; not run.
 - **Seed:** 12 venues (all four templates), 10 organizers with committed SVG logos, 72 events, 50 buyers; linked-records check with `--dry-run` and `DEMO_SEED_KEEP_LINKED`. Counts of the real run are in the report of the task.
 - **Tests:** `focal-area.spec`, `venue-templates.spec`, `venue.focal-area.spec`, `refund-policy-days.spec`, `order.refund-ack.spec`, the policy block of `refund.service.spec`, `demo-links.spec`, `demo-gate.spec`, `demo-seeder.keep.spec`, `schemas/new-fields.spec`, and updates to `demo-plan.spec`, `demo-manifest.spec`, `demo-refunds.spec`, `schema.spec`.
-- **Decisions:** #127 to #132.
+- **Decisions:** #127 to #133.

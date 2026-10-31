@@ -1,5 +1,6 @@
 import { Field, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
+import { RefundPolicy } from '../event/refund-policy';
 import { OrderStatus } from '../../enums/ticket.enum';
 import { TotalCounter } from '../member/member';
 import { Event } from '../event/event';
@@ -59,6 +60,12 @@ export class Order {
 
 	@Field(() => Date, { nullable: true })
 	paidAt?: Date;
+
+	@Field(() => RefundPolicy, { nullable: true, description: 'the refund policy of the event when the order was placed' })
+	refundPolicy?: RefundPolicy;
+
+	@Field(() => Date, { nullable: true })
+	nonRefundableAcknowledgedAt?: Date;
 
 	@Field(() => Date, { nullable: true })
 	refundedAt?: Date;

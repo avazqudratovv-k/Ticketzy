@@ -22,6 +22,8 @@ import {
 	getFixtureVenue,
 } from './demo-data';
 import { getSeatedSections } from './venue-layout';
+import { RefundPolicy } from './refund-policy';
+import { RefundPolicyType } from './enums/event.enum';
 
 /** RANDOM NUMBERS: a fixed seed, so the same day gives the same shape of data */
 
@@ -92,6 +94,8 @@ export interface PlanEvent {
 	desc: string;
 	translations: { locale: DemoLocale; title: string; description: string }[];
 	images: string[];
+	/** refundable until N days before, or not refundable (DECISIONS #129); the seed sends it with the event and acknowledges it when buying */
+	refundPolicy: RefundPolicy;
 	ticketTypes: PlanTicketType[];
 	/** orders range, or the share of the whole stock to sell (1 is sold out) */
 	orders: [number, number];
@@ -128,6 +132,7 @@ interface Row {
 	adminRefunds?: number;
 	pop?: number;
 	buyerOrders?: PlanEvent['buyerOrders'];
+	refund?: RefundPolicy;
 }
 
 const { RESERVED, GENERAL } = SeatingType;
@@ -227,6 +232,24 @@ const buildRows = (): Row[] => {
 
 		{ org: 'jeju', base: 'lanterns', venue: 'goyang', day: -80, orders: [5, 8] },
 		{ org: 'jeju', base: 'acoustic', venue: 'goyang', day: 46, orders: [6, 10] },
+
+		// the second growth step: Jeju and Suwon venues, more football, an extra sold out show, a second cancellation
+		{ org: 'jeju', base: 'rockfest', venue: 'jejuarena', day: -35, orders: [4, 7] },
+		{ org: 'jeju', base: 'pop', venue: 'jejuarena', day: 8, fill: 0.9, gaQty: [200, 40] },
+		{ org: 'jeju', base: 'electronic', venue: 'jejuarena', day: 33, orders: [5, 9] },
+		{ org: 'jeju', base: 'indiegame', venue: 'jejuarena', day: 52, status: PENDING },
+		{ org: 'jeju', base: 'rockfest', venue: 'jejuarena', day: 29, status: CANCELLED, orders: [4, 7], reason: 'The venue is closed for repairs after a storm. All tickets are refunded in full.', buyerOrders: [{ quantity: 2, outcome: 'paid' }] },
+		{ org: 'cellar', base: 'improv', venue: 'suwon', day: -18, orders: [4, 7] },
+		{ org: 'cellar', base: 'rising', venue: 'suwon', day: 9, fill: 0.9 },
+		{ org: 'hanbit', base: 'bilingual', venue: 'suwon', day: 31, saleOpensInDays: 5 },
+		{ org: 'mirae', base: 'latenight', venue: 'suwon', day: 21, fill: 1 },
+		{ org: 'mirae', base: 'symphony', venue: 'hall', day: -50, orders: [6, 10] },
+		{ org: 'neon', base: 'acoustic', venue: 'livehouse', day: 26, orders: [4, 8] },
+		{ org: 'harbor', base: 'fx-seoul-ulsan', venue: fx('fx-seoul-ulsan'), day: -28, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-gwangju-daejeon', venue: fx('fx-gwangju-daejeon'), day: 14, orders: [8, 12], pop: 0.8 },
+		{ org: 'harbor', base: 'fx-incheon-pohang', venue: fx('fx-incheon-pohang'), day: 23, fill: 0.9 },
+		{ org: 'camellia', base: 'founders', venue: 'expo', day: -9, seating: GENERAL, orders: [3, 6] },
+		{ org: 'camellia', base: 'esports', venue: 'arena', day: 38, orders: [6, 10] },
 	);
 	return rows;
 };
@@ -268,6 +291,26 @@ const buildTicketTypes = (row: Row, base: DemoBase, seating: SeatingType): PlanT
 	}));
 };
 
+/**
+ * The refund policy mix (DECISIONS #129): comedy nights are non-refundable, every fourth concert is non-refundable, the other
+ * concerts are refundable until 1, 3 or 7 days before, fairs and talks until 7 days, football until the day before (the old rule).
+ * A row may set its own.
+ */
+const getRefundPolicyPlan = (row: Row, category: EventCategory, ordinal: number): RefundPolicy => {
+	if (row.refund) return row.refund;
+	const refundable = (daysBefore: number): RefundPolicy => ({ policyType: RefundPolicyType.REFUNDABLE, daysBefore });
+	switch (category) {
+		case EventCategory.COMEDY:
+			return { policyType: RefundPolicyType.NON_REFUNDABLE, daysBefore: 0 };
+		case EventCategory.CONCERT:
+			return ordinal % 4 === 3 ? { policyType: RefundPolicyType.NON_REFUNDABLE, daysBefore: 0 } : refundable([1, 3, 7][ordinal % 3]);
+		case EventCategory.OTHER:
+			return refundable(7);
+		default:
+			return refundable(1);
+	}
+};
+
 const getPayoutPlan = (row: Row, status: EventStatus): PayoutPlan => {
 	if (status !== EventStatus.ENDED) return 'none';
 	if (row.payout) return row.payout;
@@ -289,7 +332,9 @@ export interface DemoPlan {
 export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 	const rng = createRng(20260101);
 	const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-	const rows = buildRows().sort((a, b) => a.day - b.day);
+	// by the real start (day and hour), so two shows on one day are walked in the order they happen
+	const startHour = (row: Row): number => row.day * 24 + (row.hour ?? SHOW_TIMES[DEMO_BASES.find((item) => item.id === row.base).category].hour);
+	const rows = buildRows().sort((a, b) => startHour(a) - startHour(b));
 
 	// a show that appears more than once gets "Vol. n" in chronological order
 	const uses = new Map<string, number>();
@@ -342,6 +387,7 @@ export const buildDemoPlan = (now: Date = new Date()): DemoPlan => {
 			desc: base.desc.en,
 			translations: DEMO_LOCALES.map((locale) => ({ locale, title: `${base.title[locale]}${suffix}`, description: base.desc[locale] })),
 			images: demoEventImages(base.category, ordinal),
+			refundPolicy: getRefundPolicyPlan(row, base.category, ordinal),
 			ticketTypes: buildTicketTypes(row, base, seating),
 			orders: row.orders ?? [4, 12],
 			fill: row.fill,

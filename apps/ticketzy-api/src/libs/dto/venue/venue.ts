@@ -1,6 +1,6 @@
 import { Field, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
-import { SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
+import { FocalAreaType, SectionKind, SectionSpacing, VenueStatus, VenueType } from '../../enums/event.enum';
 import { TotalCounter } from '../member/member';
 
 @ObjectType()
@@ -37,12 +37,36 @@ export class VenueSection {
 
 	@Field(() => String, { nullable: true })
 	tierKey?: string;
+
+	@Field(() => Int, { description: '0 floor, 1 lower tier, 2 upper tier (for the 3D view from a seat)' })
+	level?: number;
+}
+
+@ObjectType()
+export class FocalArea {
+	@Field(() => FocalAreaType)
+	type: FocalAreaType;
+
+	@Field(() => Number, { description: 'top left corner on the 1000 x 700 canvas' })
+	x: number;
+
+	@Field(() => Number)
+	y: number;
+
+	@Field(() => Number)
+	width: number;
+
+	@Field(() => Number)
+	height: number;
 }
 
 @ObjectType()
 export class VenueLayout {
 	@Field(() => [VenueSection])
 	sections: VenueSection[];
+
+	@Field(() => FocalArea, { description: 'a STAGE the organizer places, or a PITCH (105:68) fixed by the server' })
+	focalArea?: FocalArea;
 }
 
 @ObjectType()

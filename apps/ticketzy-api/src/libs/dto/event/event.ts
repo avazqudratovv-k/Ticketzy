@@ -4,6 +4,7 @@ import { EventCategory, EventLocale, EventStatus, SeatingType } from '../../enum
 import { Member, TotalCounter } from '../member/member';
 import { MeLiked } from '../like/like';
 import { Venue } from '../venue/venue';
+import { RefundPolicy } from './refund-policy';
 
 @ObjectType()
 export class EventTranslation {
@@ -99,6 +100,9 @@ export class Event {
 
 	@Field(() => [EventTranslation])
 	eventTranslations: EventTranslation[];
+
+	@Field(() => RefundPolicy, { description: 'refundable until N days before the event, or non-refundable; shown on the event page and at checkout' })
+	refundPolicy?: RefundPolicy;
 
 	@Field(() => Number)
 	eventMinPrice: number;

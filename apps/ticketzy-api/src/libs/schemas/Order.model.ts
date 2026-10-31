@@ -92,6 +92,16 @@ const OrderSchema = new Schema(
 			required: true,
 		},
 
+		/** the refund policy of the event when the order was placed; later changes of the event do not touch it */
+		refundPolicy: {
+			type: new Schema({ policyType: { type: String, required: true }, daysBefore: { type: Number, default: 0 } }, { _id: false }),
+		},
+
+		/** set when the buyer confirmed a NON_REFUNDABLE event at checkout */
+		nonRefundableAcknowledgedAt: {
+			type: Date,
+		},
+
 		paidAt: {
 			type: Date,
 		},

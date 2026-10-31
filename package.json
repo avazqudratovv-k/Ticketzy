@@ -18,6 +18,7 @@
     "seed:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/seed-demo.ts",
     "reset:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/reset-demo.ts",
     "check:demo": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/check-demo.ts",
+    "migrate:venue-focal-areas": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/migrate-venue-focal-areas.ts",
     "migrate:member-indexes": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/migrate-member-indexes.ts",
     "report:currency": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/report-currency.ts",
     "ai:check": "ts-node -r tsconfig-paths/register apps/ticketzy-api/src/ai-check.ts",

@@ -1,7 +1,7 @@
 import { ObjectId } from 'bson';
 import { FakeModel } from '../../test/fake-model';
 import { MemberType } from './enums/member.enum';
-import { DemoModels, countForeignData, removeDemoData } from './demo-manifest';
+import { DemoModels, countForeignData, reconcileOrganizerCounters, removeDemoData } from './demo-manifest';
 
 const names = ['manifest', 'member', 'venue', 'event', 'ticketType', 'eventSeat', 'order', 'ticket', 'payment', 'refund', 'payout', 'comment', 'like', 'view', 'follow', 'conversation', 'message', 'notification', 'auditLog'] as const;
 const build = () => Object.fromEntries(names.map((name) => [name, new FakeModel()])) as unknown as Record<(typeof names)[number], FakeModel>;
@@ -122,13 +122,23 @@ describe('demo reset', () => {
 		expect(ids(m.venue)).toContain(String(venue._id));
 	});
 
-	it('leaves comments and likes that others wrote about removed demo data, and counts them', async () => {
-		const { m, event, realBuyer } = world();
+	it('keeps an event that another account commented on or liked (#132), with its organizer, instead of leaving the records dangling', async () => {
+		const { m, event, organizer, realBuyer } = world();
 		m.comment.docs.push({ _id: id(), memberId: realBuyer._id, commentRefId: event._id });
 		m.like.docs.push({ _id: id(), memberId: realBuyer._id, likeRefId: event._id });
-		const { leftBehind } = await removeDemoData(m as unknown as DemoModels);
-		expect(leftBehind).toMatchObject({ comments: 1, likes: 1 });
+		const { kept } = await removeDemoData(m as unknown as DemoModels);
+		expect(kept.events).toBe(1);
+		expect(ids(m.event)).toContain(String(event._id));
+		expect(ids(m.member)).toContain(String(organizer._id));
 		expect(m.comment.docs.some((doc) => String(doc.memberId) === String(realBuyer._id) && String(doc.commentRefId) === String(event._id))).toBe(true);
+	});
+
+	it('keeps an organizer that another account liked or viewed', async () => {
+		const { m, organizer, realBuyer } = world();
+		m.like.docs.push({ _id: id(), memberId: realBuyer._id, likeRefId: organizer._id });
+		const { kept } = await removeDemoData(m as unknown as DemoModels);
+		expect(kept.members).toBe(1);
+		expect(ids(m.member)).toContain(String(organizer._id));
 	});
 });
 
@@ -141,5 +151,25 @@ describe('demo database check', () => {
 		const empty = build();
 		empty.member.docs.push({ _id: id(), memberEmail: 'admin@example.com', memberType: MemberType.ADMIN });
 		expect(await countForeignData(empty as unknown as DemoModels)).toEqual({ members: 0, venues: 0, events: 0, orders: 0 });
+	});
+});
+
+describe('kept organizers after a reset (DECISIONS #132)', () => {
+	it('recounts memberEvents and completedEvents from the events that really exist, and leaves a right counter alone', async () => {
+		const { m, organizer, event } = world();
+		Object.assign(m.member.docs.find((doc) => String(doc._id) === String(organizer._id)), { memberEvents: 88, completedEvents: 63 });
+		m.event.docs.push({ _id: id(), organizerId: organizer._id, eventStatus: 'ENDED' }, { _id: id(), organizerId: organizer._id, eventStatus: 'CANCELLED' });
+		m.event.docs.find((doc) => String(doc._id) === String(event._id)).eventStatus = 'APPROVED';
+
+		expect(await reconcileOrganizerCounters(m as unknown as DemoModels)).toBe(1);
+		const fixed = m.member.docs.find((doc) => String(doc._id) === String(organizer._id));
+		expect({ memberEvents: fixed.memberEvents, completedEvents: fixed.completedEvents }).toEqual({ memberEvents: 2, completedEvents: 1 });
+		expect(await reconcileOrganizerCounters(m as unknown as DemoModels)).toBe(0);
+	});
+
+	it('does nothing when no seed ever ran', async () => {
+		const { m } = world();
+		m.manifest.docs = [];
+		expect(await reconcileOrganizerCounters(m as unknown as DemoModels)).toBe(0);
 	});
 });

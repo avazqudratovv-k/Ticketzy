@@ -1,5 +1,5 @@
 import { Schema } from 'mongoose';
-import { EventCategory, EventLocale, EventStatus, ModerationFlagType, SeatingType } from '../enums/event.enum';
+import { EventCategory, EventLocale, EventStatus, ModerationFlagType, RefundPolicyType, SeatingType } from '../enums/event.enum';
 
 const EventTranslationSchema = new Schema(
 	{
@@ -28,6 +28,15 @@ const EventModerationSchema = new Schema(
 		confidence: { type: Number, min: 0, max: 1 },
 		model: { type: String },
 		checkedAt: { type: Date },
+	},
+	{ _id: false },
+);
+
+/** missing on events saved before policies: they read as refundable until the day before (libs/refund-policy.ts) */
+const RefundPolicySchema = new Schema(
+	{
+		policyType: { type: String, enum: RefundPolicyType, required: true },
+		daysBefore: { type: Number, min: 0, max: 30, default: 1 },
 	},
 	{ _id: false },
 );
@@ -69,6 +78,10 @@ const EventSchema = new Schema(
 		eventTranslations: {
 			type: [EventTranslationSchema],
 			default: [],
+		},
+
+		refundPolicy: {
+			type: RefundPolicySchema,
 		},
 
 		eventMinPrice: {

@@ -8,11 +8,11 @@ import { Venue } from '../../libs/dto/venue/venue';
 import { Refund, RefundQuote, RefundSummary } from '../../libs/dto/refund/refund';
 import { AdminRefundInput } from '../../libs/dto/refund/refund.input';
 import { Message } from '../../libs/enums/common.enum';
-import { EventStatus } from '../../libs/enums/event.enum';
+import { EventStatus, RefundPolicyType } from '../../libs/enums/event.enum';
 import { OrderStatus, RefundSource, RefundStatus, TicketStatus } from '../../libs/enums/ticket.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { NotificationGroup, NotificationType } from '../../libs/enums/notification.enum';
-import { getRefundDeadline } from '../../libs/refund-policy';
+import { RefundPolicy, getRefundDeadline, readRefundPolicy } from '../../libs/refund-policy';
 import { PaymentService } from '../payment/payment.service';
 import { SeatService } from '../seat/seat.service';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
@@ -32,6 +32,10 @@ interface Assessment {
 	/** the event was cancelled: every ticket is refunded, USED ones too, and the deadline does not apply */
 	cancelled: boolean;
 	pastDeadline: boolean;
+	/** the policy that counts: the snapshot on the order, else the event's */
+	policy: RefundPolicy;
+	/** an admin refunds an order of a non-refundable event (the buyer could not) */
+	policyOverride: boolean;
 }
 
 interface RefundRun {
@@ -77,6 +81,7 @@ export class RefundService {
 			refundable: assessment.refundable,
 			deadline: assessment.deadline,
 			venueTimezone: assessment.venueTimezone,
+			refundPolicy: assessment.policy,
 			refundableAmount: assessment.refundable ? order.totalAmount : 0,
 			currency: order.currency,
 			reason: assessment.reason,
@@ -129,7 +134,7 @@ export class RefundService {
 			action: AuditAction.ORDER_REFUNDED_BY_ADMIN,
 			targetType: AuditTargetType.ORDER,
 			targetId: order._id,
-			meta: { reason: reason, amount: order.totalAmount, afterDeadline: assessment.pastDeadline },
+			meta: { reason: reason, amount: order.totalAmount, afterDeadline: assessment.pastDeadline, policyOverride: assessment.policyOverride },
 		});
 		return result;
 	}
@@ -147,6 +152,8 @@ export class RefundService {
 			venueTimezone: DEFAULT_TIMEZONE,
 			cancelled: true,
 			pastDeadline: false,
+			policy: readRefundPolicy(event),
+			policyOverride: false,
 		};
 
 		let after: ObjectId | null = null;
@@ -211,10 +218,12 @@ export class RefundService {
 	 */
 	private assess(order: Order, event: Event, venue: Venue | null, tickets: Ticket[], now: Date, admin: boolean): Assessment {
 		const venueTimezone = venue?.venueTimezone || DEFAULT_TIMEZONE;
-		const deadline = getRefundDeadline(event.startAt, venueTimezone);
+		const policy = readRefundPolicy(order.refundPolicy ? order : event);
+		const deadline = getRefundDeadline(event.startAt, venueTimezone, policy.daysBefore || undefined);
 		const cancelled = event.eventStatus === EventStatus.CANCELLED;
 		const pastDeadline = now.getTime() > deadline.getTime();
-		const base = { deadline, venueTimezone, cancelled, pastDeadline };
+		const nonRefundable = policy.policyType === RefundPolicyType.NON_REFUNDABLE;
+		const base = { deadline, venueTimezone, cancelled, pastDeadline, policy, policyOverride: false };
 
 		if (order.orderStatus !== OrderStatus.PAID) return { ...base, refundable: false, reason: Message.ORDER_NOT_REFUNDABLE };
 		if (cancelled) return { ...base, refundable: true };
@@ -225,8 +234,10 @@ export class RefundService {
 		if (tickets.some((ticket) => ![TicketStatus.VALID, TicketStatus.REFUNDED].includes(ticket.ticketStatus))) {
 			return { ...base, refundable: false, reason: Message.ORDER_NOT_REFUNDABLE };
 		}
+		// a non-refundable event: only an admin may refund it (audited as a policy override), the buyer cannot
+		if (nonRefundable && !admin) return { ...base, refundable: false, reason: Message.REFUND_NOT_ALLOWED_BY_POLICY };
 		if (pastDeadline && !admin) return { ...base, refundable: false, reason: Message.REFUND_DEADLINE_PASSED };
-		return { ...base, refundable: true };
+		return { ...base, refundable: true, policyOverride: nonRefundable };
 	}
 
 	/** the work */

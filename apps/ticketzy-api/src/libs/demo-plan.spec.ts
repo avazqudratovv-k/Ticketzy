@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { EventCategory, EventStatus, SeatingType } from './enums/event.enum';
+import { EventCategory, EventStatus, RefundPolicyType, SeatingType } from './enums/event.enum';
+import { DEMO_LOGOS, DEMO_LOGO_DIR, buildLogoSvg, demoLogoPath } from './demo-logos';
+import { getVenueTemplate } from './venue-templates';
 import {
 	CATEGORY_PRICE_RANGE,
 	DEMO_BASES,
@@ -77,11 +79,11 @@ describe('demo data', () => {
 	});
 
 	it('has 10 venues in Korean cities with valid layouts, seated and standing', () => {
-		expect(DEMO_VENUES).toHaveLength(10);
+		expect(DEMO_VENUES).toHaveLength(12);
 		expect(DEMO_VENUES.every((venue) => /[A-Za-z]/.test(venue.name) && !/\d/.test(venue.address))).toBe(true);
 		for (const venue of DEMO_VENUES) expect(getVenueLayoutError({ sections: venue.sections })).toBeNull();
-		expect(new Set(DEMO_VENUES.map((venue) => venue.city)).size).toBeGreaterThanOrEqual(8);
-		for (const city of ['Seoul', 'Busan', 'Incheon', 'Goyang', 'Daegu', 'Daejeon', 'Gwangju', 'Jeonju']) expect(DEMO_VENUES.some((venue) => venue.city === city)).toBe(true);
+		expect(new Set(DEMO_VENUES.map((venue) => venue.city)).size).toBeGreaterThanOrEqual(10);
+		for (const city of ['Seoul', 'Busan', 'Incheon', 'Goyang', 'Daegu', 'Daejeon', 'Gwangju', 'Jeonju', 'Jeju', 'Suwon']) expect(DEMO_VENUES.some((venue) => venue.city === city)).toBe(true);
 		expect(DEMO_VENUES.some((venue) => venue.sections.some((section) => section.kind === 'STANDING'))).toBe(true);
 		expect(DEMO_VENUES.some((venue) => venue.sections.every((section) => section.kind === 'SEATED'))).toBe(true);
 	});
@@ -228,16 +230,16 @@ describe('demo texts', () => {
 });
 
 describe('demo plan', () => {
-	it('has 40 to 60 events across the four categories and every status', () => {
-		expect(events.length).toBeGreaterThanOrEqual(40);
-		expect(events.length).toBeLessThanOrEqual(60);
+	it('has 60 to 80 events across the four categories and every status', () => {
+		expect(events.length).toBeGreaterThanOrEqual(60);
+		expect(events.length).toBeLessThanOrEqual(80);
 		for (const category of [EventCategory.CONCERT, EventCategory.FOOTBALL, EventCategory.COMEDY, EventCategory.OTHER]) {
 			expect(events.some((event) => event.category === category)).toBe(true);
 		}
 		for (const status of Object.values(EventStatus)) expect(count(status)).toBeGreaterThan(0);
 		expect(count(EventStatus.REJECTED)).toBe(1);
-		expect(count(EventStatus.CANCELLED)).toBe(1);
-		expect(count(EventStatus.PENDING)).toBeGreaterThanOrEqual(3);
+		expect(count(EventStatus.CANCELLED)).toBeGreaterThanOrEqual(2);
+		expect(count(EventStatus.PENDING)).toBeGreaterThanOrEqual(4);
 		for (const event of events.filter((item) => item.status === EventStatus.REJECTED || item.status === EventStatus.CANCELLED)) expect(event.reason).toBeTruthy();
 	});
 
@@ -384,5 +386,65 @@ describe('order planners', () => {
 		const picks = pickBuyers(200, 50, createRng(7));
 		expect(picks.every((index) => index >= 1 && index <= 49)).toBe(true);
 		picks.slice(1).forEach((index, i) => expect(index).not.toBe(picks[i]));
+	});
+});
+
+describe('demo venues from templates and the refund policy mix (DECISIONS #128 to #131)', () => {
+	it('builds eight of the twelve venues from the four templates, every template at least once, and gives every venue a stage or pitch', () => {
+		const used = new Set(DEMO_VENUES.map((venue) => venue.template).filter(Boolean));
+		expect([...used].sort()).toEqual(['ARENA', 'COMEDY_CLUB', 'CONCERT_HALL', 'FOOTBALL_STADIUM']);
+		expect(DEMO_VENUES.filter((venue) => venue.template)).toHaveLength(8);
+		for (const venue of DEMO_VENUES.filter((item) => item.template)) {
+			const template = getVenueTemplate(venue.template);
+			expect(venue.sections).toEqual(template.layout.sections);
+			expect(venue.focalArea).toEqual(template.layout.focalArea);
+			expect(venue.sections.every((section) => [0, 1, 2].includes(section.level))).toBe(true);
+		}
+		expect(DEMO_VENUES.filter((venue) => venue.focalArea?.type === 'PITCH').map((venue) => venue.key).sort()).toEqual(['fortress', 'openair', 'stadium']);
+	});
+
+	it('every football ground is a template football stadium with a PITCH, and the three clubs play at home there', () => {
+		for (const club of DEMO_CLUBS.filter((item) => item.homeVenue)) {
+			expect(DEMO_VENUES.find((venue) => venue.key === club.homeVenue).template).toBe('FOOTBALL_STADIUM');
+		}
+	});
+
+	it('plans refundable (with different periods) and non-refundable events, both among upcoming and ended ones', () => {
+		const nonRefundable = events.filter((event) => event.refundPolicy.policyType === RefundPolicyType.NON_REFUNDABLE);
+		const refundable = events.filter((event) => event.refundPolicy.policyType === RefundPolicyType.REFUNDABLE);
+		expect(nonRefundable.length).toBeGreaterThanOrEqual(8);
+		expect(refundable.length).toBeGreaterThanOrEqual(30);
+		expect(new Set(refundable.map((event) => event.refundPolicy.daysBefore)).size).toBeGreaterThanOrEqual(3);
+		for (const event of nonRefundable) expect(event.refundPolicy.daysBefore).toBe(0);
+		for (const event of refundable) expect(event.refundPolicy.daysBefore).toBeGreaterThanOrEqual(1);
+		expect(nonRefundable.some((event) => event.status === EventStatus.ENDED)).toBe(true);
+		expect(nonRefundable.some((event) => event.status === EventStatus.APPROVED)).toBe(true);
+		expect(events.filter((event) => event.category === EventCategory.COMEDY).every((event) => event.refundPolicy.policyType === RefundPolicyType.NON_REFUNDABLE)).toBe(true);
+	});
+
+	it('uses the cities of the new venues', () => {
+		expect(new Set(events.map((event) => DEMO_VENUES.find((venue) => venue.key === event.venue).city)).size).toBeGreaterThanOrEqual(9);
+	});
+});
+
+describe('demo organizer logos (DECISIONS #131)', () => {
+	const logoDir = join(__dirname, '../../../../', DEMO_LOGO_DIR);
+
+	it('has a committed SVG for every organizer, byte for byte what the generator produces', () => {
+		for (const account of DEMO_ORGANIZERS) {
+			const file = join(logoDir, `${account.key}.svg`);
+			expect(existsSync(file)).toBe(true);
+			expect(readFileSync(file, 'utf8')).toBe(buildLogoSvg(DEMO_LOGOS[account.key]));
+			expect(demoLogoPath(account.key)).toBe(`demo-images/logos/${account.key}.svg`);
+		}
+		expect(readdirSync(logoDir).filter((name) => name.endsWith('.svg'))).toHaveLength(DEMO_ORGANIZERS.length);
+	});
+
+	it('is plain markup: no script, no external address, small', () => {
+		for (const account of DEMO_ORGANIZERS) {
+			const svg = readFileSync(join(logoDir, `${account.key}.svg`), 'utf8');
+			expect(svg).not.toMatch(/<script|href=|https?:\/\/(?!www\.w3\.org)|onload|onclick/i);
+			expect(svg.length).toBeLessThan(1000);
+		}
 	});
 });

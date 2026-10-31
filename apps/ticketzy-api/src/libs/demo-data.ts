@@ -6,6 +6,8 @@
  */
 import { EventCategory, SectionKind, SectionSpacing, VenueType } from './enums/event.enum';
 import { VenueLayoutSection } from './venue-layout';
+import { FocalArea } from './focal-area';
+import { VenueTemplateKey, instantiateTemplate } from './venue-templates';
 
 export type DemoLocale = 'en' | 'ko' | 'ru' | 'uz';
 export const DEMO_LOCALES: DemoLocale[] = ['en', 'ko', 'ru', 'uz'];
@@ -238,12 +240,13 @@ export const DEMO_BUYERS: DemoBuyer[] = BUYER_ROWS.map(([fullName, slug, nick], 
 }));
 
 /**
- * VENUES: ten venues in nine Korean cities with real names (district and city only, coordinates are approximate) and fictional layouts;
- * the layouts sit on a 1000 x 700 canvas, the stage or pitch in the middle. The three stadiums are the home grounds of the football
+ * VENUES: twelve venues in ten Korean cities with real names (district and city only, coordinates are approximate). Eight are built from
+ * the four venue templates of libs/venue-templates.ts (the same data the layout editor gets from `getVenueTemplates`), four have a layout of
+ * their own. The layouts sit on a 1000 x 700 canvas. The three stadiums are the home grounds of the football
  * clubs in `DEMO_CLUBS`; `images` are two of the committed `venue-NN.jpg` photos.
  */
 
-export type VenueKey = 'hall' | 'stadium' | 'club' | 'playhouse' | 'arena' | 'expo' | 'openair' | 'fortress' | 'livehouse' | 'goyang';
+export type VenueKey = 'hall' | 'stadium' | 'club' | 'playhouse' | 'arena' | 'expo' | 'openair' | 'fortress' | 'livehouse' | 'goyang' | 'jejuarena' | 'suwon';
 
 export interface DemoVenue {
 	key: VenueKey;
@@ -253,7 +256,11 @@ export interface DemoVenue {
 	address: string;
 	coordinates: [number, number];
 	owner: OrganizerKey;
+	/** the template the layout was built from (libs/venue-templates.ts), if any; the other venues have a layout of their own */
+	template?: VenueTemplateKey;
 	sections: VenueLayoutSection[];
+	/** the stage or pitch: the one of the template, or the default stage for a layout of its own */
+	focalArea?: FocalArea;
 	images: string[];
 }
 
@@ -273,15 +280,11 @@ const section = (
 const { SEATED, STANDING } = SectionKind;
 const { COMPACT, NORMAL, WIDE } = SectionSpacing;
 
-/** a football ground: a standing pitch (concerts), premium west and lower and upper stands */
-const stadiumSections = (pitchCapacity: number): VenueLayoutSection[] => [
-	section('PITCH', 'Standing Pitch', STANDING, 1, 1, 500, 350, 0, COMPACT, { capacity: pitchCapacity }),
-	section('VIP_W', 'Premium West', SEATED, 4, 16, 130, 350, 270, WIDE, { tierKey: 'VIP' }),
-	section('LOWER_N', 'Lower North', SEATED, 8, 20, 500, 110, 0, NORMAL, { tierKey: 'GOLD' }),
-	section('LOWER_S', 'Lower South', SEATED, 8, 20, 500, 590, 180, NORMAL, { tierKey: 'GOLD' }),
-	section('UPPER_E', 'Upper East', SEATED, 10, 24, 880, 350, 90, COMPACT, { tierKey: 'STANDARD' }),
-	section('UPPER_W', 'Upper West', SEATED, 10, 24, 20, 350, 270, COMPACT, { tierKey: 'STANDARD' }),
-];
+/** a venue whose layout is a copy of a template: sections, levels and the stage or pitch come from the template */
+const fromTemplate = (key: VenueTemplateKey): Pick<DemoVenue, 'template' | 'sections' | 'focalArea'> => {
+	const layout = instantiateTemplate(key);
+	return { template: key, sections: layout.sections, focalArea: layout.focalArea };
+};
 
 export const DEMO_VENUES: DemoVenue[] = [
 	{
@@ -293,12 +296,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [127.0117, 37.4788],
 		owner: 'hanbit',
 		images: [demoImagePath('venue', 1), demoImagePath('venue', 2)],
-		sections: [
-			section('BOX', 'Side Boxes', SEATED, 3, 8, 90, 300, 270, WIDE, { tierKey: 'VIP' }),
-			section('ORCH_L', 'Orchestra Left', SEATED, 12, 10, 330, 300, 0, NORMAL, { tierKey: 'PREMIUM' }),
-			section('ORCH_R', 'Orchestra Right', SEATED, 12, 10, 670, 300, 0, NORMAL, { tierKey: 'PREMIUM' }),
-			section('BALCONY', 'Balcony', SEATED, 6, 24, 500, 560, 0, COMPACT, { tierKey: 'STANDARD' }),
-		],
+		...fromTemplate('CONCERT_HALL'),
 	},
 	{
 		key: 'stadium',
@@ -309,7 +307,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [126.8972, 37.5683],
 		owner: 'harbor',
 		images: [demoImagePath('venue', 5), demoImagePath('venue', 6)],
-		sections: stadiumSections(1200),
+		...fromTemplate('FOOTBALL_STADIUM'),
 	},
 	{
 		key: 'club',
@@ -320,10 +318,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [129.059, 35.1579],
 		owner: 'cellar',
 		images: [demoImagePath('venue', 3), demoImagePath('venue', 7)],
-		sections: [
-			section('FRONT', 'Front Tables', SEATED, 3, 8, 500, 250, 0, WIDE, { tierKey: 'FRONT' }),
-			section('BACK', 'Back Rows', SEATED, 4, 10, 500, 450, 0, NORMAL, { tierKey: 'STANDARD' }),
-		],
+		...fromTemplate('COMEDY_CLUB'),
 	},
 	{
 		key: 'playhouse',
@@ -348,13 +343,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [128.6126, 35.9072],
 		owner: 'camellia',
 		images: [demoImagePath('venue', 6), demoImagePath('venue', 5)],
-		sections: [
-			section('FLOOR', 'Standing Floor', STANDING, 1, 1, 500, 350, 0, COMPACT, { capacity: 900 }),
-			section('EAST', 'East Stand', SEATED, 8, 20, 860, 350, 90, NORMAL, { tierKey: 'GOLD' }),
-			section('WEST', 'West Stand', SEATED, 8, 20, 140, 350, 270, NORMAL, { tierKey: 'GOLD' }),
-			section('NORTH', 'North Stand', SEATED, 6, 16, 500, 90, 0, COMPACT, { tierKey: 'STANDARD' }),
-			section('SOUTH', 'South Stand', SEATED, 6, 16, 500, 610, 180, COMPACT, { tierKey: 'STANDARD' }),
-		],
+		...fromTemplate('ARENA'),
 	},
 	{
 		key: 'expo',
@@ -381,7 +370,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [126.8885, 35.134],
 		owner: 'harbor',
 		images: [demoImagePath('venue', 6), demoImagePath('venue', 5)],
-		sections: stadiumSections(2000),
+		...fromTemplate('FOOTBALL_STADIUM'),
 	},
 	{
 		key: 'fortress',
@@ -392,12 +381,7 @@ export const DEMO_VENUES: DemoVenue[] = [
 		coordinates: [126.6946, 37.4627],
 		owner: 'harbor',
 		images: [demoImagePath('venue', 5), demoImagePath('venue', 6)],
-		sections: [
-			section('BOX', 'Directors Box', SEATED, 3, 12, 500, 90, 0, WIDE, { tierKey: 'VIP' }),
-			section('EAST', 'East Stand', SEATED, 10, 30, 880, 350, 90, NORMAL, { tierKey: 'GOLD' }),
-			section('WEST', 'West Stand', SEATED, 10, 30, 120, 350, 270, NORMAL, { tierKey: 'GOLD' }),
-			section('SOUTH', 'South Terrace', SEATED, 8, 30, 500, 610, 180, COMPACT, { tierKey: 'STANDARD' }),
-		],
+		...fromTemplate('FOOTBALL_STADIUM'),
 	},
 	{
 		key: 'livehouse',
@@ -427,6 +411,28 @@ export const DEMO_VENUES: DemoVenue[] = [
 			section('BALCONY', 'Balcony', SEATED, 5, 14, 500, 560, 0, COMPACT, { tierKey: 'STANDARD' }),
 		],
 	},
+	{
+		key: 'jejuarena',
+		name: 'Jeju Halla Gymnasium',
+		type: VenueType.HALL,
+		city: 'Jeju',
+		address: 'Jeju-si, Jeju',
+		coordinates: [126.5312, 33.4996],
+		owner: 'jeju',
+		images: [demoImagePath('venue', 2), demoImagePath('venue', 7)],
+		...fromTemplate('ARENA'),
+	},
+	{
+		key: 'suwon',
+		name: 'Gyeonggi Arts Center Small Theater',
+		type: VenueType.THEATER,
+		city: 'Suwon',
+		address: 'Paldal-gu, Suwon',
+		coordinates: [127.0286, 37.2636],
+		owner: 'mirae',
+		images: [demoImagePath('venue', 4), demoImagePath('venue', 3)],
+		...fromTemplate('COMEDY_CLUB'),
+	},
 ];
 
 /** how a ticket type of a general admission event at a venue is sized: [general, premium] */
@@ -441,6 +447,8 @@ export const GA_QUANTITIES: Record<VenueKey, [number, number]> = {
 	fortress: [600, 60],
 	livehouse: [250, 40],
 	goyang: [120, 30],
+	jejuarena: [700, 100],
+	suwon: [60, 12],
 };
 
 /** the tier names a RESERVED event shows; the tier keys come from the venue layouts above */
@@ -590,6 +598,9 @@ export const DEMO_FIXTURE_BASES: DemoBase[] = [
 	fixtureBase('fx-gwangju-ulsan', 'gwangju', 'ulsan', 'league'),
 	fixtureBase('fx-seoul-pohang', 'seoul', 'pohang', 'league'),
 	fixtureBase('fx-incheon-jeonbuk', 'incheon', 'jeonbuk', 'league'),
+	fixtureBase('fx-seoul-ulsan', 'seoul', 'ulsan', 'league'),
+	fixtureBase('fx-gwangju-daejeon', 'gwangju', 'daejeon', 'league'),
+	fixtureBase('fx-incheon-pohang', 'incheon', 'pohang', 'league'),
 ];
 
 export const DEMO_BASES: DemoBase[] = [
@@ -713,6 +724,12 @@ export const DEMO_COMMENTS: Localized[] = [
 	t('I went last time and the sound was fantastic.', '지난번에도 갔는데 음향이 최고였어요.', 'В прошлый раз звук был великолепный.', "O'tgan safar tovush juda yaxshi edi."),
 	t('What time do the doors open?', '입장은 몇 시부터인가요?', 'Во сколько открываются двери?', 'Eshiklar soat nechada ochiladi?'),
 	t('Is the venue easy to reach by subway?', '지하철로 가기 편한 곳인가요?', 'Удобно ли добираться до зала на метро?', "Zalga metro bilan borish qulaymi?"),
+	t('Is there a student discount?', '학생 할인이 있나요?', 'Есть ли скидка для студентов?', 'Talabalar uchun chegirma bormi?'),
+	t('Bringing my parents, are the seats comfortable?', '부모님과 함께 가요. 좌석은 편한가요?', 'Иду с родителями, удобные ли там места?', "Ota-onam bilan boraman, o'rindiqlar qulaymi?"),
+	t('The first show was a blast, booking again.', '지난 공연이 정말 즐거웠어서 또 예매했어요.', 'Прошлое шоу было потрясающим, беру снова.', "Oldingi shou ajoyib edi, yana band qildim."),
+	t('Please add more dates!', '공연 일정을 더 추가해 주세요!', 'Добавьте, пожалуйста, больше дат!', "Iltimos, ko'proq sanalar qo'shing!"),
+	t('Will there be an English translation?', '영어 통역이 제공되나요?', 'Будет ли перевод на английский?', "Inglizcha tarjima bo'ladimi?"),
+	t('Does the ticket include a drink?', '티켓에 음료가 포함되어 있나요?', 'В билет входит напиток?', 'Chiptaga ichimlik kiradimi?'),
 ];
 export const DEMO_REPLIES: Localized = t(
 	'Thank you for asking! Seats in one row are sold side by side, and doors open one hour before the start.',

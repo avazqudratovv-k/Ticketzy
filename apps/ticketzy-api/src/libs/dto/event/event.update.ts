@@ -4,6 +4,7 @@ import { IsNotEmpty, IsOptional, Length, ValidateNested } from 'class-validator'
 import { ObjectId } from 'mongoose';
 import { EventCategory, SeatingType } from '../../enums/event.enum';
 import { EventTranslationInput } from './event.input';
+import { RefundPolicyInput } from './refund-policy';
 
 @InputType()
 export class EventUpdate {
@@ -34,6 +35,12 @@ export class EventUpdate {
 	@Type(() => EventTranslationInput)
 	@Field(() => [EventTranslationInput], { nullable: true })
 	eventTranslations?: EventTranslationInput[];
+
+	@IsOptional()
+	@ValidateNested()
+	@Type(() => RefundPolicyInput)
+	@Field(() => RefundPolicyInput, { nullable: true })
+	refundPolicy?: RefundPolicyInput;
 
 	@IsOptional()
 	@Field(() => [String], { nullable: true })

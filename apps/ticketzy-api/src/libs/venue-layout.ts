@@ -1,7 +1,13 @@
 import { Message } from './enums/common.enum';
 import { SectionKind, SectionSpacing } from './enums/event.enum';
+import { FocalArea, FocalAreaInput, getFocalAreaError } from './focal-area';
 
 export const MAX_SEAT_GRID = 100;
+
+/** where a section sits for the 3D "view from seat": 0 floor, 1 lower tier, 2 upper tier (DECISIONS #128) */
+export const SectionLevel = { FLOOR: 0, LOWER_TIER: 1, UPPER_TIER: 2 } as const;
+export const DEFAULT_SECTION_LEVEL = SectionLevel.FLOOR;
+export const isSectionLevel = (value: unknown): boolean => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 2;
 
 export interface VenueLayoutSection {
 	key: string;
@@ -15,10 +21,14 @@ export interface VenueLayoutSection {
 	rotation: number;
 	spacing: SectionSpacing;
 	tierKey?: string;
+	/** missing means 0 (floor) */
+	level?: number;
 }
 
 export interface VenueLayout {
 	sections: VenueLayoutSection[];
+	/** missing on layouts saved before focal areas; they read as the default stage */
+	focalArea?: FocalArea;
 }
 
 const isGridSize = (value: unknown): boolean =>
@@ -49,8 +59,10 @@ export const getVenueLayoutError = (layout: VenueLayout | null | undefined): Mes
 			return Message.VENUE_LAYOUT_CAPACITY_REQUIRED;
 		}
 		if (section.kind === SectionKind.SEATED && !section.tierKey?.trim()) return Message.VENUE_LAYOUT_TIER_KEY_REQUIRED;
+		if (section.level !== undefined && section.level !== null && !isSectionLevel(section.level)) return Message.VENUE_LAYOUT_BAD_LEVEL;
 	}
-	return null;
+	// the focal area from a client: a PITCH with other geometry than the fixed one is refused, a STAGE must lie inside the canvas
+	return getFocalAreaError(layout.focalArea as unknown as FocalAreaInput);
 };
 
 /** seats of a SEATED section, the capacity of a STANDING one */

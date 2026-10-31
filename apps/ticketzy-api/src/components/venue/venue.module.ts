@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { VenueResolver } from './venue.resolver';
+import { VenueLayoutResolver, VenueResolver, VenueSectionResolver } from './venue.resolver';
 import { VenueService } from './venue.service';
 import VenueSchema from '../../libs/schemas/Venue.model';
 import EventSchema from '../../libs/schemas/Event.model';
@@ -16,7 +16,7 @@ import { AuthModule } from '../auth/auth.module';
 		]),
 		AuthModule,
 	],
-	providers: [VenueResolver, VenueService],
+	providers: [VenueResolver, VenueLayoutResolver, VenueSectionResolver, VenueService],
 	exports: [VenueService],
 })
 export class VenueModule {}

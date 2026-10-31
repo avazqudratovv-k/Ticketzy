@@ -1,5 +1,6 @@
 import { Field, Int, ObjectType } from '@nestjs/graphql';
 import { ObjectId } from 'mongoose';
+import { RefundPolicy } from '../event/refund-policy';
 import { RefundSource, RefundStatus } from '../../enums/ticket.enum';
 
 @ObjectType()
@@ -58,7 +59,7 @@ export class RefundQuote {
 	@Field(() => Boolean)
 	refundable: boolean;
 
-	@Field(() => Date, { description: 'the end of 23:59 on the day before the event, in the venue timezone' })
+	@Field(() => Date, { description: 'the end of 23:59 on the last refundable day (by default the day before the event), in the venue timezone' })
 	deadline: Date;
 
 	@Field(() => String)
@@ -72,6 +73,9 @@ export class RefundQuote {
 
 	@Field(() => String, { nullable: true, description: 'why it is not refundable' })
 	reason?: string;
+
+	@Field(() => RefundPolicy, { description: 'the policy that applies to this order' })
+	refundPolicy?: RefundPolicy;
 }
 
 /** what refunding the orders of a cancelled event came to; running it again finishes the rest */

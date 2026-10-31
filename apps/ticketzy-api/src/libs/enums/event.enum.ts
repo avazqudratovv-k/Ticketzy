@@ -120,3 +120,21 @@ export enum SeatStatus {
 registerEnumType(SeatStatus, {
 	name: 'SeatStatus',
 });
+
+/** the one focal area of a venue layout: where the audience looks (DECISIONS #127) */
+export enum FocalAreaType {
+	STAGE = 'STAGE',
+	PITCH = 'PITCH',
+}
+registerEnumType(FocalAreaType, {
+	name: 'FocalAreaType',
+});
+
+/** per event: refundable until `daysBefore` days before the event, or never (DECISIONS #129) */
+export enum RefundPolicyType {
+	REFUNDABLE = 'REFUNDABLE',
+	NON_REFUNDABLE = 'NON_REFUNDABLE',
+}
+registerEnumType(RefundPolicyType, {
+	name: 'RefundPolicyType',
+});

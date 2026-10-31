@@ -52,7 +52,11 @@ import {
 } from './libs/demo-plan';
 import { getPayoutDate } from './libs/payout';
 import { withScenario } from './libs/demo-errors';
-import { getRefundRoute } from './libs/demo-refunds';
+import { getRefundRoute, getRefundRouteReason } from './libs/demo-refunds';
+import { demoLogoPath } from './libs/demo-logos';
+import { getTrackedIds } from './libs/demo-manifest';
+import { DEMO_EMAIL_PATTERN } from './libs/demo-guards';
+import { RefundPolicyType } from './libs/enums/event.enum';
 import { AuditAction } from './libs/enums/audit-log.enum';
 import { CommentGroup } from './libs/enums/comment.enum';
 import { EventStatus, SeatStatus, SeatingType } from './libs/enums/event.enum';
@@ -106,7 +110,20 @@ export class DemoSeeder {
 	/** when an organizer's commission last dropped to a lower tier: later orders must be sold after it */
 	private tierFloor = new Map<OrganizerKey, number>();
 	private moderationSkipped = 0;
-	private refundCounts = { buyer: 0, admin: 0, adminAfterDeadline: 0 };
+	private refundCounts = { buyer: 0, admin: 0, adminAfterDeadline: 0, adminByPolicy: 0 };
+	/**
+	 * DEMO_SEED_KEEP_LINKED (#132): demo members, venues and events that other accounts' records point at were not reset. They are
+	 * reused as they are: never created again, never changed, and the plan events that match a kept event are skipped.
+	 */
+	private keepMode = false;
+	private keptMembers = new Map<string, any>();
+	private keptVenues = new Map<string, any>();
+	private keptEvents: any[] = [];
+	private newOrganizers = new Set<OrganizerKey>();
+	private skippedEvents = new Set<string>();
+	/** events not created in keep mode because a kept venue has another layout, or a kept event already holds the slot */
+	private skippedByLayout = 0;
+	private skippedBySlot = 0;
 
 	private readonly eventService: EventService;
 	private readonly ticketTypeService: TicketTypeService;
@@ -163,29 +180,59 @@ export class DemoSeeder {
 		};
 	}
 
-	public async run(passwords: Record<DemoPasswordKey, string>): Promise<void> {
+	public async run(passwords: Record<DemoPasswordKey, string>, options: { keepLinked?: boolean } = {}): Promise<void> {
 		this.admin = await this.models.member.findOne({ memberType: MemberType.ADMIN, memberStatus: MemberStatus.ACTIVE }).sort({ createdAt: 1 }).lean().exec();
 		if (!this.admin) throw new Error('No admin exists yet. Run `npm run seed` first (it needs ADMIN_EMAIL and ADMIN_PASSWORD).');
 
-		await withScenario('accounts', () => this.createAccounts(passwords));
-		await withScenario('venues', () => this.createVenues());
+		this.keepMode = !!options.keepLinked;
+		if (this.keepMode) await this.timed('load kept records', () => this.loadKept());
+		await this.timed('accounts', () => withScenario('accounts', () => this.createAccounts(passwords)));
+		await this.timed('venues', () => withScenario('venues', () => this.createVenues()));
 		const plan = buildDemoPlan(this.now);
 		let done = 0;
 		for (const event of plan.events) {
+			const started = Date.now();
 			await withScenario(`event ${done + 1}/${plan.events.length} ${event.key} (${event.status})`, () => this.processEvent(event));
+			this.phaseMs.set('events (create, sell, refund, social)', (this.phaseMs.get('events (create, sell, refund, social)') ?? 0) + Date.now() - started);
 			done++;
 			if (done % 8 === 0 || done === plan.events.length) this.log(`  events ${done}/${plan.events.length}`);
 		}
-		const { buyer, admin, adminAfterDeadline } = this.refundCounts;
-		this.log(`  refunds: ${buyer} by buyers, ${admin} by an admin (${adminAfterDeadline} of them because the refund deadline had passed)`);
+		const { buyer, admin, adminAfterDeadline, adminByPolicy } = this.refundCounts;
+		this.log(`  refunds: ${buyer} by buyers, ${admin} by an admin (${adminAfterDeadline} because the refund deadline had passed, ${adminByPolicy} because the event is non-refundable)`);
+		if (this.skippedEvents.size) this.log(`  kept as they were: ${this.skippedEvents.size} event(s) that other accounts' records point at`);
+		if (this.skippedByLayout || this.skippedBySlot) this.log(`  not created because of kept records: ${this.skippedByLayout} (the kept venue has another layout), ${this.skippedBySlot} (a kept event holds the slot)`);
 		this.log(`  AI moderation skipped for ${this.moderationSkipped} submitted event(s) (the seed has no AI)`);
-		await withScenario('payouts', () => this.payouts(plan.events));
-		await withScenario('organizer likes', () => this.likeOrganizers());
-		await withScenario('chats', () => this.chats(plan.events));
-		await withScenario('extra notifications', () => this.extraNotifications(plan.events));
-		await withScenario('dating the admin trail', () => this.dateTheAdminTrail(plan.events));
-		await withScenario('ranks', () => this.writeRanks());
-		await withScenario('old notifications', () => this.markOldNotificationsRead());
+		await this.timed('payouts', () => withScenario('payouts', () => this.payouts(plan.events)));
+		await this.timed('organizer likes', () => withScenario('organizer likes', () => this.likeOrganizers()));
+		if (this.keptMembers.size) this.log('  chats skipped: kept organizers keep their conversations');
+		else await this.timed('chats', () => withScenario('chats', () => this.chats(plan.events)));
+		await this.timed('extra notifications', () => withScenario('extra notifications', () => this.extraNotifications(plan.events)));
+		await this.timed('dating the admin trail', () => withScenario('dating the admin trail', () => this.dateTheAdminTrail(plan.events)));
+		if (this.keepMode) await this.timed('end expired kept events', () => withScenario('end expired kept events', () => this.endExpiredKeptEvents()));
+		await this.timed('ranks', () => withScenario('ranks', () => this.writeRanks()));
+		await this.timed('old notifications', () => withScenario('old notifications', () => this.markOldNotificationsRead()));
+		this.logTimes();
+	}
+
+	/** PHASE TIMES: simple wall-clock times per phase, printed at the end of the run */
+
+	private readonly phaseMs = new Map<string, number>();
+
+	private async timed(label: string, work: () => Promise<unknown>): Promise<void> {
+		const started = Date.now();
+		try {
+			await work();
+		} finally {
+			this.phaseMs.set(label, (this.phaseMs.get(label) ?? 0) + Date.now() - started);
+		}
+	}
+
+	private logTimes(): void {
+		const format = (ms: number): string => (ms >= 60000 ? `${Math.floor(ms / 60000)}m ${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s` : `${(ms / 1000).toFixed(1)}s`);
+		const total = [...this.phaseMs.values()].reduce((sum, ms) => sum + ms, 0);
+		this.log('\nTime per phase:');
+		for (const [label, ms] of this.phaseMs) this.log(`  ${label.padEnd(40)} ${format(ms)}`);
+		this.log(`  ${'total (phases)'.padEnd(40)} ${format(total)}`);
 	}
 
 	/** MANIFEST: a root document is written here before it is created, so a run that dies half way is still cleaned up by reset */
@@ -195,7 +242,7 @@ export class DemoSeeder {
 	}
 
 	private async setTimes(model: Model<any>, filter: any, createdAt: Date, extra: Record<string, Date> = {}): Promise<void> {
-		await model.updateMany(filter, { $set: { createdAt, updatedAt: createdAt, ...extra } }, { timestamps: false } as any).exec();
+		await model.updateMany(filter, { $set: { createdAt, updatedAt: createdAt, ...extra } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 	}
 
 	/** gives every matching document a random creation time between `from` and `to` (one update, the database picks the numbers) */
@@ -203,11 +250,29 @@ export class DemoSeeder {
 		const fromMs = from.getTime();
 		const span = Math.max(1, to.getTime() - fromMs);
 		const when = { $toDate: { $add: [fromMs, { $multiply: [{ $rand: {} }, span] }] } };
-		await model.updateMany(filter, [{ $set: { createdAt: when } }, { $set: { updatedAt: '$createdAt' } }] as any, { timestamps: false } as any).exec();
+		await model.updateMany(filter, [{ $set: { createdAt: when } }, { $set: { updatedAt: '$createdAt' } }] as any, { timestamps: false, overwriteImmutable: true } as any).exec();
 	}
 
 	private async inChunks<T>(items: T[], size: number, work: (item: T) => Promise<unknown>): Promise<void> {
 		for (let start = 0; start < items.length; start += size) await Promise.all(items.slice(start, start + size).map(work));
+	}
+
+	/** KEPT RECORDS (#132): demo roots that the reset left in place because other accounts use them */
+
+	private async loadKept(): Promise<void> {
+		const [memberIds, venueIds, eventIds] = await Promise.all([
+			getTrackedIds(this.models as any, 'Member'),
+			getTrackedIds(this.models as any, 'Venue'),
+			getTrackedIds(this.models as any, 'Event'),
+		]);
+		const members: any[] = await this.models.member.find({ _id: { $in: memberIds }, memberEmail: DEMO_EMAIL_PATTERN, memberType: { $ne: MemberType.ADMIN } }).lean().exec();
+		const venues: any[] = await this.models.venue.find({ _id: { $in: venueIds } }).lean().exec();
+		this.keptMembers = new Map(members.map((member) => [member.memberEmail, member]));
+		this.keptVenues = new Map(venues.map((venue) => [`${venue.venueCity}|${venue.venueName}`, venue]));
+		this.keptEvents = await this.models.event.find({ $or: [{ _id: { $in: eventIds } }, { organizerId: { $in: members.map((member) => member._id) } }] }).lean().exec();
+		if (this.keptMembers.size || this.keptVenues.size || this.keptEvents.length) {
+			this.log(`  kept: ${this.keptMembers.size} account(s), ${this.keptVenues.size} venue(s), ${this.keptEvents.length} event(s) from an earlier run`);
+		}
 	}
 
 	/** ACCOUNTS */
@@ -223,6 +288,12 @@ export class DemoSeeder {
 		const joined = new Date(this.now.getTime() - 400 * DAY);
 
 		for (const account of DEMO_ORGANIZERS) {
+			const keptAccount = this.keptMembers.get(account.email);
+			if (keptAccount) {
+				this.organizers[account.key] = keptAccount;
+				continue;
+			}
+			this.newOrganizers.add(account.key);
 			const _id = new Types.ObjectId();
 			await this.track('Member', [_id]);
 			await this.models.member.create({
@@ -237,42 +308,52 @@ export class DemoSeeder {
 				memberAddress: account.address,
 				memberPhone: account.phone,
 				memberDesc: account.desc,
+				memberImage: demoLogoPath(account.key), // a committed SVG monogram (#131)
 			});
 			if (account.outcome === 'verify') {
 				await this.organizerService.verifyOrganizerByAdmin(this.admin._id, _id as any);
 				// the seeded organizers were approved long ago: no celebration screen waits for them (#120)
-				await this.models.member.updateOne({ _id }, { $set: { approvalCelebrationPending: false } }, { timestamps: false } as any).exec();
+				await this.models.member.updateOne({ _id }, { $set: { approvalCelebrationPending: false } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 			}
 			if (account.outcome === 'reject') await this.organizerService.rejectOrganizerByAdmin(this.admin._id, { memberId: _id, reason: account.rejectReason } as any);
 			this.organizers[account.key] = await this.models.member.findById(_id).lean().exec();
 		}
 
-		const ids = DEMO_BUYERS.map(() => new Types.ObjectId());
-		await this.track('Member', ids);
-		await this.models.member.insertMany(
-			DEMO_BUYERS.map((buyer, index) => ({
-				_id: ids[index],
-				memberEmail: buyer.email,
-				memberPassword: hashes.buyer,
-				memberType: MemberType.USER,
-				memberStatus: MemberStatus.ACTIVE,
-				memberAuthType: MemberAuthType.EMAIL,
-				memberNick: buyer.nick,
-				memberFullName: buyer.fullName,
-				memberPhone: buyer.phone,
-				memberAddress: buyer.address,
-			})),
-		);
-		this.buyers = await this.models.member.find({ _id: { $in: ids } }).lean().exec();
-		this.buyers.sort((a, b) => ids.findIndex((id) => id.equals(a._id)) - ids.findIndex((id) => id.equals(b._id)));
+		const missing = DEMO_BUYERS.filter((buyer) => !this.keptMembers.has(buyer.email));
+		const ids = missing.map(() => new Types.ObjectId());
+		if (ids.length) {
+			await this.track('Member', ids);
+			await this.models.member.insertMany(
+				missing.map((buyer, index) => ({
+					_id: ids[index],
+					memberEmail: buyer.email,
+					memberPassword: hashes.buyer,
+					memberType: MemberType.USER,
+					memberStatus: MemberStatus.ACTIVE,
+					memberAuthType: MemberAuthType.EMAIL,
+					memberNick: buyer.nick,
+					memberFullName: buyer.fullName,
+					memberPhone: buyer.phone,
+					memberAddress: buyer.address,
+				})),
+			);
+		}
+		// all buyers in the order of the data, the new ones and the ones kept from an earlier run
+		const everyBuyer: any[] = await this.models.member.find({ memberEmail: { $in: DEMO_BUYERS.map((buyer) => buyer.email) } }).lean().exec();
+		this.buyers = DEMO_BUYERS.map((buyer) => everyBuyer.find((member) => member.memberEmail === buyer.email));
 
-		const all = [...ids, ...Object.values(this.organizers).map((member: any) => member._id)];
+		const all = [...ids, ...[...this.newOrganizers].map((key) => this.organizers[key]._id)];
 		await this.setTimes(this.models.member, { _id: { $in: all } }, joined);
 		this.log(`  accounts: ${DEMO_ORGANIZERS.length} organizers, ${DEMO_BUYERS.length} buyers`);
 	}
 
 	private async createVenues(): Promise<void> {
 		for (const venue of DEMO_VENUES) {
+			const keptVenue = this.keptVenues.get(`${venue.city}|${venue.name}`);
+			if (keptVenue) {
+				this.venues[venue.key] = keptVenue;
+				continue;
+			}
 			const _id = new Types.ObjectId();
 			await this.track('Venue', [_id]);
 			this.venues[venue.key] = await this.venueService.createVenue({
@@ -283,7 +364,8 @@ export class DemoSeeder {
 				venueAddress: venue.address,
 				venueCoordinates: venue.coordinates,
 				venueTimezone: 'Asia/Seoul',
-				venueLayout: { sections: venue.sections },
+				// templates bring their own stage or pitch and levels; a PITCH is stored with the server's fixed geometry (#127, #128)
+				venueLayout: { sections: venue.sections, ...(venue.focalArea ? { focalArea: venue.focalArea } : {}) },
 				venueImages: venue.images,
 				memberId: this.organizers[venue.owner]._id,
 			} as any);
@@ -297,10 +379,20 @@ export class DemoSeeder {
 	private async processEvent(plan: PlanEvent): Promise<void> {
 		const organizer = this.organizers[plan.organizer];
 		const shift = plan.shiftDays * DAY;
+		// an event kept from an earlier run (other accounts' records point at it) is not created again and not touched
+		if (this.keptEvents.some((kept) => String(kept.organizerId) === String(organizer._id) && String(kept.venueId) === String(this.venues[plan.venue]._id) && kept.eventTitle === plan.title)) {
+			this.skippedEvents.add(plan.key);
+			return;
+		}
+		if (this.keepMode && this.layoutDiffers(plan)) {
+			this.skippedByLayout++;
+			this.skippedEvents.add(plan.key);
+			return;
+		}
 		const eventId = new Types.ObjectId();
 		await this.track('Event', [eventId]);
 
-		const event: any = await withScenario('create event', () => this.eventService.createEvent({
+		const event: any = await withScenario('create event', () => this.createOrSkip({
 			_id: eventId,
 			eventCategory: plan.category,
 			seatingType: plan.seating,
@@ -312,8 +404,14 @@ export class DemoSeeder {
 			startAt: new Date(plan.startAt.getTime() + shift),
 			endAt: new Date(plan.endAt.getTime() + shift),
 			saleStartAt: plan.saleStartAt,
+			refundPolicy: plan.refundPolicy,
 			organizerId: organizer._id,
-		} as any));
+		}));
+		if (!event) {
+			this.skippedBySlot++;
+			this.skippedEvents.add(plan.key);
+			return;
+		}
 
 		this.created.set(plan.key, event);
 		const ticketTypes: any[] = [];
@@ -346,6 +444,25 @@ export class DemoSeeder {
 		await withScenario('views, likes and comments', () => this.social(built));
 		if (plan.status === EventStatus.CANCELLED) await withScenario('cancel and refund all', () => this.cancel(built, placed));
 		if (plan.status === EventStatus.ENDED) await withScenario('check-in and end', () => this.finish(built, placed));
+	}
+
+	/** keep mode: a kept venue keeps the layout it had, so an event whose ticket tiers do not match it cannot be created */
+	private layoutDiffers(plan: PlanEvent): boolean {
+		const venue = this.venues[plan.venue];
+		if (plan.seating !== SeatingType.RESERVED || ![...this.keptVenues.values()].some((kept) => String(kept._id) === String(venue._id))) return false;
+		const tiers = (list: (string | undefined)[]) => [...new Set(list.filter(Boolean))].sort().join(',');
+		const venueTiers = tiers((venue.venueLayout?.sections ?? []).filter((section: any) => section.kind === 'SEATED').map((section: any) => section.tierKey));
+		return venueTiers !== tiers(plan.ticketTypes.map((type) => type.tierKey));
+	}
+
+	/** keep mode: when a kept event already holds the venue slot the event is skipped (null) instead of stopping the whole seed */
+	private async createOrSkip(input: any): Promise<any> {
+		try {
+			return await this.eventService.createEvent(input);
+		} catch (err) {
+			if (this.keepMode && /already booked/i.test(String(err?.message))) return null;
+			throw err;
+		}
 	}
 
 	/** SALES */
@@ -420,7 +537,9 @@ export class DemoSeeder {
 	/** hold, checkout and pay (or cancel or fail) exactly as the API's three calls do */
 	private async placeOrder(buyer: any, event: any, spec: { seatIds?: string[]; items?: any[]; forced?: string }, plan: PlanEvent): Promise<Placed> {
 		if (spec.seatIds) await this.seatService.holdSeats(buyer._id, event._id, spec.seatIds as any);
-		const order: any = await this.orderService.createCheckout(buyer._id, { eventId: event._id, seatIds: spec.seatIds, items: spec.items } as any);
+		// a non-refundable event needs the buyer's explicit confirmation, exactly as in the app (#129)
+		const acknowledge = plan.refundPolicy.policyType === RefundPolicyType.NON_REFUNDABLE ? { acknowledgeNonRefundable: true } : {};
+		const order: any = await this.orderService.createCheckout(buyer._id, { eventId: event._id, seatIds: spec.seatIds, items: spec.items, ...acknowledge } as any);
 		const base = { orderId: order._id, buyerId: buyer._id, toRefund: false, protectedOrder: false, checkIn: false };
 		if (spec.forced === 'cancelled') {
 			await this.orderService.cancelPendingOrder(buyer._id, order._id);
@@ -440,13 +559,13 @@ export class DemoSeeder {
 	private async dateOrders(placed: Placed[], rng: Rng): Promise<void> {
 		if (!placed.length) return;
 		const dated = placed.map((item) => ({ item, paidAt: item.at, createdAt: new Date(item.at.getTime() - randomInt(rng, 1, 9) * MINUTE) }));
-		const opts = { timestamps: false } as any;
+		const opts = { timestamps: false, overwriteImmutable: true } as any;
 		const byTime = (field: string) =>
-			dated.map(({ item, paidAt }) => ({ updateMany: { filter: { [field]: item.orderId }, update: { $set: { createdAt: paidAt, updatedAt: paidAt } } } }));
+			dated.map(({ item, paidAt }) => ({ updateMany: { filter: { [field]: item.orderId }, update: { $set: { createdAt: paidAt, updatedAt: paidAt } }, overwriteImmutable: true } }));
 		await Promise.all([
 			this.models.order.bulkWrite(
 				dated.map(({ item, paidAt, createdAt }) => ({
-					updateOne: { filter: { _id: item.orderId }, update: { $set: { createdAt, updatedAt: paidAt, ...(item.outcome === 'paid' ? { paidAt } : {}) } } },
+					updateOne: { filter: { _id: item.orderId }, update: { $set: { createdAt, updatedAt: paidAt, ...(item.outcome === 'paid' ? { paidAt } : {}) } }, overwriteImmutable: true },
 				})),
 				opts,
 			),
@@ -475,10 +594,12 @@ export class DemoSeeder {
 		const when = (item: Placed) => new Date(Math.min(limit, item.at.getTime() + randomInt(rng, 2, 120) * HOUR));
 		// A buyer is bound to the real refund deadline. An event that starts tomorrow (Seoul) is past it from midnight, so a
 		// refund the plan gives to the buyer is then done by an admin, which the policy allows after the deadline (#109).
-		const route = getRefundRoute(built.event.startAt, VENUE_TIMEZONE, new Date());
+		const policy = plan.refundPolicy;
+		const route = getRefundRoute(built.event.startAt, VENUE_TIMEZONE, new Date(), policy);
+		const routeReason = getRefundRouteReason(built.event.startAt, VENUE_TIMEZONE, new Date(), policy);
 		const asBuyer = [...byBuyer, ...chosen];
 		const jobs: { item: Placed; byAdmin: boolean; label: string }[] = [
-			...asBuyer.map((item) => ({ item, byAdmin: route === 'admin', label: route === 'admin' ? 'admin, buyer deadline passed' : 'buyer' })),
+			...asBuyer.map((item) => ({ item, byAdmin: route === 'admin', label: route === 'admin' ? (routeReason === 'policy' ? 'admin, non-refundable' : 'admin, buyer deadline passed') : 'buyer' })),
 			...byAdmin.map((item) => ({ item, byAdmin: true, label: 'admin' })),
 		];
 		for (const [index, job] of jobs.entries()) {
@@ -498,8 +619,8 @@ export class DemoSeeder {
 
 	private async dateRefund(orderId: any, when: Date): Promise<void> {
 		await Promise.all([
-			this.models.refund.updateOne({ orderId }, { $set: { requestedAt: when, completedAt: new Date(when.getTime() + MINUTE), createdAt: when, updatedAt: when } }, { timestamps: false } as any).exec(),
-			this.models.order.updateOne({ _id: orderId }, { $set: { refundedAt: when } }, { timestamps: false } as any).exec(),
+			this.models.refund.updateOne({ orderId }, { $set: { requestedAt: when, completedAt: new Date(when.getTime() + MINUTE), createdAt: when, updatedAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec(),
+			this.models.order.updateOne({ _id: orderId }, { $set: { refundedAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec(),
 			this.setTimes(this.models.notification, { orderId, notificationType: { $in: [NotificationType.REFUND_COMPLETED, NotificationType.ORDER_REFUNDED] } }, when),
 			this.setTimes(this.models.auditLog, { targetId: orderId }, when),
 		]);
@@ -511,7 +632,7 @@ export class DemoSeeder {
 		const { plan, event } = built;
 		const organizer = this.organizers[plan.organizer];
 		const rng = createRng(hashString(`social-${plan.key}`));
-		const viewers = shuffled(rng, this.buyers).slice(0, Math.min(this.buyers.length, 3 + Math.round(plan.popularity * 40)));
+		const viewers = shuffled(rng, this.buyers).slice(0, Math.min(this.buyers.length, 5 + Math.round(plan.popularity * 44)));
 		const from = plan.approvedAt;
 		const to = new Date(Math.min(this.now.getTime() - HOUR, plan.shiftDays ? plan.startAt.getTime() - HOUR : this.now.getTime()));
 
@@ -520,12 +641,12 @@ export class DemoSeeder {
 			const created = await this.viewService.recordView({ memberId: viewer._id, viewRefId: event._id, viewGroup: ViewGroup.EVENT } as any);
 			if (created) newViews++;
 		});
-		await this.models.event.updateOne({ _id: event._id }, { $inc: { eventViews: newViews } }, { timestamps: false } as any).exec();
+		await this.models.event.updateOne({ _id: event._id }, { $inc: { eventViews: newViews } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 
-		const likers = viewers.slice(0, Math.round(viewers.length * 0.35 * (0.5 + plan.popularity)));
+		const likers = viewers.slice(0, Math.round(viewers.length * 0.5 * (0.5 + plan.popularity)));
 		await this.inChunks(likers, 10, (liker) => this.eventService.likeTargetEvent(liker._id, event._id));
 
-		const commenters = viewers.slice(0, Math.max(1, Math.round(plan.popularity * 3)));
+		const commenters = viewers.slice(0, Math.max(2, Math.round(plan.popularity * 8)));
 		// the texts and the dice are drawn first, in order, so the data does not depend on which request finishes first
 		const talk = commenters.map((commenter) => {
 			const locale = this.localeOf(commenter);
@@ -559,8 +680,8 @@ export class DemoSeeder {
 		await this.eventService.cancelEventByAdmin(this.admin._id, { eventId: event._id, reason: plan.reason } as any);
 		const when = new Date(plan.decidedAt.getTime() + 3 * MINUTE);
 		await Promise.all([
-			this.models.refund.updateMany({ eventId: event._id }, { $set: { requestedAt: when, completedAt: new Date(when.getTime() + MINUTE), createdAt: when, updatedAt: when } }, { timestamps: false } as any).exec(),
-			this.models.order.updateMany({ _id: { $in: orderIds }, orderStatus: OrderStatus.REFUNDED }, { $set: { refundedAt: when } }, { timestamps: false } as any).exec(),
+			this.models.refund.updateMany({ eventId: event._id }, { $set: { requestedAt: when, completedAt: new Date(when.getTime() + MINUTE), createdAt: when, updatedAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec(),
+			this.models.order.updateMany({ _id: { $in: orderIds }, orderStatus: OrderStatus.REFUNDED }, { $set: { refundedAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec(),
 			this.setTimes(this.models.notification, { orderId: { $in: orderIds }, notificationType: { $in: [NotificationType.REFUND_COMPLETED, NotificationType.ORDER_REFUNDED] } }, when),
 		]);
 		const left = await this.models.order.countDocuments({ eventId: event._id, orderStatus: OrderStatus.PAID }).exec();
@@ -580,11 +701,11 @@ export class DemoSeeder {
 		await this.inChunks(scanned, 10, async (ticket) => {
 			await this.ticketService.checkInTicket(organizer._id, MemberType.ORGANIZER, ticket.qrToken, event._id);
 			const when = new Date(start - 40 * MINUTE + Math.floor(rng() * 70 * MINUTE));
-			await this.models.ticket.updateOne({ _id: ticket._id }, { $set: { checkedInAt: when, updatedAt: when } }, { timestamps: false } as any).exec();
+			await this.models.ticket.updateOne({ _id: ticket._id }, { $set: { checkedInAt: when, updatedAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 		});
 
 		// the event was created ahead of its date; now its real, past dates are written and the real job ends it
-		await this.models.event.updateOne({ _id: event._id }, { $set: { startAt: plan.startAt, endAt: plan.endAt } }, { timestamps: false } as any).exec();
+		await this.models.event.updateOne({ _id: event._id }, { $set: { startAt: plan.startAt, endAt: plan.endAt } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 		const before: any = await this.models.member.findById(organizer._id).select('completedEvents commissionOverride').lean().exec();
 		await this.batch.batchEndEvents([event._id]);
 		const ended: any = await this.models.event.findById(event._id).select('eventStatus').lean().exec();
@@ -599,6 +720,7 @@ export class DemoSeeder {
 		let paid = 0;
 		for (const plan of events.filter((item) => item.payout === 'paid')) {
 			const built = this.built.get(plan.key);
+			if (!built) continue; // kept from an earlier run
 			await this.payoutService.markPayoutPaidByAdmin(this.admin._id, { eventId: built.event._id, note: 'Bank transfer' } as any);
 			const rng = createRng(hashString(`payout-${plan.key}`));
 			const when = new Date(Math.min(this.now.getTime() - HOUR, getPayoutDate(plan.endAt, 'Asia/Seoul').getTime() + randomInt(rng, 1, 40) * HOUR));
@@ -623,13 +745,15 @@ export class DemoSeeder {
 			.filter((plan) => plan.status === EventStatus.ENDED && getPayoutDate(plan.endAt, VENUE_TIMEZONE).getTime() <= this.now.getTime())
 			.map((plan) => this.built.get(plan.key)?.event._id)
 			.filter(Boolean);
-		await this.models.event.updateMany({ _id: { $in: ids }, payoutDueNotifiedAt: null }, { $set: { payoutDueNotifiedAt: this.now } }, { timestamps: false } as any).exec();
+		await this.models.event.updateMany({ _id: { $in: ids }, payoutDueNotifiedAt: null }, { $set: { payoutDueNotifiedAt: this.now } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 	}
 
 	/** ORGANIZER SOCIAL: profile views and likes of the active organizers */
 
 	private async likeOrganizers(): Promise<void> {
-		const active = DEMO_ORGANIZERS.filter((item) => item.outcome === 'verify').map((item) => this.organizers[item.key]);
+		// an organizer kept from an earlier run keeps its likes: liking is a toggle and would take them back
+		const active = DEMO_ORGANIZERS.filter((item) => item.outcome === 'verify' && this.newOrganizers.has(item.key)).map((item) => this.organizers[item.key]);
+		if (!active.length) return;
 		const rng = createRng(77);
 		// the dice are drawn first, in order; each buyer then acts alone (one buyer's calls stay in sequence)
 		const actions = this.buyers.map((buyer, index) => ({
@@ -661,10 +785,10 @@ export class DemoSeeder {
 		const talk = async (conversation: any, lines: [any, string, Date][], adminReads: boolean, organizerReads: boolean) => {
 			for (const [sender, body, when] of lines) {
 				const message: any = await this.conversationService.sendMessage(sender, conversation._id, body);
-				await this.models.message.updateOne({ _id: message._id }, { $set: { createdAt: when } }, { timestamps: false } as any).exec();
+				await this.models.message.updateOne({ _id: message._id }, { $set: { createdAt: when } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 			}
 			const last = lines[lines.length - 1][2];
-			await this.models.conversation.updateOne({ _id: conversation._id }, { $set: { createdAt: lines[0][2], updatedAt: last, lastMessageAt: last } }, { timestamps: false } as any).exec();
+			await this.models.conversation.updateOne({ _id: conversation._id }, { $set: { createdAt: lines[0][2], updatedAt: last, lastMessageAt: last } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 			await this.setTimes(this.models.notification, { conversationId: conversation._id }, last);
 			if (adminReads) await this.conversationService.markConversationRead(admin, conversation._id);
 			if (organizerReads) await this.conversationService.markConversationRead(this.organizers.hanbit, conversation._id);
@@ -733,13 +857,13 @@ export class DemoSeeder {
 			true,
 			false,
 		);
-		await this.models.conversation.updateOne({ _id: reply._id }, { $set: { unreadForOrganizer: 0 } }, { timestamps: false } as any).exec();
+		await this.models.conversation.updateOne({ _id: reply._id }, { $set: { unreadForOrganizer: 0 } }, { timestamps: false, overwriteImmutable: true } as any).exec();
 		await this.models.message.updateMany({ conversationId: reply._id, senderId: admin._id }, { $set: { readAt: new Date(day(19).getTime() + 5 * HOUR) } }).exec();
 		this.log('  chats: 5 conversations');
 	}
 
 	private async extraNotifications(events: PlanEvent[]): Promise<void> {
-		const next = events.filter((item) => item.status === EventStatus.APPROVED && item.buyerOrders.some((order) => order.outcome === 'paid')).slice(0, 3);
+		const next = events.filter((item) => this.built.has(item.key) && item.status === EventStatus.APPROVED && item.buyerOrders.some((order) => order.outcome === 'paid')).slice(0, 3);
 		for (const plan of next) {
 			const built = this.built.get(plan.key);
 			await this.notificationService.createNotification({
@@ -772,12 +896,12 @@ export class DemoSeeder {
 					this.setTimes(this.models.auditLog, { targetId: eventId, action }, when),
 					...(notification ? [this.setTimes(this.models.notification, { eventId, notificationType: notification }, when)] : []),
 				]),
-				this.models.event.updateOne({ _id: eventId }, { $set: { createdAt: plan.createdAt } }, { timestamps: false } as any).exec(),
+				this.models.event.updateOne({ _id: eventId }, { $set: { createdAt: plan.createdAt } }, { timestamps: false, overwriteImmutable: true } as any).exec(),
 				this.setTimes(this.models.ticketType, { eventId }, plan.createdAt),
 			]);
 		});
 		const joinedAt = new Date(this.now.getTime() - 399 * DAY);
-		await this.inChunks(DEMO_ORGANIZERS, 5, async (account) => {
+		await this.inChunks(DEMO_ORGANIZERS.filter((account) => this.newOrganizers.has(account.key)), 5, async (account) => {
 			const member = this.organizers[account.key];
 			await Promise.all([
 				this.setTimes(this.models.auditLog, { targetId: member._id }, joinedAt),
@@ -785,23 +909,31 @@ export class DemoSeeder {
 			]);
 		});
 		// admin trail of the rejection chat: the admin opened it nineteen days ago
-		await this.setTimes(this.models.auditLog, { action: AuditAction.SUPPORT_CONVERSATION_STARTED, actorId: this.admin._id, 'meta.organizerId': this.organizers.rejected._id }, new Date(this.now.getTime() - 19 * DAY));
+		if (this.newOrganizers.has('rejected')) {
+			await this.setTimes(this.models.auditLog, { action: AuditAction.SUPPORT_CONVERSATION_STARTED, actorId: this.admin._id, 'meta.organizerId': this.organizers.rejected._id }, new Date(this.now.getTime() - 19 * DAY));
+		}
+	}
+
+	/** keep mode: time has passed for the events kept from an earlier run; the real hourly job ends the ones that are over */
+	private async endExpiredKeptEvents(): Promise<void> {
+		const ids = this.keptEvents.filter((event) => event.eventStatus === EventStatus.APPROVED && new Date(event.endAt) <= this.now).map((event) => event._id);
+		if (ids.length) await this.batch.batchEndEvents(ids);
 	}
 
 	/** RANKS: the formulas of the rank job (rank.ts), applied to the demo documents only */
 
 	private async writeRanks(): Promise<void> {
-		const events: any[] = await this.models.event.find({ _id: { $in: [...this.built.values()].map((item) => item.event._id) }, eventStatus: EventStatus.APPROVED }).lean().exec();
-		if (events.length) await this.models.event.bulkWrite(events.map((event) => ({ updateOne: { filter: { _id: event._id }, update: { $set: { eventRank: getEventRank(event) } } } })), { timestamps: false } as any);
+		const events: any[] = await this.models.event.find({ _id: { $in: [...[...this.built.values()].map((item) => item.event._id), ...this.keptEvents.map((event) => event._id)] }, eventStatus: EventStatus.APPROVED }).lean().exec();
+		if (events.length) await this.models.event.bulkWrite(events.map((event) => ({ updateOne: { filter: { _id: event._id }, update: { $set: { eventRank: getEventRank(event) } } } })), { timestamps: false, overwriteImmutable: true } as any);
 		const organizers: any[] = await this.models.member.find({ _id: { $in: Object.values(this.organizers).map((member: any) => member._id) }, memberStatus: MemberStatus.ACTIVE }).lean().exec();
-		if (organizers.length) await this.models.member.bulkWrite(organizers.map((organizer) => ({ updateOne: { filter: { _id: organizer._id }, update: { $set: { memberRank: getOrganizerRank(organizer) } } } })), { timestamps: false } as any);
+		if (organizers.length) await this.models.member.bulkWrite(organizers.map((organizer) => ({ updateOne: { filter: { _id: organizer._id }, update: { $set: { memberRank: getOrganizerRank(organizer) } } } })), { timestamps: false, overwriteImmutable: true } as any);
 	}
 
 	/** older notifications were read long ago; the recent ones stay unread so the badge shows a number */
 	private async markOldNotificationsRead(): Promise<void> {
-		const members = [...this.buyers, ...Object.values(this.organizers)].map((member: any) => member._id);
+		const members = [...this.buyers.filter((buyer) => !this.keptMembers.has(buyer.memberEmail)), ...[...this.newOrganizers].map((key) => this.organizers[key])].map((member: any) => member._id);
 		await this.models.notification
-			.updateMany({ receiverId: { $in: members }, createdAt: { $lt: new Date(this.now.getTime() - 3 * DAY) } }, { $set: { notificationStatus: NotificationStatus.READ } }, { timestamps: false } as any)
+			.updateMany({ receiverId: { $in: members }, createdAt: { $lt: new Date(this.now.getTime() - 3 * DAY) } }, { $set: { notificationStatus: NotificationStatus.READ } }, { timestamps: false, overwriteImmutable: true } as any)
 			.exec();
 	}
 }

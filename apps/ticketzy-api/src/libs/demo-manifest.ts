@@ -12,7 +12,7 @@
  * Nothing is counted down on documents that stay.
  */
 import { MemberType } from './enums/member.enum';
-import { DEMO_EMAIL_PATTERN } from './demo-guards';
+import { findLinkedRecords, findOwned } from './demo-links';
 
 export type DemoRecordType = 'Member' | 'Venue' | 'Event';
 
@@ -88,46 +88,40 @@ export interface DemoScope {
 
 /**
  * Works out what a reset may remove. Owned = in the manifest (members also need the demo email domain). Then the
- * dependencies of other people are taken out: an owned event with an order from a member that is not owned stays.
+ * dependencies of other people are taken out (DECISIONS #108, #132): an owned event that an account outside the seed bought
+ * tickets for, commented on, liked, viewed or got a notification about stays with its organizer and venue; so does an
+ * organizer others liked, viewed or wrote to, and a venue another organizer's event uses. Nothing is deleted under a record
+ * that someone else still points at, whatever the flags of the scripts say.
  */
 export const findDemoScope = async (models: DemoModels): Promise<DemoScope> => {
-	const [trackedMembers, trackedVenues, trackedEvents] = await Promise.all([
-		getTrackedIds(models, 'Member'),
-		getTrackedIds(models, 'Venue'),
-		getTrackedIds(models, 'Event'),
-	]);
 	const empty: DemoScope = { memberIds: [], venueIds: [], eventIds: [], orderIds: [], kept: { members: 0, venues: 0, events: 0, orders: 0 } };
-	if (!trackedMembers.length && !trackedVenues.length && !trackedEvents.length) return empty;
+	const owned = await findOwned(models);
+	if (owned.empty) return empty;
+	const ownedMembers = owned.memberIds;
+	const ownedEvents = owned.eventIds;
+	const ownedVenues = owned.venueIds;
+	const orders = owned.orders as any[];
+	const links = await findLinkedRecords(models, owned);
 
-	const members = await models.member
-		.find({ _id: { $in: trackedMembers }, memberEmail: DEMO_EMAIL_PATTERN, memberType: { $ne: MemberType.ADMIN } })
-		.lean()
-		.exec();
-	const ownedMembers = idsOf(members);
+	const events = await models.event.find({ _id: { $in: ownedEvents } }).lean().exec();
+	const venues = await models.venue.find({ _id: { $in: ownedVenues } }).lean().exec();
 
-	// events and venues of the seeded accounts count as owned too, also when they were created later through the API
-	const [events, venues] = await Promise.all([
-		models.event.find({ $or: [{ _id: { $in: trackedEvents } }, { organizerId: { $in: ownedMembers } }] }).lean().exec(),
-		models.venue.find({ $or: [{ _id: { $in: trackedVenues } }, { memberId: { $in: ownedMembers } }] }).lean().exec(),
+	// an owned event somebody else bought tickets for, wrote about or liked stays, and so do its organizer, venue and the orders on it
+	const keptEvents = unique([
+		...orders.filter((order: any) => !ownedMembers.some((id) => String(id) === String(order.buyerId))).map((order: any) => order.eventId),
+		...links.eventIds,
 	]);
-	const ownedEvents = idsOf(events);
-	const ownedVenues = idsOf(venues);
-
-	const orders = await models.order.find({ $or: [{ eventId: { $in: ownedEvents } }, { buyerId: { $in: ownedMembers } }] }).lean().exec();
-
-	// an owned event somebody else bought tickets for stays, and so do its organizer, venue and the orders on it
-	const keptEvents = unique(orders.filter((order: any) => !ownedMembers.some((id) => String(id) === String(order.buyerId))).map((order: any) => order.eventId));
 	// a seeded buyer's order on an event that stays or is not owned keeps the buyer
 	const keptOrders = orders.filter(
 		(order: any) => keptEvents.some((id) => String(id) === String(order.eventId)) || !ownedEvents.some((id) => String(id) === String(order.eventId)),
 	);
 	const keptEventDocs = events.filter((event: any) => keptEvents.some((id) => String(id) === String(event._id)));
-	let keptMembers = unique([...keptEventDocs.map((event: any) => event.organizerId), ...keptOrders.map((order: any) => order.buyerId)]);
+	let keptMembers = unique([...keptEventDocs.map((event: any) => event.organizerId), ...keptOrders.map((order: any) => order.buyerId), ...links.memberIds]);
 	const removableEvents = without(ownedEvents, keptEvents);
 
-	// a venue that an event outside the removable set uses stays
+	// a venue that an event outside the removable set uses stays, and one that another organizer's event uses
 	const stillUsed: any[] = await models.event.find({ venueId: { $in: ownedVenues }, _id: { $nin: removableEvents } }).lean().exec();
-	const keptVenues = unique(stillUsed.map((event) => event.venueId));
+	const keptVenues = unique([...stillUsed.map((event) => event.venueId), ...links.venueIds]);
 	// the owner of a venue that stays stays too
 	keptMembers = unique([...keptMembers, ...venues.filter((venue: any) => keptVenues.some((id) => String(id) === String(venue._id))).map((venue: any) => venue.memberId)]);
 
@@ -139,7 +133,7 @@ export const findDemoScope = async (models: DemoModels): Promise<DemoScope> => {
 		kept: {
 			members: keptMembers.filter((id) => ownedMembers.some((owned) => String(owned) === String(id))).length,
 			venues: keptVenues.filter((id) => ownedVenues.some((owned) => String(owned) === String(id))).length,
-			events: keptEvents.length,
+			events: keptEvents.filter((id) => ownedEvents.some((owned) => String(owned) === String(id))).length,
 			orders: keptOrders.length,
 		},
 	};
@@ -193,6 +187,27 @@ export const removeDemoData = async (
 	await remove('members', models.member, { _id: { $in: memberIds }, memberType: { $ne: MemberType.ADMIN } });
 	await remove('manifestRows', models.manifest, { recordId: { $in: [...memberIds, ...venueIds, ...eventIds] } });
 	return { removed, kept: scope.kept, leftBehind: await countLeftBehind(models, scope) };
+};
+
+/**
+ * A reset never counts down on accounts that stay (#108), so an organizer kept because other accounts use it still carries
+ * `memberEvents` and `completedEvents` of events that were removed. This sets both from the events that really exist, the way
+ * the consistency check reads them (not CANCELLED, and ENDED), so the commission tier and the rank of the next seed start right.
+ */
+export const reconcileOrganizerCounters = async (models: DemoModels): Promise<number> => {
+	const owned = await findOwned(models);
+	if (owned.empty || !owned.memberIds.length) return 0;
+	const organizers: any[] = await models.member.find({ _id: { $in: owned.memberIds }, memberType: MemberType.ORGANIZER }).lean().exec();
+	let changed = 0;
+	for (const organizer of organizers) {
+		const events: any[] = await models.event.find({ organizerId: organizer._id }).lean().exec();
+		const memberEvents = events.filter((event) => event.eventStatus !== 'CANCELLED').length;
+		const completedEvents = events.filter((event) => event.eventStatus === 'ENDED').length;
+		if (organizer.memberEvents === memberEvents && organizer.completedEvents === completedEvents) continue;
+		await (models.member as any).updateOne({ _id: organizer._id }, { $set: { memberEvents, completedEvents } }, { timestamps: false }).exec();
+		changed++;
+	}
+	return changed;
 };
 
 /** documents that stay behind a removal because somebody else wrote them (reported, never touched) */

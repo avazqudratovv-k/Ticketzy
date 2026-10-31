@@ -7,7 +7,7 @@ import { PaymentService } from '../payment/payment.service';
 import { MockPaymentProvider } from '../payment/mock-payment.provider';
 import { TicketTypeService } from '../ticket-type/ticket-type.service';
 import { Message } from '../../libs/enums/common.enum';
-import { EventStatus, SeatStatus, SeatingType } from '../../libs/enums/event.enum';
+import { EventStatus, RefundPolicyType, SeatStatus, SeatingType } from '../../libs/enums/event.enum';
 import { OrderStatus, PaymentStatus, RefundSource, RefundStatus, TicketStatus } from '../../libs/enums/ticket.enum';
 import { AuditAction, AuditTargetType } from '../../libs/enums/audit-log.enum';
 import { NotificationType } from '../../libs/enums/notification.enum';
@@ -447,7 +447,7 @@ describe('RefundService', () => {
 				action: AuditAction.ORDER_REFUNDED_BY_ADMIN,
 				targetType: AuditTargetType.ORDER,
 				targetId: order._id,
-				meta: { reason: 'Buyer was in hospital', amount: 100, afterDeadline: true },
+				meta: { reason: 'Buyer was in hospital', amount: 100, afterDeadline: true, policyOverride: false },
 			});
 			expect(ctx.notificationService.createNotification).toHaveBeenCalledTimes(2);
 		});
@@ -716,5 +716,103 @@ describe('RefundService', () => {
 
 			expect(ctx.sold()).toBe(3);
 		});
+	});
+});
+
+/** DECISIONS #129: the refund policy of the event (snapshotted on the order) is enforced by the server */
+describe('RefundService refund policy', () => {
+	beforeEach(() => freezeClock(FIXED_NOW));
+	afterEach(() => jest.useRealTimers());
+
+	const NON_REFUNDABLE = { policyType: RefundPolicyType.NON_REFUNDABLE, daysBefore: 0 };
+	const refundable = (daysBefore: number) => ({ policyType: RefundPolicyType.REFUNDABLE, daysBefore });
+	const DAY = 86400000;
+
+	it('refuses a buyer refund of a non-refundable order, changes nothing, and says why in the quote', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY) });
+		const order = await ctx.addPaidOrder();
+		ctx.orderOf(order._id).refundPolicy = NON_REFUNDABLE;
+
+		const quote = await ctx.service.getRefundQuote(BUYER as any, order._id);
+		expect(quote).toMatchObject({ refundable: false, reason: Message.REFUND_NOT_ALLOWED_BY_POLICY, refundableAmount: 0, refundPolicy: NON_REFUNDABLE });
+		await expect(ctx.service.requestRefund(BUYER as any, order._id)).rejects.toThrow(new BadRequestException(Message.REFUND_NOT_ALLOWED_BY_POLICY));
+		expect(ctx.refunds.docs).toHaveLength(0);
+		expect(ctx.providerRefund).not.toHaveBeenCalled();
+		expect(orderStatus(ctx, order)).toBe(OrderStatus.PAID);
+	});
+
+	const orderStatus = (ctx: ReturnType<typeof build>, order: any) => ctx.orderOf(order._id).orderStatus;
+
+	it('lets an admin refund a non-refundable order and audits it as a policy override', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY) });
+		const order = await ctx.addPaidOrder();
+		ctx.orderOf(order._id).refundPolicy = NON_REFUNDABLE;
+
+		const result: any = await ctx.service.refundOrderByAdmin(ADMIN as any, { orderId: order._id, reason: 'Goodwill after a complaint' } as any);
+		expect(result.orderStatus).toBe(OrderStatus.REFUNDED);
+		expect(ctx.auditLogService.record).toHaveBeenCalledWith(
+			expect.objectContaining({ action: AuditAction.ORDER_REFUNDED_BY_ADMIN, meta: expect.objectContaining({ policyOverride: true }) }),
+		);
+	});
+
+	it('does not flag a normal admin refund as a policy override', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY) });
+		const order = await ctx.addPaidOrder();
+		await ctx.service.refundOrderByAdmin(ADMIN as any, { orderId: order._id, reason: 'Support request' } as any);
+		expect(ctx.auditLogService.record).toHaveBeenCalledWith(expect.objectContaining({ meta: expect.objectContaining({ policyOverride: false }) }));
+	});
+
+	it('a cancelled event refunds everything, non-refundable or not', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY), eventStatus: EventStatus.CANCELLED });
+		const order = await ctx.addPaidOrder();
+		ctx.orderOf(order._id).refundPolicy = NON_REFUNDABLE;
+		ctx.events.docs[0].refundPolicy = NON_REFUNDABLE;
+		const summary = await ctx.service.refundOrdersForCancelledEvent(ADMIN as any, ctx.events.docs[0]);
+		expect(summary).toMatchObject({ refundedCount: 1, failedCount: 0 });
+		expect(orderStatus(ctx, order)).toBe(OrderStatus.REFUNDED);
+	});
+
+	it('honours daysBefore: refundable until the end of the day N days before the event (venue clock)', async () => {
+		// now is 2026-12-01 21:00 in Seoul. Event on 2026-12-05 at 19:00 Seoul.
+		const startAt = new Date('2026-12-05T10:00:00Z');
+		for (const [days, expected] of [
+			[1, true], // until the end of 12-04
+			[3, true], // until the end of 12-02
+			[4, true], // until the end of 12-01: still today
+			[5, false], // until the end of 11-30: passed
+			[30, false],
+		] as [number, boolean][]) {
+			const ctx = build({ startAt });
+			const order = await ctx.addPaidOrder();
+			ctx.orderOf(order._id).refundPolicy = refundable(days);
+			const quote = await ctx.service.getRefundQuote(BUYER as any, order._id);
+			expect({ days, refundable: quote.refundable }).toEqual({ days, refundable: expected });
+			if (!expected) expect(quote.reason).toBe(Message.REFUND_DEADLINE_PASSED);
+		}
+	});
+
+	it('the quote deadline moves with daysBefore', async () => {
+		const startAt = new Date('2026-12-20T10:00:00Z'); // 19:00 on 12-20 in Seoul
+		const ctx = build({ startAt });
+		const order = await ctx.addPaidOrder();
+		ctx.orderOf(order._id).refundPolicy = refundable(7);
+		const quote = await ctx.service.getRefundQuote(BUYER as any, order._id);
+		expect(quote.deadline.toISOString()).toBe('2026-12-13T14:59:59.999Z'); // end of 12-13 in Seoul
+	});
+
+	it('an order keeps the policy it was placed under: editing the event later does not take the refund away', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY) });
+		const order = await ctx.addPaidOrder();
+		ctx.orderOf(order._id).refundPolicy = refundable(1);
+		ctx.events.docs[0].refundPolicy = NON_REFUNDABLE; // the organizer edited the event after the sale
+		const refunded: any = await ctx.service.requestRefund(BUYER as any, order._id);
+		expect(refunded.orderStatus).toBe(OrderStatus.REFUNDED);
+	});
+
+	it('an order from before policies falls back to the event, and an event without one to the old day-before rule', async () => {
+		const ctx = build({ startAt: new Date(Date.now() + 20 * DAY) });
+		const order = await ctx.addPaidOrder();
+		const quote = await ctx.service.getRefundQuote(BUYER as any, order._id);
+		expect(quote).toMatchObject({ refundable: true, refundPolicy: refundable(1) });
 	});
 });

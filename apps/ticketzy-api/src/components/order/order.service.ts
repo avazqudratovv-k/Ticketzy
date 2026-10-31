@@ -11,7 +11,8 @@ import { Event } from '../../libs/dto/event/event';
 import { Member } from '../../libs/dto/member/member';
 import { MemberStatus } from '../../libs/enums/member.enum';
 import { Direction, Message } from '../../libs/enums/common.enum';
-import { SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
+import { RefundPolicyType, SeatingType, publicEventStatus } from '../../libs/enums/event.enum';
+import { readRefundPolicy } from '../../libs/refund-policy';
 import { OrderStatus, PaymentSimulation, TicketStatus } from '../../libs/enums/ticket.enum';
 import { T } from '../../libs/types/common';
 import { escapeRegExp, lookupEvent, lookupEventWithVenue, shapeIntoMongoObjectId } from '../../libs/config';
@@ -74,6 +75,12 @@ export class OrderService {
 		if (!organizer) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		const windowError = getPurchaseWindowError(event, now);
 		if (windowError) throw new BadRequestException(windowError);
+
+		// a non-refundable event needs the buyer's explicit confirmation, checked here and not only in the UI (#129)
+		const policy = readRefundPolicy(event);
+		if (policy.policyType === RefundPolicyType.NON_REFUNDABLE && input.acknowledgeNonRefundable !== true) {
+			throw new BadRequestException(Message.NON_REFUNDABLE_ACK_REQUIRED);
+		}
 
 		const commissionRate = getCommissionRate(organizer, now);
 		return event.seatingType === SeatingType.RESERVED
@@ -153,6 +160,7 @@ export class OrderService {
 		expiresAt: Date,
 		seatIds: ObjectId[],
 	): Promise<Order> {
+		const policy = readRefundPolicy(event);
 		const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 		const amounts = calculateOrderAmounts(subtotal, commissionRate);
 		return await this.orderModel.create({
@@ -166,6 +174,9 @@ export class OrderService {
 			commissionRate: amounts.commissionRate,
 			commissionAmount: amounts.commissionAmount,
 			totalAmount: amounts.total,
+			// the policy of the moment is kept on the order, so a later edit of the event cannot take a refund away
+			refundPolicy: policy,
+			...(policy.policyType === RefundPolicyType.NON_REFUNDABLE ? { nonRefundableAcknowledgedAt: new Date() } : {}),
 			expiresAt: expiresAt,
 		});
 	}

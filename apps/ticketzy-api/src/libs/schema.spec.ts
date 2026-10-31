@@ -26,8 +26,8 @@ describe('GraphQL schema (built without a database)', () => {
 		schema = await moduleRef.get(GraphQLSchemaFactory).create(loadResolvers());
 	});
 
-	it('builds, and has the 99 operations (42 queries, 57 mutations): none was renamed or dropped (101 before the follow feature went, #122; two account deletion operations, #123)', () => {
-		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(42);
+	it('builds, and has the 100 operations (43 queries, 57 mutations): none was renamed or dropped (101 before the follow feature went, #122; two account deletion operations, #123; getVenueTemplates, #130)', () => {
+		expect(Object.keys(schema.getQueryType()!.getFields())).toHaveLength(43);
 		expect(Object.keys(schema.getMutationType()!.getFields())).toHaveLength(57);
 		for (const name of ['getEvents', 'getMember', 'getAllMembersByAdmin', 'updateMemberByAdmin', 'payOrder', 'imageUploader']) {
 			const fields = { ...schema.getQueryType()!.getFields(), ...schema.getMutationType()!.getFields() };
