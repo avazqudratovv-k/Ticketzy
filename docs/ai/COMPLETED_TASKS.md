@@ -744,3 +744,8 @@ Backend only. No new dependency. Decision: DECISIONS #62. `npm run seed` (admin 
 - **Seed:** 12 venues (all four templates), 10 organizers with committed SVG logos, 72 events, 50 buyers; linked-records check with `--dry-run` and `DEMO_SEED_KEEP_LINKED`. Counts of the real run are in the report of the task.
 - **Tests:** `focal-area.spec`, `venue-templates.spec`, `venue.focal-area.spec`, `refund-policy-days.spec`, `order.refund-ack.spec`, the policy block of `refund.service.spec`, `demo-links.spec`, `demo-gate.spec`, `demo-seeder.keep.spec`, `schemas/new-fields.spec`, and updates to `demo-plan.spec`, `demo-manifest.spec`, `demo-refunds.spec`, `schema.spec`.
 - **Decisions:** #127 to #133.
+
+## Template section gaps and per-event refund text for the AI assistant (decision #134)
+- **What changed:** six section coordinates in `libs/venue-templates.ts` (ARENA, FOOTBALL_STADIUM) for the 12-unit editor gap; `getRefundPolicyText(event?)` in `libs/refund-policy.ts` describes the per-event policy; `get_refund_policy` in `components/ai/ai-tools.service.ts` takes an optional `eventId` and returns that event's policy and deadline.
+- **Tests:** `venue-templates.spec` (gap check per template; fails on the old coordinates), `refund-policy.spec` (general, refundable with days, non-refundable, no policy), `ai.service.spec` (general text updated; `eventId` case, hidden event, bad id).
+- **Decisions:** #134.

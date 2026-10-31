@@ -68,4 +68,29 @@ describe('venue templates (DECISIONS #130)', () => {
 		expect(new Set(layout.sections.map((section) => section.key)).size).toBe(layout.sections.length);
 		expect(layout.sections.filter((section) => section.kind === SectionKind.SEATED).every((section) => !!section.tierKey)).toBe(true);
 	});
+
+	// the frontend editor draws a 6-unit plate around every section, so two sections need at least 12 units between them
+	it.each(VENUE_TEMPLATES.map((template) => [template.key, template] as const))('%s keeps at least 12 units between section seat boxes', (_key, template) => {
+		const spacing = { COMPACT: 13, NORMAL: 16, WIDE: 21 } as Record<string, number>;
+		const boxes = template.layout.sections.map((item) => {
+			const w = item.seatsPerRow * spacing[item.spacing];
+			const h = item.rows * spacing[item.spacing];
+			const turned = item.rotation % 180 === 90;
+			const bw = turned ? h : w;
+			const bh = turned ? w : h;
+			return { key: item.key, left: item.x - bw / 2, right: item.x + bw / 2, top: item.y - bh / 2, bottom: item.y + bh / 2 };
+		});
+		const tooClose: string[] = [];
+		for (let i = 0; i < boxes.length; i++) {
+			for (let j = i + 1; j < boxes.length; j++) {
+				const a = boxes[i];
+				const b = boxes[j];
+				const gapX = Math.max(a.left - b.right, b.left - a.right);
+				const gapY = Math.max(a.top - b.bottom, b.top - a.bottom);
+				// boxes that overlap on one axis are separated by the gap on the other; the real distance is the larger of the two
+				if (Math.max(gapX, gapY) < 12) tooClose.push(`${a.key}/${b.key}`);
+			}
+		}
+		expect(tooClose).toEqual([]);
+	});
 });

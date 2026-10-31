@@ -587,8 +587,24 @@ describe('AiToolsService', () => {
 	});
 
 	it('get_refund_policy is static text and an unknown tool is an error', async () => {
-		expect((await tools.execute('get_refund_policy', {}, null)).content).toMatch(/23:59 on the day before/);
+		expect((await tools.execute('get_refund_policy', {}, null)).content).toMatch(/1 to 30 days/);
 		expect((await tools.execute('delete_everything', {}, null)).isError).toBe(true);
+	});
+
+	it('get_refund_policy with an eventId gives that event\'s own policy and deadline, and hides events that are not public', async () => {
+		eventModel.aggregate.mockReturnValue(
+			exec([{ ...publicEvent, startAt: new Date('2026-12-25T10:00:00Z'), refundPolicy: { policyType: 'REFUNDABLE', daysBefore: 7 }, venueData: { venueTimezone: 'Asia/Seoul' } }]),
+		);
+		const own = await tools.execute('get_refund_policy', { eventId: 'a'.repeat(24) }, null);
+		expect(own.content).toContain('refundable until 7 day(s) before');
+		expect(own.content).toContain('2026-12-18T14:59:59.999Z');
+
+		eventModel.aggregate.mockReturnValue(exec([{ ...publicEvent, refundPolicy: { policyType: 'NON_REFUNDABLE', daysBefore: 0 }, venueData: { venueTimezone: 'UTC' } }]));
+		expect((await tools.execute('get_refund_policy', { eventId: 'a'.repeat(24) }, null)).content).toContain('NON-REFUNDABLE');
+
+		eventModel.aggregate.mockReturnValue(exec([]));
+		expect((await tools.execute('get_refund_policy', { eventId: 'b'.repeat(24) }, null)).isError).toBe(true);
+		expect((await tools.execute('get_refund_policy', { eventId: 'nope' }, null)).isError).toBe(true);
 	});
 });
 

@@ -1,4 +1,5 @@
-import { getRefundDeadline, isBeforeRefundDeadline } from './refund-policy';
+import { RefundPolicyType } from './enums/event.enum';
+import { getRefundDeadline, getRefundPolicyText, isBeforeRefundDeadline } from './refund-policy';
 
 describe('getRefundDeadline', () => {
 	// 2026-12-25 10:00 UTC is 19:00 on Dec 25 in Seoul (UTC+9) and 02:00 on Dec 25 in Los Angeles (UTC-8)
@@ -138,5 +139,28 @@ describe('refund deadline boundaries', () => {
 				}
 			}
 		});
+	});
+});
+
+describe('getRefundPolicyText (AI assistant)', () => {
+	const startAt = new Date('2026-12-25T10:00:00Z');
+
+	it('describes the per-event policy and no longer the fixed day-before rule', () => {
+		const text = getRefundPolicyText();
+		expect(text).not.toContain('23:59 on the day before');
+		expect(text).toMatch(/1 to 30 days/);
+		expect(text).toMatch(/non-refundable/);
+		expect(text).toMatch(/event page/);
+	});
+
+	it('uses the own policy and deadline of an event in context', () => {
+		const text = getRefundPolicyText({ startAt, venueTimezone: 'Asia/Seoul', refundPolicy: { policyType: RefundPolicyType.REFUNDABLE, daysBefore: 7 } });
+		expect(text).toContain('refundable until 7 day(s) before');
+		expect(text).toContain(getRefundDeadline(startAt, 'Asia/Seoul', 7).toISOString());
+	});
+
+	it('says a non-refundable event cannot be refunded, and an old event without a policy reads as 1 day', () => {
+		expect(getRefundPolicyText({ startAt, venueTimezone: 'UTC', refundPolicy: { policyType: RefundPolicyType.NON_REFUNDABLE, daysBefore: 0 } })).toContain('NON-REFUNDABLE');
+		expect(getRefundPolicyText({ startAt, venueTimezone: 'UTC' })).toContain('refundable until 1 day(s) before');
 	});
 });

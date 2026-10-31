@@ -83,13 +83,26 @@ export const getRefundDeadline = (startAt: Date | string, venueTimezone: string,
 export const isBeforeRefundDeadline = (startAt: Date | string, venueTimezone: string, now: Date = new Date(), daysBefore: number = DEFAULT_REFUND_DAYS): boolean =>
 	now.getTime() <= getRefundDeadline(startAt, venueTimezone, daysBefore).getTime();
 
-/** the refund rules in plain words, for the AI assistant; keep it in line with RefundService.assess and getRefundDeadline */
-export const getRefundPolicyText = (): string =>
-	[
+/** the refund rules in plain words, for the AI assistant; keep it in line with RefundService.assess and getRefundDeadline (#129) */
+export const getRefundPolicyText = (event?: { startAt: Date | string; venueTimezone: string; refundPolicy?: Partial<RefundPolicy> | null }): string => {
+	const lines = [
 		'Refunds are per order: the whole order is refunded, never a single ticket.',
 		'Only a paid order can be refunded, and only while every ticket in it is unused (not checked in at the gate).',
-		'A buyer can refund until 23:59 on the day before the event starts, on the clock of the venue timezone. After that the buyer can no longer refund, and only the support team can decide.',
+		'Each event has its own refund policy, shown on its event page: either refundable until a number of days before the event (1 to 30 days; the organizer chooses, 1 day is the default), or non-refundable. The last refund moment is 23:59 on that day, on the clock of the venue timezone. After it the buyer can no longer refund, and only the support team can decide.',
+	];
+	if (event) {
+		const policy = readRefundPolicy(event);
+		if (policy.policyType === RefundPolicyType.NON_REFUNDABLE) {
+			lines.push('This event is NON-REFUNDABLE: the buyer cannot refund an order for it; only the support team can decide.');
+		} else {
+			const deadline = getRefundDeadline(event.startAt, event.venueTimezone, policy.daysBefore).toISOString();
+			lines.push(`This event is refundable until ${policy.daysBefore} day(s) before it starts, that is until ${deadline} (UTC), which is 23:59 on the clock of ${event.venueTimezone}.`);
+		}
+	}
+	lines.push(
 		'If the event is cancelled, every paid order of that event is refunded automatically, including tickets that were already used.',
 		'A refunded order cannot be paid or used again; its tickets stop working.',
 		'The money goes back through the original payment method. Refunding an order that is already refunded changes nothing.',
-	].join('\n');
+	);
+	return lines.join('\n');
+};

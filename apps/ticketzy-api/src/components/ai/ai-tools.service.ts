@@ -57,8 +57,8 @@ export const ASSISTANT_TOOLS: AiToolDefinition[] = [
 	},
 	{
 		name: 'get_refund_policy',
-		description: 'The refund rules of the platform.',
-		parameters: { type: 'object', properties: {}, additionalProperties: false },
+		description: 'The refund rules of the platform. Each event has its own policy (refundable until N days before, or non-refundable). Pass eventId when the question is about one event to get that event\'s own policy and deadline.',
+		parameters: { type: 'object', properties: { eventId: { type: 'string', description: 'optional: the id of the event in question' } }, additionalProperties: false },
 	},
 	{
 		name: 'get_my_tickets',
@@ -91,7 +91,7 @@ export class AiToolsService {
 				case 'get_event':
 					return await this.getEvent(args);
 				case 'get_refund_policy':
-					return { content: getRefundPolicyText() };
+					return await this.getRefundPolicy(args);
 				case 'get_my_tickets':
 					return await this.getMyTickets(authMember);
 				default:
@@ -161,6 +161,18 @@ export class AiToolsService {
 			}),
 			events,
 		};
+	}
+
+	private async getRefundPolicy(args: Record<string, unknown>): Promise<ToolOutcome> {
+		if (args.eventId === undefined) return { content: getRefundPolicyText() };
+		if (typeof args.eventId !== 'string' || !/^[a-f0-9]{24}$/i.test(args.eventId)) return this.fail('eventId is not valid.');
+		const [event]: Event[] = await this.eventModel
+			.aggregate([{ $match: { _id: shapeIntoMongoObjectId(args.eventId), ...publicEventFilter() } }, ...lookupActiveOrganizer, lookupVenue, { $unwind: { path: '$venueData', preserveNullAndEmptyArrays: true } }])
+			.exec();
+		if (!event) return this.fail(Message.NO_DATA_FOUND);
+		const venueTimezone = event.venueData?.venueTimezone;
+		if (!venueTimezone) return { content: getRefundPolicyText() };
+		return { content: getRefundPolicyText({ startAt: event.startAt, venueTimezone, refundPolicy: event.refundPolicy }) };
 	}
 
 	private async getEvent(args: Record<string, unknown>): Promise<ToolOutcome> {
