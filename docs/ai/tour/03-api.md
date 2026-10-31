@@ -162,6 +162,7 @@ Notation: **Who** uses G (guest), U (USER), P (PENDING organizer), O (ACTIVE org
 | `createVenue` M | O A | `VenueInput` (Flow 3) | `Venue` | insert `venues`; `venueCapacity` computed | `INVALID_VENUE_TIMEZONE`, `INVALID_VENUE_LAYOUT` and the `VENUE_LAYOUT_*` messages, `CREATE_FAILED` (also for a duplicate `(city, name, address)`) |
 | `updateVenue` M | O A | `VenueUpdate { _id, ...optional fields, venueStatus? }` | `Venue` | update (creator or admin); capacity recomputed when a layout is sent | `VENUE_LAYOUT_LOCKED`, timezone/layout errors, `UPDATE_FAILED` |
 | `getVenue(venueId)` Q | all | id | `Venue` | none | `NO_DATA_FOUND` (missing or DELETE) |
+| `getVenueTemplates` Q | all | none | `[VenueTemplate]`: CONCERT_HALL, ARENA, FOOTBALL_STADIUM, COMEDY_CLUB with layout, focal area, levels, capacity (#130) | none | |
 | `getVenues(input)` Q | all | `VenuesInquiry`: sort in `availableVenueSorts`, `search.cityList?`, `typeList?`, `text?` (name regex) | `Venues` (ACTIVE only) | none | |
 
 ### B.4 Events (`components/event`)

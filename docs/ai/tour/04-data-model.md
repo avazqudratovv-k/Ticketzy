@@ -61,7 +61,8 @@ Written by: `MemberService` (sign-up, `updateMember`, `updateMemberByAdmin`), `O
 | `venueCoordinates` | [number] | | used by `looksLikeSamePlace` for the admin conflict hint |
 | `venueTimezone` | string | `Asia/Seoul` | IANA zone; used for refund deadline and payout date |
 | `venueLayout` | `{ sections[] }` | optional | seat map definition |
-| `venueLayout.sections[]` | `{ key, name, kind SEATED/STANDING, rows 1-100, seatsPerRow 1-100, capacity?, x, y, rotation, spacing COMPACT/NORMAL/WIDE, tierKey? }` | `_id: false` | one block of seats or a standing area |
+| `venueLayout.sections[]` | `{ key, name, kind SEATED/STANDING, rows 1-100, seatsPerRow 1-100, capacity?, x, y, rotation, spacing COMPACT/NORMAL/WIDE, tierKey?, level 0-2 }` | `_id: false`; `level` default 0 (0 floor, 1 lower tier, 2 upper tier, #128) | one block of seats or a standing area |
+| `venueLayout.focalArea` | `{ type STAGE/PITCH, x, y, width, height }` on the 1000 x 700 canvas | missing on old layouts, which read as the default stage (x 340, y 4, 320 x 22); a PITCH is always stored as 420 x 272 at (290, 214) = 105:68 (#127) | the one stage or pitch the audience looks at |
 | `venueCapacity` | number | required, computed by the server | rows x seatsPerRow for SEATED, `capacity` for STANDING |
 | `venueImages` | [string] | [] | |
 | `venueStatus` | enum ACTIVE/CLOSED/DELETE | ACTIVE | |
@@ -81,6 +82,7 @@ Written by: `VenueService`. Layout is read by event approval (`generateEventSeat
 | `eventDesc` | string | | |
 | `eventImages` | [string] | required | paths |
 | `eventTranslations` | `[{ locale en/ko/ru/uz, title, description? }]` | [] | organizer-saved translations |
+| `refundPolicy` | `{ policyType REFUNDABLE/NON_REFUNDABLE, daysBefore 0-30 }` | missing reads as REFUNDABLE, 1 day (#129) | refundable until N days before the event, or never |
 | `eventMinPrice` | number | 0 | cheapest non-paused ticket price, kept by `refreshEventMinPrice` |
 | `eventViews`, `eventLikes`, `eventComments`, `eventRank` | number | 0 | counters; `eventRank` by the batch job |
 | `organizerId` | ObjectId -> Member | required | owner |
@@ -148,6 +150,8 @@ Written by: `EventService.generateEventSeats` (insert via `$setOnInsert` upsert)
 | `items` | `[{ ticketTypeId, quantity >= 1, unitPrice }]` | required | purchased lines; `_id: false` |
 | `seatIds` | [ObjectId -> EventSeat] | [] | RESERVED orders only |
 | `currency` | string | | |
+| `refundPolicy` | `{ policyType, daysBefore }` | snapshot of the event's policy when the order was placed (#129) | what the refund flow follows |
+| `nonRefundableAcknowledgedAt` | date | set when the buyer confirmed a NON_REFUNDABLE event | proof of the confirmation |
 | `subtotal`, `commissionRate`, `commissionAmount`, `totalAmount` | number | required | frozen at checkout; rate in percent; `totalAmount` = what the buyer pays (= subtotal) |
 | `expiresAt` | date | required | when an unpaid order dies |
 | `paidAt`, `refundedAt` | date | | |
