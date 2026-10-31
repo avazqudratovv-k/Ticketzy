@@ -22,6 +22,7 @@ npm run reset:demo         # removes only what seed:demo tracked
 npm run check:demo         # read-only consistency report of the demo data
 npm run report:currency    # read-only report of ticket types that are not in KRW (#95), needs the database
 npm run migrate:venue-focal-areas  # optional (#127): writes the default stage into layouts without one; dry run, add `-- --apply` (needs VENUE_FOCAL_AREA_MIGRATION_CONFIRM); not needed for reads
+npm run migrate:stadium-surround  # one-off (#138): moves PITCH venue sections 16 units off the pitch (only x/y); dry run, add `-- --apply` (needs STADIUM_SURROUND_MIGRATION_CONFIRM); never against a real database without the owner
 npm run migrate:email-verified  # one-off (#135): marks every existing member as email verified; dry run, add `-- --apply` (needs EMAIL_VERIFIED_MIGRATION_CONFIRM); run once right after the deploy, never against a real database without the owner
 npm run migrate:member-indexes  # one-off: swaps the unique email/phone indexes of members (#124); dry run, add `-- --apply` (needs MEMBER_INDEX_MIGRATION_CONFIRM); never run it against a real database without the owner
 npx tsc -p apps/ticketzy-api/tsconfig.app.json --noEmit

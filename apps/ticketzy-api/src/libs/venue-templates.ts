@@ -80,17 +80,18 @@ export const VENUE_TEMPLATES: VenueTemplate[] = [
 		description: 'A fixed 105:68 pitch in the middle and four stands (north, south, west, east), each with a lower and an upper level.',
 		venueType: VenueType.STADIUM,
 		layout: {
-			// position and size of the pitch are fixed by the server (libs/focal-area.ts), whatever a client sends
+			// position and size of the pitch are fixed by the server (libs/focal-area.ts), whatever a client sends; the stands keep
+			// 16 units between their plate and the pitch for the run-off, boards and dugouts (libs/stadium-surround.ts, #138)
 			focalArea: { ...FIXED_PITCH },
 			sections: [
-				section('LOWER_N', 'Lower North', SEATED, LOWER_TIER, 6, 30, 500, 170, 0, COMPACT, { tierKey: 'GOLD' }),
-				section('UPPER_N', 'Upper North', SEATED, UPPER_TIER, 5, 36, 500, 86, 0, COMPACT, { tierKey: 'STANDARD' }),
-				section('LOWER_S', 'Lower South', SEATED, LOWER_TIER, 6, 30, 500, 530, 180, COMPACT, { tierKey: 'GOLD' }),
-				section('UPPER_S', 'Upper South', SEATED, UPPER_TIER, 5, 36, 500, 614, 180, COMPACT, { tierKey: 'STANDARD' }),
-				section('LOWER_W', 'Main Stand (West)', SEATED, LOWER_TIER, 6, 22, 250, 350, 270, COMPACT, { tierKey: 'VIP' }),
-				section('UPPER_W', 'Upper West', SEATED, UPPER_TIER, 5, 24, 165, 350, 270, COMPACT, { tierKey: 'STANDARD' }),
-				section('LOWER_E', 'Lower East', SEATED, LOWER_TIER, 6, 22, 750, 350, 90, COMPACT, { tierKey: 'GOLD' }),
-				section('UPPER_E', 'Upper East', SEATED, UPPER_TIER, 5, 24, 835, 350, 90, COMPACT, { tierKey: 'STANDARD' }),
+				section('LOWER_N', 'Lower North', SEATED, LOWER_TIER, 6, 30, 500, 152, 0, COMPACT, { tierKey: 'GOLD' }),
+				section('UPPER_N', 'Upper North', SEATED, UPPER_TIER, 5, 36, 500, 68, 0, COMPACT, { tierKey: 'STANDARD' }),
+				section('LOWER_S', 'Lower South', SEATED, LOWER_TIER, 6, 30, 500, 548, 180, COMPACT, { tierKey: 'GOLD' }),
+				section('UPPER_S', 'Upper South', SEATED, UPPER_TIER, 5, 36, 500, 632, 180, COMPACT, { tierKey: 'STANDARD' }),
+				section('LOWER_W', 'Main Stand (West)', SEATED, LOWER_TIER, 6, 22, 228, 350, 270, COMPACT, { tierKey: 'VIP' }),
+				section('UPPER_W', 'Upper West', SEATED, UPPER_TIER, 5, 24, 143, 350, 270, COMPACT, { tierKey: 'STANDARD' }),
+				section('LOWER_E', 'Lower East', SEATED, LOWER_TIER, 6, 22, 772, 350, 90, COMPACT, { tierKey: 'GOLD' }),
+				section('UPPER_E', 'Upper East', SEATED, UPPER_TIER, 5, 24, 857, 350, 90, COMPACT, { tierKey: 'STANDARD' }),
 			],
 		},
 	},

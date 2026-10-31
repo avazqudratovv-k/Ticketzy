@@ -45,6 +45,7 @@ The API refuses to start, and prints every problem at once by variable **name**,
 | `DEMO_BUYER_PASSWORD`, `DEMO_ORGANIZER_PASSWORD`, `DEMO_PENDING_ORGANIZER_PASSWORD`, `DEMO_REJECTED_ORGANIZER_PASSWORD` | none | only for `npm run seed:demo`: strong passwords (12+ characters, three kinds, no common words) of the demo accounts; remove them from the host afterwards |
 | `DEMO_SEED_CONFIRM` | none | only for `seed:demo` and `reset:demo`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use |
 | `EMAIL_VERIFIED_MIGRATION_CONFIRM` | none | only for `npm run migrate:email-verified -- --apply`: must be `MONGO_DEV` or `MONGO_PROD` (see "Upgrading to email verification") |
+| `STADIUM_SURROUND_MIGRATION_CONFIRM` | none | only for `npm run migrate:stadium-surround -- --apply`: must be `MONGO_DEV` or `MONGO_PROD` (see "Room around the pitch") |
 | `MEMBER_INDEX_MIGRATION_CONFIRM` | none | only for `npm run migrate:member-indexes -- --apply`: must be `MONGO_DEV` or `MONGO_PROD`, the database variable the command should use (see "Upgrading member indexes") |
 | `DEMO_SEED_ALLOW_NON_DEMO_DB` | `false` | `true` lets the demo commands run against a database that already holds data the seed did not create |
 | `ALLOW_DEMO_SEED` | `false` | the demo commands refuse `NODE_ENV=production` unless this is `true` |
@@ -74,6 +75,17 @@ EMAIL_VERIFIED_MIGRATION_CONFIRM=MONGO_PROD NODE_ENV=production npm run migrate:
 ```
 
 It sets `emailVerifiedAt` only on members that have none, so running it again changes nothing. Set `RESEND_API_KEY`, `MAIL_FROM` and `SITE_URL` first (the API refuses to start in production without them), and verify the sending domain at Resend (SPF and DKIM) or the mail will not arrive.
+
+## Room around the pitch (decision #138)
+
+Football stadium venues get a free band of 16 units between the pitch and every stand, for the run-off, advertising boards and dugouts. New venues from the template have it; venues stored earlier are moved by a one-off script. Run it **after** the deploy, with the owner. It touches only `x` and `y` of sections of PITCH venues (no seat, order or ticket depends on them) and prints each venue, section and old to new place.
+
+```bash
+NODE_ENV=production npm run migrate:stadium-surround                                                              # 1. dry run: read the list
+STADIUM_SURROUND_MIGRATION_CONFIRM=MONGO_PROD NODE_ENV=production npm run migrate:stadium-surround -- --apply    # 2. run it
+```
+
+A venue marked "NEEDS A PERSON" is left untouched (exit code 1); fix its layout by hand. Running it again changes nothing.
 
 ## Upgrading member indexes (account deletion, decision #124)
 

@@ -2,6 +2,7 @@ import { FocalAreaType, SectionKind, VenueType } from './enums/event.enum';
 import { FIXED_PITCH, getFocalAreaError } from './focal-area';
 import { VENUE_TEMPLATES, VenueTemplateKey, getTemplateCapacity, getVenueTemplate, instantiateTemplate } from './venue-templates';
 import { computeLayoutCapacity, getVenueLayoutError } from './venue-layout';
+import { PITCH_CLEARANCE, SECTION_PLATE, getPitchClearance, getSectionBox, isInsideCanvas, withPlate } from './stadium-surround';
 
 describe('venue templates (DECISIONS #130)', () => {
 	it('are the four asked for', () => {
@@ -92,5 +93,37 @@ describe('venue templates (DECISIONS #130)', () => {
 			}
 		}
 		expect(tooClose).toEqual([]);
+	});
+
+	// room for the run-off, advertising boards and dugouts the frontend draws around the pitch (DECISIONS #138)
+	it('FOOTBALL_STADIUM keeps every stand plate (seat block + 6) at least 16 units from the pitch on every side, inside 1000 x 700', () => {
+		expect(SECTION_PLATE).toBe(6);
+		expect(PITCH_CLEARANCE).toBe(16);
+		const layout = instantiateTemplate('FOOTBALL_STADIUM');
+		const pitch = layout.focalArea;
+		const tooClose: string[] = [];
+		const outside: string[] = [];
+		for (const item of layout.sections) {
+			const plate = withPlate(getSectionBox(item));
+			const gapX = Math.max(plate.left - (pitch.x + pitch.width), pitch.x - plate.right);
+			const gapY = Math.max(plate.top - (pitch.y + pitch.height), pitch.y - plate.bottom);
+			if (Math.max(gapX, gapY) < 16) tooClose.push(item.key);
+			if (!isInsideCanvas(plate)) outside.push(item.key);
+			expect(getPitchClearance(item, pitch)).toBe(Math.max(gapX, gapY));
+		}
+		expect(tooClose).toEqual([]);
+		expect(outside).toEqual([]);
+	});
+
+	it('FOOTBALL_STADIUM: the pitch and the section sizes did not change, only the stands moved outward', () => {
+		const layout = instantiateTemplate('FOOTBALL_STADIUM');
+		expect(layout.focalArea).toEqual(FIXED_PITCH);
+		const byKey = Object.fromEntries(layout.sections.map((item) => [item.key, item]));
+		expect(Object.fromEntries(layout.sections.map((item) => [item.key, [item.x, item.y]]))).toEqual({
+			LOWER_N: [500, 152], UPPER_N: [500, 68], LOWER_S: [500, 548], UPPER_S: [500, 632],
+			LOWER_W: [228, 350], UPPER_W: [143, 350], LOWER_E: [772, 350], UPPER_E: [857, 350],
+		});
+		expect(layout.sections.map((item) => [item.rows, item.seatsPerRow, item.rotation])).toEqual([[6, 30, 0], [5, 36, 0], [6, 30, 180], [5, 36, 180], [6, 22, 270], [5, 24, 270], [6, 22, 90], [5, 24, 90]]);
+		expect(byKey.LOWER_W.x).toBeLessThan(FIXED_PITCH.x);
 	});
 });
