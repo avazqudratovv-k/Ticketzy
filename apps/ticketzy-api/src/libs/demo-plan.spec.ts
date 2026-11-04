@@ -79,7 +79,7 @@ describe('demo data', () => {
 	});
 
 	it('has 10 venues in Korean cities with valid layouts, seated and standing', () => {
-		expect(DEMO_VENUES).toHaveLength(12);
+		expect(DEMO_VENUES).toHaveLength(17);
 		expect(DEMO_VENUES.every((venue) => /[A-Za-z]/.test(venue.name) && !/\d/.test(venue.address))).toBe(true);
 		for (const venue of DEMO_VENUES) expect(getVenueLayoutError({ sections: venue.sections })).toBeNull();
 		expect(new Set(DEMO_VENUES.map((venue) => venue.city)).size).toBeGreaterThanOrEqual(10);
@@ -127,7 +127,7 @@ describe('demo football', () => {
 	});
 
 	it('plays at the home ground of the home club, in the right city', () => {
-		const cities: Record<string, string> = { seoul: 'Seoul', incheon: 'Incheon', gwangju: 'Gwangju' };
+		const cities: Record<string, string> = { seoul: 'Seoul', incheon: 'Incheon', gwangju: 'Gwangju', jeonbuk: 'Jeonju', ulsan: 'Ulsan', pohang: 'Pohang', jeju: 'Seogwipo', daejeon: 'Daejeon' };
 		for (const event of footballEvents) {
 			expect(event.venue).toBe(getFixtureVenue(event.fixture));
 			const venue = DEMO_VENUES.find((item) => item.key === event.venue);
@@ -230,9 +230,9 @@ describe('demo texts', () => {
 });
 
 describe('demo plan', () => {
-	it('has 60 to 80 events across the four categories and every status', () => {
+	it('has 60 to 100 events across the four categories and every status', () => {
 		expect(events.length).toBeGreaterThanOrEqual(60);
-		expect(events.length).toBeLessThanOrEqual(80);
+		expect(events.length).toBeLessThanOrEqual(100);
 		for (const category of [EventCategory.CONCERT, EventCategory.FOOTBALL, EventCategory.COMEDY, EventCategory.OTHER]) {
 			expect(events.some((event) => event.category === category)).toBe(true);
 		}
@@ -390,20 +390,20 @@ describe('order planners', () => {
 });
 
 describe('demo venues from templates and the refund policy mix (DECISIONS #128 to #131)', () => {
-	it('builds eight of the twelve venues from the four templates, every template at least once, and gives every venue a stage or pitch', () => {
+	it('builds thirteen of the seventeen venues from the four templates, every template at least once, and gives every venue a stage or pitch', () => {
 		const used = new Set(DEMO_VENUES.map((venue) => venue.template).filter(Boolean));
 		expect([...used].sort()).toEqual(['ARENA', 'COMEDY_CLUB', 'CONCERT_HALL', 'FOOTBALL_STADIUM']);
-		expect(DEMO_VENUES.filter((venue) => venue.template)).toHaveLength(8);
+		expect(DEMO_VENUES.filter((venue) => venue.template)).toHaveLength(13);
 		for (const venue of DEMO_VENUES.filter((item) => item.template)) {
 			const template = getVenueTemplate(venue.template);
 			expect(venue.sections).toEqual(template.layout.sections);
 			expect(venue.focalArea).toEqual(template.layout.focalArea);
 			expect(venue.sections.every((section) => [0, 1, 2].includes(section.level))).toBe(true);
 		}
-		expect(DEMO_VENUES.filter((venue) => venue.focalArea?.type === 'PITCH').map((venue) => venue.key).sort()).toEqual(['fortress', 'openair', 'stadium']);
+		expect(DEMO_VENUES.filter((venue) => venue.focalArea?.type === 'PITCH').map((venue) => venue.key).sort()).toEqual(['daejeon', 'fortress', 'jeonju', 'munsu', 'openair', 'seogwipo', 'stadium', 'steelyard']);
 	});
 
-	it('every football ground is a template football stadium with a PITCH, and the three clubs play at home there', () => {
+	it('every football ground is a template football stadium with a PITCH, and all eight clubs play at home there', () => {
 		for (const club of DEMO_CLUBS.filter((item) => item.homeVenue)) {
 			expect(DEMO_VENUES.find((venue) => venue.key === club.homeVenue).template).toBe('FOOTBALL_STADIUM');
 		}

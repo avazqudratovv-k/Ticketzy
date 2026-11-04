@@ -250,6 +250,22 @@ const buildRows = (): Row[] => {
 		{ org: 'harbor', base: 'fx-incheon-pohang', venue: fx('fx-incheon-pohang'), day: 23, fill: 0.9 },
 		{ org: 'camellia', base: 'founders', venue: 'expo', day: -9, seating: GENERAL, orders: [3, 6] },
 		{ org: 'camellia', base: 'esports', venue: 'arena', day: 38, orders: [6, 10] },
+		// the third growth step: the other five clubs play at their own home grounds
+		{ org: 'harbor', base: 'fx-jeonbuk-ulsan', venue: fx('fx-jeonbuk-ulsan'), day: -52, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-jeonbuk-seoul', venue: fx('fx-jeonbuk-seoul'), day: 3, orders: [8, 12], pop: 0.85 },
+		{ org: 'harbor', base: 'fx-jeonbuk-gwangju', venue: fx('fx-jeonbuk-gwangju'), day: 21, fill: 0.9 },
+		{ org: 'harbor', base: 'fx-ulsan-pohang', venue: fx('fx-ulsan-pohang'), day: -33, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-ulsan-incheon', venue: fx('fx-ulsan-incheon'), day: 12, orders: [8, 12] },
+		{ org: 'harbor', base: 'fx-ulsan-daejeon', venue: fx('fx-ulsan-daejeon'), day: 41, orders: [6, 10] },
+		{ org: 'hanbit', base: 'fx-pohang-seoul', venue: fx('fx-pohang-seoul'), day: 7, orders: [8, 12], pop: 0.8 },
+		{ org: 'hanbit', base: 'fx-pohang-jeju', venue: fx('fx-pohang-jeju'), day: 28, orders: [6, 10] },
+		{ org: 'hanbit', base: 'fx-pohang-gwangju-cup', venue: fx('fx-pohang-gwangju-cup'), day: 66, orders: [5, 8] },
+		{ org: 'jeju', base: 'fx-jeju-daejeon', venue: fx('fx-jeju-daejeon'), day: -19, orders: [4, 7] },
+		{ org: 'jeju', base: 'fx-jeju-jeonbuk', venue: fx('fx-jeju-jeonbuk'), day: 15, orders: [6, 10], pop: 0.8 },
+		{ org: 'jeju', base: 'fx-jeju-incheon', venue: fx('fx-jeju-incheon'), day: 36, orders: [5, 9] },
+		{ org: 'harbor', base: 'fx-daejeon-pohang', venue: fx('fx-daejeon-pohang'), day: -7, orders: [6, 10] },
+		{ org: 'harbor', base: 'fx-daejeon-seoul', venue: fx('fx-daejeon-seoul'), day: 19, orders: [8, 12] },
+		{ org: 'harbor', base: 'fx-daejeon-jeonbuk-cup', venue: fx('fx-daejeon-jeonbuk-cup'), day: 55, saleOpensInDays: 10 },
 	);
 	return rows;
 };

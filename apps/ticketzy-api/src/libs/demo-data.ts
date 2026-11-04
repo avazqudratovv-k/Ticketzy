@@ -246,7 +246,7 @@ export const DEMO_BUYERS: DemoBuyer[] = BUYER_ROWS.map(([fullName, slug, nick], 
  * clubs in `DEMO_CLUBS`; `images` are two of the committed `venue-NN.jpg` photos.
  */
 
-export type VenueKey = 'hall' | 'stadium' | 'club' | 'playhouse' | 'arena' | 'expo' | 'openair' | 'fortress' | 'livehouse' | 'goyang' | 'jejuarena' | 'suwon';
+export type VenueKey = 'hall' | 'stadium' | 'club' | 'playhouse' | 'arena' | 'expo' | 'openair' | 'fortress' | 'livehouse' | 'goyang' | 'jejuarena' | 'suwon' | 'jeonju' | 'munsu' | 'steelyard' | 'seogwipo' | 'daejeon';
 
 export interface DemoVenue {
 	key: VenueKey;
@@ -433,6 +433,61 @@ export const DEMO_VENUES: DemoVenue[] = [
 		images: [demoImagePath('venue', 4), demoImagePath('venue', 3)],
 		...fromTemplate('COMEDY_CLUB'),
 	},
+	{
+		key: 'jeonju',
+		name: 'Jeonju World Cup Stadium',
+		type: VenueType.STADIUM,
+		city: 'Jeonju',
+		address: 'Deokjin-gu, Jeonju',
+		coordinates: [127.0644, 35.8668],
+		owner: 'harbor',
+		images: [demoImagePath('venue', 6), demoImagePath('venue', 5)],
+		...fromTemplate('FOOTBALL_STADIUM'),
+	},
+	{
+		key: 'munsu',
+		name: 'Ulsan Munsu Football Stadium',
+		type: VenueType.STADIUM,
+		city: 'Ulsan',
+		address: 'Nam-gu, Ulsan',
+		coordinates: [129.2619, 35.5322],
+		owner: 'harbor',
+		images: [demoImagePath('venue', 5), demoImagePath('venue', 6)],
+		...fromTemplate('FOOTBALL_STADIUM'),
+	},
+	{
+		key: 'steelyard',
+		name: 'Pohang Steel Yard',
+		type: VenueType.STADIUM,
+		city: 'Pohang',
+		address: 'Nam-gu, Pohang',
+		coordinates: [129.3590, 36.0081],
+		owner: 'harbor',
+		images: [demoImagePath('venue', 6), demoImagePath('venue', 5)],
+		...fromTemplate('FOOTBALL_STADIUM'),
+	},
+	{
+		key: 'seogwipo',
+		name: 'Jeju World Cup Stadium',
+		type: VenueType.STADIUM,
+		city: 'Seogwipo',
+		address: 'Seogwipo-si, Jeju',
+		coordinates: [126.5097, 33.2474],
+		owner: 'jeju',
+		images: [demoImagePath('venue', 5), demoImagePath('venue', 6)],
+		...fromTemplate('FOOTBALL_STADIUM'),
+	},
+	{
+		key: 'daejeon',
+		name: 'Daejeon World Cup Stadium',
+		type: VenueType.STADIUM,
+		city: 'Daejeon',
+		address: 'Yuseong-gu, Daejeon',
+		coordinates: [127.3124, 36.3017],
+		owner: 'harbor',
+		images: [demoImagePath('venue', 6), demoImagePath('venue', 5)],
+		...fromTemplate('FOOTBALL_STADIUM'),
+	},
 ];
 
 /** how a ticket type of a general admission event at a venue is sized: [general, premium] */
@@ -449,6 +504,11 @@ export const GA_QUANTITIES: Record<VenueKey, [number, number]> = {
 	goyang: [120, 30],
 	jejuarena: [700, 100],
 	suwon: [60, 12],
+	jeonju: [600, 60],
+	munsu: [600, 60],
+	steelyard: [500, 50],
+	seogwipo: [500, 50],
+	daejeon: [600, 60],
 };
 
 /** the tier names a RESERVED event shows; the tier keys come from the venue layouts above */
@@ -522,11 +582,36 @@ export const DEMO_CLUBS: DemoClub[] = [
 		homeVenue: 'openair',
 		stadium: t('Gwangju World Cup Stadium', '광주월드컵경기장', 'стадион «Кванджу Ворлд Кап»', 'Gwangju World Cup stadioni'),
 	},
-	{ key: 'jeonbuk', name: t('Jeonbuk Hyundai Motors', '전북 현대 모터스', 'Чонбук Хёндэ Моторс', 'Chonbuk Xyundey Motors'), stadium: t('', '', '', '') },
-	{ key: 'ulsan', name: t('Ulsan HD', '울산 HD', 'Ульсан эйч-ди', 'Ulsan HD'), stadium: t('', '', '', '') },
-	{ key: 'pohang', name: t('Pohang Steelers', '포항 스틸러스', 'Пхохан Стилерс', 'Pohang Stilers'), stadium: t('', '', '', '') },
-	{ key: 'jeju', name: t('Jeju SK', '제주 SK', 'Чеджу эс-кей', 'Jeju SK'), stadium: t('', '', '', '') },
-	{ key: 'daejeon', name: t('Daejeon Hana Citizen', '대전 하나 시티즌', 'Тэджон Хана Ситизен', 'Tejon Xana Sitizen'), stadium: t('', '', '', '') },
+	{
+		key: 'jeonbuk',
+		name: t('Jeonbuk Hyundai Motors', '전북 현대 모터스', 'Чонбук Хёндэ Моторс', 'Chonbuk Xyundey Motors'),
+		homeVenue: 'jeonju',
+		stadium: t('Jeonju World Cup Stadium', '전주월드컵경기장', 'стадион «Чонджу Ворлд Кап»', 'Jeonju World Cup stadioni'),
+	},
+	{
+		key: 'ulsan',
+		name: t('Ulsan HD', '울산 HD', 'Ульсан эйч-ди', 'Ulsan HD'),
+		homeVenue: 'munsu',
+		stadium: t('Ulsan Munsu Football Stadium', '울산문수축구경기장', 'стадион «Ульсан Мунсу»', 'Ulsan Munsu stadioni'),
+	},
+	{
+		key: 'pohang',
+		name: t('Pohang Steelers', '포항 스틸러스', 'Пхохан Стилерс', 'Pohang Stilers'),
+		homeVenue: 'steelyard',
+		stadium: t('Pohang Steel Yard', '포항스틸야드', 'стадион «Пхохан Стил Ярд»', 'Pohang Steel Yard stadioni'),
+	},
+	{
+		key: 'jeju',
+		name: t('Jeju SK', '제주 SK', 'Чеджу эс-кей', 'Jeju SK'),
+		homeVenue: 'seogwipo',
+		stadium: t('Jeju World Cup Stadium', '제주월드컵경기장', 'стадион «Чеджу Ворлд Кап»', 'Jeju World Cup stadioni'),
+	},
+	{
+		key: 'daejeon',
+		name: t('Daejeon Hana Citizen', '대전 하나 시티즌', 'Тэджон Хана Ситизен', 'Tejon Xana Sitizen'),
+		homeVenue: 'daejeon',
+		stadium: t('Daejeon World Cup Stadium', '대전월드컵경기장', 'стадион «Тэджон Ворлд Кап»', 'Daejeon World Cup stadioni'),
+	},
 ];
 
 export type FixtureKind = 'league' | 'cup' | 'charity';
@@ -601,6 +686,21 @@ export const DEMO_FIXTURE_BASES: DemoBase[] = [
 	fixtureBase('fx-seoul-ulsan', 'seoul', 'ulsan', 'league'),
 	fixtureBase('fx-gwangju-daejeon', 'gwangju', 'daejeon', 'league'),
 	fixtureBase('fx-incheon-pohang', 'incheon', 'pohang', 'league'),
+	fixtureBase('fx-jeonbuk-ulsan', 'jeonbuk', 'ulsan', 'league'),
+	fixtureBase('fx-jeonbuk-seoul', 'jeonbuk', 'seoul', 'league'),
+	fixtureBase('fx-jeonbuk-gwangju', 'jeonbuk', 'gwangju', 'league'),
+	fixtureBase('fx-ulsan-pohang', 'ulsan', 'pohang', 'league'),
+	fixtureBase('fx-ulsan-incheon', 'ulsan', 'incheon', 'league'),
+	fixtureBase('fx-ulsan-daejeon', 'ulsan', 'daejeon', 'league'),
+	fixtureBase('fx-pohang-seoul', 'pohang', 'seoul', 'league'),
+	fixtureBase('fx-pohang-jeju', 'pohang', 'jeju', 'league'),
+	fixtureBase('fx-pohang-gwangju-cup', 'pohang', 'gwangju', 'cup'),
+	fixtureBase('fx-jeju-daejeon', 'jeju', 'daejeon', 'league'),
+	fixtureBase('fx-jeju-jeonbuk', 'jeju', 'jeonbuk', 'league'),
+	fixtureBase('fx-jeju-incheon', 'jeju', 'incheon', 'league'),
+	fixtureBase('fx-daejeon-pohang', 'daejeon', 'pohang', 'league'),
+	fixtureBase('fx-daejeon-seoul', 'daejeon', 'seoul', 'league'),
+	fixtureBase('fx-daejeon-jeonbuk-cup', 'daejeon', 'jeonbuk', 'cup'),
 ];
 
 export const DEMO_BASES: DemoBase[] = [

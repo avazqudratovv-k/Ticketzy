@@ -333,8 +333,8 @@ export const evaluateDemoConsistency = (snapshot: DemoSnapshot): Finding[] => {
 	const organizers = members.filter((member) => member.memberType === MemberType.ORGANIZER);
 	const inRange = (value: number, min: number, max: number): number => (value >= min && value <= max ? 0 : 1);
 	check('coverage', '40 to 60 buyers', inRange(buyers, 40, 60), 'buyer count out of range', `${buyers} buyers`);
-	check('coverage', '60 to 80 events', inRange(events.length, 60, 80), 'event count out of range', `${events.length} events`);
-	check('coverage', '12 venues', snapshot.venueCount === 12 ? 0 : 1, 'venue count is not 12', '12 venues');
+	check('coverage', '60 to 100 events', inRange(events.length, 60, 100), 'event count out of range', `${events.length} events`);
+	check('coverage', '17 venues', snapshot.venueCount === 17 ? 0 : 1, 'venue count is not 17', '17 venues');
 	check(
 		'coverage',
 		'organizers in every state',
