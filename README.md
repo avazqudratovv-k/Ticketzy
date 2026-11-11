@@ -72,6 +72,8 @@ The demo seed refuses to run against a database that holds data it did not creat
 
 Jest covers the services, the GraphQL and HTTP layer, the demo seeder (including refunds) and the batch jobs (ranking and payout notices). Run `npm test`.
 
+1,675 backend test cases in 88 spec files, run in CI. The API exposes 105 GraphQL operations (43 queries, 62 mutations).
+
 ## License
 
 Private project, shown here as a portfolio piece.
